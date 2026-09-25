@@ -553,9 +553,15 @@ step5() {
     note "creating the secrets in $PROJECT from the file (passwords are generated)"
     NAMESPACE="$PROJECT" SECRETS_FILE="$SECRETS_FILE" "$ROOT/scripts/create-secrets.sh" | sed 's/^/  /' || return 1
   fi
+  local key slack=off docs=off
+  in_cluster() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$1}" 2>/dev/null)" ]; }
   for key in SLACK_BOT_TOKEN TAVUS_API_KEY GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_DOCS_FOLDER_ID; do
-    if [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$key}" 2>/dev/null)" ]; then ok "$key in the cluster"; else warn "$key empty in the cluster (skipped; that feature stays off)"; fi
+    if in_cluster "$key"; then ok "$key in the cluster"; else warn "$key empty in the cluster (skipped; that feature stays off)"; fi
   done
+  in_cluster SLACK_BOT_TOKEN && slack=on
+  in_cluster GOOGLE_SERVICE_ACCOUNT_JSON && in_cluster GOOGLE_DOCS_FOLDER_ID && docs=on
+  ok "step 6 deploys with Slack $slack and Google Docs $docs (integrations.*.enabled follow the keys); requests are approved in the admin portal$([ "$slack" = on ] && echo " and in Slack")"
+  note "admin portal password (generated, kept on re-runs): oc extract secret/assistant-admin -n $PROJECT --keys=ADMIN_PASSWORD --to=-"
   mark 5
 }
 step6() {
@@ -621,6 +627,7 @@ step9() {
   say "  \$ NS=$PROJECT scripts/demo-preflight.sh -f chart/values-demo-cluster.yaml ${extra[*]:-} --set global.domain=$DOMAIN ${llm_set[*]:-}"
   if NS="$PROJECT" "$ROOT/scripts/demo-preflight.sh" -f "$ROOT/chart/values-demo-cluster.yaml" "${extra[@]}" --set "global.domain=$DOMAIN" "${llm_set[@]}"; then
     mark 9; say ""; say "  ${G}Ready for the demo.${N}"; say "  frontend $FRONTEND_URL"; say "  n8n      $N8N_URL (login $(oc get secret assistant-n8n -n "$PROJECT" -o jsonpath='{.data.N8N_OWNER_EMAIL}' 2>/dev/null | base64 -d), password N8N_OWNER_PASSWORD in $SECRETS_FILE)"
+    say "  admin    $FRONTEND_URL/admin (sign in with your name and the password from: oc extract secret/assistant-admin -n $PROJECT --keys=ADMIN_PASSWORD --to=-)"
     say "  Walk through docs/demo-script.md: a cited text answer, a voice session (the browser asks for the microphone), a request by voice with its Slack card, the archive button."
     [ "${SLACK_INTERACTIVITY_HOST:-}" = "n8n-$PROJECT.$DOMAIN" ] || say "  Check once: the Slack app's Interactivity request URL must be $N8N_URL/webhook/slack-interactions (step 5 asks about it)."
     say "  Next cluster: clone, scripts/setup.sh."

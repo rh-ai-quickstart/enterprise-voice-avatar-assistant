@@ -21,9 +21,13 @@ print('duplicate file names:', dups or 'none')
 "
 
 if [ -n "$QUERY" ]; then
-  FE="https://$(oc get route frontend -n "$NS" -o jsonpath='{.spec.host}')"
+  # /v1/search is internal: run it from the RAG API pod, which has the token in its environment
   echo "=== search: $QUERY (stale text would score high) ==="
-  curl -s -X POST "$FE/api/v1/search" -H 'Content-Type: application/json' \
-    -d "$(python3 -c "import json,sys; print(json.dumps({'query': sys.argv[1], 'top_k': 3}))" "$QUERY")" \
-    | python3 -c "import sys,json; [print(' ', round(h['score'],2), h['source'], '|', h['snippet'][:90].replace(chr(10),' ')) for h in json.load(sys.stdin)['hits']]"
+  oc exec deploy/rag-api -n "$NS" -- .venv/bin/python -c "
+import json, os, sys, urllib.request
+req = urllib.request.Request('http://localhost:8080/v1/search', data=json.dumps({'query': sys.argv[1], 'top_k': 3}).encode(),
+                             headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + os.environ.get('INTERNAL_API_TOKEN', '')})
+for h in json.load(urllib.request.urlopen(req, timeout=60))['hits']:
+    print(' ', round(h['score'], 2), h['source'], '|', h['snippet'][:90].replace(chr(10), ' '))
+" "$QUERY"
 fi

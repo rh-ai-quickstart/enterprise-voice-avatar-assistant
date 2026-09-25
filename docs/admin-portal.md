@@ -92,12 +92,15 @@ render that combination while `ragApi.requestsRequireApproval` is true (see
   of the workflow actors (`n8n`, `assistant`, `system`, `slack`, `sla-escalation`), so a notice never
   reads "approved by system".
 - **Session.** A cookie `admin_session` holding `{name, issued_at, expires_at}` signed with HMAC-SHA256
-  under `ADMIN_SESSION_SECRET`. `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, lifetime
-  `admin.sessionHours` (default 8). Rotating the secret signs everyone out.
+  under a key derived from `ADMIN_SESSION_SECRET` and `ADMIN_PASSWORD`. `HttpOnly`, `Secure`,
+  `SameSite=Strict`, `Path=/`, lifetime `admin.sessionHours` (default 8). Changing the password or
+  rotating the secret signs everyone out.
 - **CSRF.** `SameSite=Strict` plus a required `X-Admin-Request: 1` header on every non-GET admin
   call; a cross-site form cannot set it.
 - **Brute force.** Five failed logins per client address per minute return 429 (in memory per
-  replica, which is enough for a demo). Every attempt, failed or not, is an audit entry.
+  replica, which is enough for a demo). The address is the one the OpenShift router saw: nginx
+  passes the last `X-Forwarded-For` entry as `X-Client-Address`, since the entries before it are
+  whatever the client sent. Every attempt, failed or not, is an audit entry.
 - **Not configured.** An empty `ADMIN_PASSWORD` makes login return 503 "admin portal not configured";
   `admin.enabled: false` removes the routes and the nginx locations altogether.
 - **Attribution.** The session name is the `actor` on `ticket_events`, the `approver` on the ticket
@@ -355,10 +358,12 @@ Other changes to existing data:
 
 ## Workflow changes
 
-Every Slack node goes behind an `IF Slack on?` node reading `$env.SLACK_ENABLED`, instead of relying on
-`continueOnFail` to swallow the failure. Slack nodes keep `continueOnFail`, and a failure is posted as
-an `integration.error` event. Every HTTP node that calls the RAG API or the ingestion service sends
-`Authorization: Bearer {{ $env.INTERNAL_API_TOKEN }}`.
+Every Slack node goes behind an IF node `Slack on? (<node>)` reading `$env.SLACK_ENABLED`, instead of
+relying on `continueOnFail` to swallow the failure; its false output carries on to whatever followed
+the Slack node, unless that talks to Slack too. Slack nodes keep `continueOnFail`, and a failure is
+posted as an `integration.error` event. Every HTTP node that calls the RAG API or the ingestion
+service sends `Authorization: Bearer {{ $env.INTERNAL_API_TOKEN }}`. Without `SLACK_BOT_TOKEN` the
+import creates a placeholder Slack credential, so the workflows are published and run with Slack off.
 
 | Workflow | Change |
 |---|---|
@@ -443,9 +448,10 @@ secrets:
   are false: "requests need an approval surface: enable Slack or the admin portal".
 - **Frontend.** The nginx allowlist and the `/admin/` and stream locations are part of
   `frontend/nginx/app.conf`; with `admin.enabled: false` the entrypoint leaves the admin locations out.
-- **Setup script.** Step 5 sets the integration flags from what was provided or skipped. Step 9 prints
-  the admin URL and the command that reads the password:
-  `oc extract secret/assistant-admin -n <project> --keys=ADMIN_PASSWORD --to=-`.
+- **Setup and deploy scripts.** `deploy.sh` and `deploy-argocd.sh` (which setup step 6 runs) set
+  `integrations.slack.enabled` and `integrations.googleDocs.enabled` from the keys in the integrations
+  secret; setup step 5 says which will be on. Step 9 prints the admin URL and the command that reads
+  the password: `oc extract secret/assistant-admin -n <project> --keys=ADMIN_PASSWORD --to=-`.
 - **Upgrades.** An existing install with a Slack token keeps Slack only if
   `integrations.slack.enabled: true` is set; the release notes and `docs/SETUP.md` say so.
 

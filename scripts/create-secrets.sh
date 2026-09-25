@@ -38,6 +38,10 @@ N8N_OWNER_PASSWORD="${N8N_OWNER_PASSWORD:-$(existing assistant-n8n N8N_OWNER_PAS
 LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-$(existing assistant-livekit LIVEKIT_API_KEY)}"; LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-APIk$(rand 6)}"
 LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-$(existing assistant-livekit LIVEKIT_API_SECRET)}"; LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-$(rand 24)}"
 QDRANT_API_KEY="${QDRANT_API_KEY:-$(existing assistant-qdrant QDRANT_API_KEY)}"; QDRANT_API_KEY="${QDRANT_API_KEY:-$(rand 24)}"
+# Admin portal sign-in and the token the services send each other (docs/admin-portal.md)
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(existing assistant-admin ADMIN_PASSWORD)}"; ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(rand 12)}"
+ADMIN_SESSION_SECRET="${ADMIN_SESSION_SECRET:-$(existing assistant-admin ADMIN_SESSION_SECRET)}"; ADMIN_SESSION_SECRET="${ADMIN_SESSION_SECRET:-$(rand 32)}"
+INTERNAL_API_TOKEN="${INTERNAL_API_TOKEN:-$(existing assistant-admin INTERNAL_API_TOKEN)}"; INTERNAL_API_TOKEN="${INTERNAL_API_TOKEN:-$(rand 32)}"
 # Google service account for transcript archival: the JSON key file, or its content
 if [ -n "${GOOGLE_SERVICE_ACCOUNT_FILE:-}" ]; then
   [ -r "${GOOGLE_SERVICE_ACCOUNT_FILE}" ] || { echo "GOOGLE_SERVICE_ACCOUNT_FILE ${GOOGLE_SERVICE_ACCOUNT_FILE} is not readable"; exit 1; }
@@ -78,6 +82,12 @@ make_secret assistant-n8n \
 make_secret assistant-qdrant \
   --from-literal=QDRANT_API_KEY="${QDRANT_API_KEY}"
 
+# Required: the RAG API, the ingestion service and n8n read it.
+make_secret assistant-admin \
+  --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+  --from-literal=ADMIN_SESSION_SECRET="${ADMIN_SESSION_SECRET}" \
+  --from-literal=INTERNAL_API_TOKEN="${INTERNAL_API_TOKEN}"
+
 make_secret assistant-livekit \
   --from-literal=LIVEKIT_API_KEY="${LIVEKIT_API_KEY}" \
   --from-literal=LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET}"
@@ -105,3 +115,4 @@ make_secret assistant-integrations \
 echo
 echo "Secrets are in namespace ${NS}. Back up assistant-n8n: losing N8N_ENCRYPTION_KEY makes the credentials stored in n8n unreadable."
 echo "n8n owner: ${N8N_OWNER_EMAIL} (password: oc extract secret/assistant-n8n -n ${NS} --keys=N8N_OWNER_PASSWORD --to=-)"
+echo "admin portal: /admin on the frontend host (password: oc extract secret/assistant-admin -n ${NS} --keys=ADMIN_PASSWORD --to=-)"

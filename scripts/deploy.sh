@@ -17,7 +17,9 @@
 #   Extra arguments go to helm, for example: scripts/deploy.sh -f my-values.yaml
 #
 # Secrets for the optional integrations (Slack, Tavus, Google) are read by
-# scripts/create-secrets.sh from the environment; see its header.
+# scripts/create-secrets.sh from the environment; see its header. Slack and Google Docs are
+# turned on (integrations.*.enabled) when their keys are in the integrations secret; a --set in
+# the helm arguments wins.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RELEASE="${RELEASE:-assistant}"
@@ -54,8 +56,14 @@ fi
 say "Secrets (existing ones are kept)"
 NAMESPACE="$PROJECT" "$ROOT/scripts/create-secrets.sh"
 
+has_key() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$1}" 2>/dev/null)" ]; }
+SLACK_ON=false; has_key SLACK_BOT_TOKEN && SLACK_ON=true
+DOCS_ON=false; has_key GOOGLE_SERVICE_ACCOUNT_JSON && has_key GOOGLE_DOCS_FOLDER_ID && DOCS_ON=true
+say "Integrations from the keys in assistant-integrations: Slack $SLACK_ON, Google Docs $DOCS_ON"
+
 say "Installing the chart"
-helm upgrade --install "$RELEASE" "$ROOT/chart" --namespace "$PROJECT" --set "global.domain=$DOMAIN" "${MODEL_ARGS[@]}" "$@"
+helm upgrade --install "$RELEASE" "$ROOT/chart" --namespace "$PROJECT" --set "global.domain=$DOMAIN" \
+  --set "integrations.slack.enabled=$SLACK_ON" --set "integrations.googleDocs.enabled=$DOCS_ON" "${MODEL_ARGS[@]}" "$@"
 
 if [ "$WAIT" = "1" ]; then
   say "Waiting for workloads"
@@ -80,6 +88,8 @@ for r in frontend n8n minio-console qdrant; do
   h=$(oc get route "$r" -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || true)
   [ -n "$h" ] && printf '  %-14s https://%s\n' "$r" "$h"
 done
+h=$(oc get route frontend -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || true)
+[ -n "$h" ] && printf '  %-14s https://%s/admin  (password: oc extract secret/assistant-admin -n %s --keys=ADMIN_PASSWORD --to=-)\n' "admin portal" "$h" "$PROJECT"
 echo "  Credentials: oc extract secret/assistant-minio -n $PROJECT --to=-   (MinIO); n8n asks you to create the owner account on first visit."
 
 if [ "${RUN_TESTS:-0}" = "1" ]; then

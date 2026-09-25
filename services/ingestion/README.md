@@ -20,6 +20,9 @@ its previous chunks.
 | GET | `/v1/documents` | documents recorded in PostgreSQL (501 when no database is configured) |
 | DELETE | `/v1/documents/{doc_id}` | remove a document's vectors and record |
 
+Every POST and DELETE needs `Authorization: Bearer $INTERNAL_API_TOKEN`; the RAG API and the n8n
+workflows send it. The service has no Route, so the reads stay open inside the cluster.
+
 Interactive docs are served at `/docs`.
 
 Document ids are stable: `uuid5(bucket/key)`. Every Qdrant point carries
@@ -40,6 +43,7 @@ provides them through the `assistant-config` config map and the secrets.
 | `EMBEDDINGS_BASE_URL`, `EMBEDDINGS_MODEL`, `EMBEDDINGS_API_KEY` | vLLM defaults | OpenAI-compatible embeddings |
 | `SERVICE_CA_FILE` | unset | extra CA for in-cluster TLS endpoints |
 | `DATABASE_URL` | unset | enables the `documents` and `ingestion_jobs` tables |
+| `INTERNAL_API_TOKEN` | unset | bearer token the write routes require; unset disables the check (local development only) |
 | `CHUNK_MAX_TOKENS`, `CHUNK_TOKENIZER` | `512`, `BAAI/bge-m3` | chunk size measured with the embedding model's tokenizer |
 | `OCR_ENABLED` | `false` | OCR for scanned PDFs and images (slower, needs the OCR models) |
 | `MAX_CONCURRENT_JOBS` | `2` | parallel conversions |

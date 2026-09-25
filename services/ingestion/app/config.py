@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # Extra CA bundle trusted for in-cluster endpoints served over TLS (OpenShift service CA)
     service_ca_file: str | None = None
 
+    # Bearer token the write routes require (the RAG API and n8n send it). Empty disables the
+    # check, for local development only; the chart always sets one.
+    internal_api_token: str = ""
+
     # Optional PostgreSQL for the documents and jobs tables. Disabled when unset.
     database_url: str | None = None
 

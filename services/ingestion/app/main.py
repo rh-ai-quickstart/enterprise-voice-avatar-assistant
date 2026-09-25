@@ -10,14 +10,17 @@ Endpoints
   POST /v1/extract              convert one object and return its text as Markdown (for classification)
   GET  /v1/documents            documents known to the database (501 without a database)
   DELETE /v1/documents/{doc_id} remove a document's vectors and record
+
+Every POST and DELETE needs Authorization: Bearer $INTERNAL_API_TOKEN (the RAG API and n8n send it).
 """
 
 import asyncio
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from . import db, storage, vectorstore
@@ -44,11 +47,26 @@ async def lifespan(_: FastAPI):
     logging.basicConfig(level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     log.info("ingestion service starting; qdrant=%s embeddings=%s buckets=%s",
              settings.qdrant_url, settings.embeddings_base_url, sorted(settings.ingest_bucket_set))
+    if not settings.internal_api_token:
+        log.warning("INTERNAL_API_TOKEN is empty: the write routes are open to anyone who can reach this service")
     await asyncio.to_thread(db.init_schema)
     yield
 
 
 app = FastAPI(title="Enterprise voice avatar assistant - ingestion", version="0.1.0", lifespan=lifespan)
+
+
+def require_internal_token(request: Request) -> None:
+    token = settings.internal_api_token
+    if not token:
+        return
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(value.strip().encode(), token.encode()):
+        raise HTTPException(status_code=401, detail="this route needs the internal API token",
+                            headers={"WWW-Authenticate": "Bearer"})
+
+
+WRITE = [Depends(require_internal_token)]
 
 
 def _status(job: Job) -> JobStatus:
@@ -73,7 +91,7 @@ async def readyz():
     return {"status": "ready"}
 
 
-@app.post("/v1/ingest", status_code=202, response_model=IngestAccepted)
+@app.post("/v1/ingest", status_code=202, response_model=IngestAccepted, dependencies=WRITE)
 async def ingest(request: IngestRequest):
     bucket = request.bucket or settings.s3_bucket
     doc_id = request.doc_id or make_doc_id(bucket, request.key)
@@ -81,7 +99,7 @@ async def ingest(request: IngestRequest):
     return IngestAccepted(job_id=job.job_id, doc_id=doc_id, status=job.status)
 
 
-@app.post("/v1/ingest/upload", status_code=202, response_model=IngestAccepted)
+@app.post("/v1/ingest/upload", status_code=202, response_model=IngestAccepted, dependencies=WRITE)
 async def ingest_upload(file: Annotated[UploadFile, File()], bucket: Annotated[str | None, Form()] = None):
     bucket = bucket or settings.s3_bucket
     key = file.filename or "upload"
@@ -92,7 +110,7 @@ async def ingest_upload(file: Annotated[UploadFile, File()], bucket: Annotated[s
     return IngestAccepted(job_id=job.job_id, doc_id=doc_id, status=job.status)
 
 
-@app.post("/v1/events/minio", response_model=EventResponse)
+@app.post("/v1/events/minio", response_model=EventResponse, dependencies=WRITE)
 async def minio_event(event: dict):
     response = EventResponse()
     for kind, bucket, key in parse_minio_event(event):
@@ -110,7 +128,7 @@ async def minio_event(event: dict):
     return response
 
 
-@app.post("/v1/extract", response_model=ExtractResponse)
+@app.post("/v1/extract", response_model=ExtractResponse, dependencies=WRITE)
 async def extract(request: ExtractRequest):
     bucket = request.bucket or settings.s3_bucket
     try:
@@ -141,7 +159,7 @@ async def list_documents():
     return rows
 
 
-@app.delete("/v1/documents/{doc_id}")
+@app.delete("/v1/documents/{doc_id}", dependencies=WRITE)
 async def delete_document(doc_id: str):
     await asyncio.to_thread(vectorstore.delete_document, doc_id)
     await asyncio.to_thread(db.delete_document, doc_id)

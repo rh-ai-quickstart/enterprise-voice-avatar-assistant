@@ -15,6 +15,19 @@ jobs:
       - run: helm lint chart --set global.domain=apps.example.com
       - run: helm lint chart -f chart/values-demo-cluster.yaml
       - run: helm template assistant chart --namespace voice-avatar-assistant --set global.domain=apps.example.com > /dev/null
+      - name: every integration and admin portal combination renders
+        run: |
+          for args in "--set integrations.slack.enabled=true" "--set integrations.googleDocs.enabled=true" \
+                      "--set admin.enabled=false --set integrations.slack.enabled=true" \
+                      "--set admin.enabled=false --set ragApi.requestsRequireApproval=false"; do
+            echo "helm template $args"; helm template assistant chart --set global.domain=apps.example.com $args > /dev/null
+          done
+      - name: no approval surface is refused
+        run: |
+          if helm template assistant chart --set admin.enabled=false > /dev/null 2> err.txt; then
+            echo "rendered with neither Slack nor the admin portal while requests require approval"; exit 1
+          fi
+          grep "requests need an approval surface" err.txt
 
   python:
     name: ${{ matrix.service }} tests
@@ -26,6 +39,21 @@ jobs:
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
+    # The RAG API's database tests (TEST_DATABASE_URL) run against this; the others ignore it
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -51,3 +79,5 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run build
+      - name: public /api proxy (nginx allowlist)
+        run: nginx/test-proxy.sh

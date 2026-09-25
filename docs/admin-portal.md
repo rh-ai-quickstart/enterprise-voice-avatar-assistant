@@ -510,6 +510,7 @@ Defaults chosen where no decision was made. Each can change before implementatio
    `X-Slack-Signature`, so anyone can approve a pending ticket by posting a fake Slack payload,
    bypassing the portal's sign-in. Default: **in scope**. Verify the HMAC in the first Code node of
    WF4 with a new `SLACK_SIGNING_SECRET` in the integrations secret, collected by setup step 5.
+   (Done in phase 2; the Code node needs `NODE_FUNCTION_ALLOW_BUILTIN=crypto`, which the chart sets.)
 2. **Deleting an archived conversation.** Default: remove the in-cluster copies and **leave the Google
    Doc**, naming it in the confirmation dialog, since the Doc may already be shared. The service
    account could move it to the Drive trash instead.

@@ -168,6 +168,9 @@ same database, encryption key, public URL and service URLs. Pass the root contex
 # The workflows post to Slack only when it is on (an IF node in front of every Slack node)
 - name: SLACK_ENABLED
   value: {{ .Values.integrations.slack.enabled | quote }}
+# WF4 verifies the signature of Slack clicks (SLACK_SIGNING_SECRET) with node's crypto module
+- name: NODE_FUNCTION_ALLOW_BUILTIN
+  value: crypto
 - name: S3_ENDPOINT_URL
   value: http://minio:9000
 - name: NODE_EXTRA_CA_CERTS

@@ -31,7 +31,7 @@ images:
 #   n8n:          N8N_ENCRYPTION_KEY
 #   livekit:      LIVEKIT_API_KEY, LIVEKIT_API_SECRET
 #   models:       LLM_API_KEY, STT_API_KEY, TTS_API_KEY, EMBEDDINGS_API_KEY, GUARDRAILS_API_KEY, HF_TOKEN
-#   integrations: SLACK_BOT_TOKEN, SIMLI_API_KEY, SIMLI_FACE_ID,
+#   integrations: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SIMLI_API_KEY, SIMLI_FACE_ID,
 #                 TAVUS_API_KEY, TAVUS_FACE_ID, TAVUS_PAL_ID (optional),
 #                 GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID
 #   admin:        ADMIN_PASSWORD, ADMIN_SESSION_SECRET, INTERNAL_API_TOKEN (required: the RAG API,
@@ -51,7 +51,8 @@ secrets:
 # when its keys are in the integrations secret.
 integrations:
   slack:
-    # Approval cards and notices in the Slack channels (SLACK_BOT_TOKEN).
+    # Approval cards and notices in the Slack channels (SLACK_BOT_TOKEN; SLACK_SIGNING_SECRET to
+    # accept clicks on the cards).
     enabled: false
   googleDocs:
     # A Google Doc per archived transcript (GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID).

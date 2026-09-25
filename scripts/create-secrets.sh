@@ -104,6 +104,7 @@ make_secret assistant-models \
 # External integrations. Leave empty to disable a feature.
 make_secret assistant-integrations \
   --from-literal=SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-}" \
+  --from-literal=SLACK_SIGNING_SECRET="${SLACK_SIGNING_SECRET:-}" \
   --from-literal=SIMLI_API_KEY="${SIMLI_API_KEY:-}" \
   --from-literal=SIMLI_FACE_ID="${SIMLI_FACE_ID:-}" \
   --from-literal=TAVUS_API_KEY="${TAVUS_API_KEY:-}" \

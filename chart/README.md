@@ -72,7 +72,7 @@ Application images built from this repository and published by CI as <registry>/
 
 ### `secrets`
 
-Names of the pre-created Secrets. Keys per secret: postgres:     POSTGRESQL_USER, POSTGRESQL_PASSWORD, POSTGRESQL_DATABASE, DATABASE_URL minio:        MINIO_ROOT_USER, MINIO_ROOT_PASSWORD n8n:          N8N_ENCRYPTION_KEY livekit:      LIVEKIT_API_KEY, LIVEKIT_API_SECRET models:       LLM_API_KEY, STT_API_KEY, TTS_API_KEY, EMBEDDINGS_API_KEY, GUARDRAILS_API_KEY, HF_TOKEN integrations: SLACK_BOT_TOKEN, SIMLI_API_KEY, SIMLI_FACE_ID, TAVUS_API_KEY, TAVUS_FACE_ID, TAVUS_PAL_ID (optional), GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID admin:        ADMIN_PASSWORD, ADMIN_SESSION_SECRET, INTERNAL_API_TOKEN (required: the RAG API, the ingestion service and n8n do not start without it)
+Names of the pre-created Secrets. Keys per secret: postgres:     POSTGRESQL_USER, POSTGRESQL_PASSWORD, POSTGRESQL_DATABASE, DATABASE_URL minio:        MINIO_ROOT_USER, MINIO_ROOT_PASSWORD n8n:          N8N_ENCRYPTION_KEY livekit:      LIVEKIT_API_KEY, LIVEKIT_API_SECRET models:       LLM_API_KEY, STT_API_KEY, TTS_API_KEY, EMBEDDINGS_API_KEY, GUARDRAILS_API_KEY, HF_TOKEN integrations: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SIMLI_API_KEY, SIMLI_FACE_ID, TAVUS_API_KEY, TAVUS_FACE_ID, TAVUS_PAL_ID (optional), GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID admin:        ADMIN_PASSWORD, ADMIN_SESSION_SECRET, INTERNAL_API_TOKEN (required: the RAG API, the ingestion service and n8n do not start without it)
 
 | Key | Default | Description |
 |---|---|---|
@@ -90,7 +90,7 @@ External integrations the deployment uses. Off, the admin portal is where reques
 
 | Key | Default | Description |
 |---|---|---|
-| `integrations.slack.enabled` | `false` | Approval cards and notices in the Slack channels (SLACK_BOT_TOKEN). |
+| `integrations.slack.enabled` | `false` | Approval cards and notices in the Slack channels (SLACK_BOT_TOKEN; SLACK_SIGNING_SECRET to accept clicks on the cards). |
 | `integrations.googleDocs.enabled` | `false` | A Google Doc per archived transcript (GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID). |
 
 ### `admin`

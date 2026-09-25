@@ -77,3 +77,50 @@ def test_connections_name_existing_nodes(path):
         for branch in outputs.get("main", []):
             for connection in branch or []:
                 assert connection["node"] in names, f"{path.name}: {source} -> {connection['node']}"
+
+
+def _webhooks() -> dict[str, tuple[dict, dict]]:
+    """Webhook path -> (workflow, webhook node) across all the workflows."""
+    found = {}
+    for path in WORKFLOWS:
+        wf = load(path)
+        for node in wf["nodes"]:
+            if node["type"] == "n8n-nodes-base.webhook":
+                found[node["parameters"]["path"]] = (wf, node)
+    return found
+
+
+def _next_nodes(wf: dict, name: str) -> list[dict]:
+    nodes = {n["name"]: n for n in wf["nodes"]}
+    outputs = wf["connections"].get(name, {}).get("main", [])
+    return [nodes[c["node"]] for c in (outputs[0] if outputs else [])]
+
+
+def test_the_webhooks_the_rag_api_calls_exist():
+    from app.config import settings
+
+    webhooks = _webhooks()
+    for path in (
+        settings.n8n_request_webhook_path,
+        settings.n8n_archive_webhook_path,
+        settings.n8n_decision_webhook_path,
+    ):
+        assert path.removeprefix("/webhook/") in webhooks, path
+
+
+def test_portal_decisions_are_accepted_only_with_the_internal_token():
+    wf, hook = _webhooks()["ticket-decided"]
+    (check,) = _next_nodes(wf, hook["name"])
+    condition = check["parameters"]["conditions"]["conditions"][0]
+    assert check["type"] == "n8n-nodes-base.if"
+    assert "authorization" in condition["leftValue"] and "$env.INTERNAL_API_TOKEN" in condition["rightValue"]
+
+
+def test_slack_clicks_are_verified_before_anything_else():
+    wf, hook = _webhooks()["slack-interactions"]
+    assert hook["parameters"]["options"].get("rawBody") is True
+    (verify,) = _next_nodes(wf, hook["name"])
+    code = verify["parameters"]["jsCode"]
+    assert "SLACK_SIGNING_SECRET" in code and "createHmac('sha256'" in code and "timingSafeEqual" in code
+    (valid,) = _next_nodes(wf, verify["name"])
+    assert valid["type"] == "n8n-nodes-base.if" and "signature_ok" in str(valid["parameters"])

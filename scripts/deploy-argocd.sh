@@ -87,6 +87,7 @@ has_key() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpa
 for key in SLACK_BOT_TOKEN TAVUS_API_KEY GOOGLE_DOCS_FOLDER_ID; do
   if has_key "$key"; then ok "$key set"; else warn "$key empty (feature off)"; fi
 done
+if has_key SLACK_BOT_TOKEN && ! has_key SLACK_SIGNING_SECRET; then warn "SLACK_SIGNING_SECRET empty: clicks on the Slack approval cards are refused; approve in the admin portal, or add the secret"; fi
 # integrations.*.enabled follow the keys unless set explicitly
 if [ -z "${SLACK_ENABLED:-}" ]; then SLACK_ENABLED=false; has_key SLACK_BOT_TOKEN && SLACK_ENABLED=true; fi
 if [ -z "${GOOGLE_DOCS_ENABLED:-}" ]; then GOOGLE_DOCS_ENABLED=false; has_key GOOGLE_SERVICE_ACCOUNT_JSON && has_key GOOGLE_DOCS_FOLDER_ID && GOOGLE_DOCS_ENABLED=true; fi

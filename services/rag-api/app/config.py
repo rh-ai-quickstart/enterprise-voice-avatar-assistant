@@ -81,6 +81,22 @@ class Settings(BaseSettings):
     tts_voice_female: str = "af_bella"
     tts_voice_male: str = "am_michael"
 
+    # Integrations the deployment turned on (integrations.*.enabled in the chart). Off, the portal
+    # is the only surface for approvals and notices; on with a key missing, it reports misconfigured.
+    slack_enabled: bool = False
+    google_docs_enabled: bool = False
+
+    # Admin portal (docs/admin-portal.md): one shared password, a display name per sign-in
+    admin_enabled: bool = True
+    admin_password: str = ""
+    admin_session_secret: str = ""
+    admin_session_hours: int = 8
+    # Browsers treat http://localhost as secure, so this only needs turning off for plain-HTTP hosts
+    admin_cookie_secure: bool = True
+    # Bearer token for every route that is not public (n8n, the ingestion service, scripts).
+    # Empty disables the check, for local development only; the chart always sets one.
+    internal_api_token: str = ""
+
     # Neighbours
     ingestion_url: str = "http://ingestion:8080"
     n8n_url: str = "http://n8n:5678"

@@ -180,4 +180,67 @@ class NotificationAck(BaseModel):
     ids: list[int]
 
 
+class AdminLogin(BaseModel):
+    password: str = Field(max_length=200)
+    # Shown as the approver and the actor on everything done in the session
+    name: str = Field(max_length=100)
+
+
+class AdminMe(BaseModel):
+    name: str
+    expires_at: datetime
+
+
+class ActivityEventIn(BaseModel):
+    kind: str = Field(
+        max_length=80, pattern=r"^[a-z][a-z_]*(\.[a-z][a-z_]*)+$", examples=["document.ingested"]
+    )
+    title: str = Field(min_length=1, max_length=300)
+    severity: Literal["info", "success", "warning", "error"] = "info"
+    detail: str | None = Field(default=None, max_length=4000)
+    ref_type: Literal["ticket", "conversation", "document", "gap", "integration"] | None = None
+    ref_id: str | None = Field(default=None, max_length=200)
+    actor: str | None = Field(default=None, max_length=80)
+    source: str = Field(default="n8n", max_length=40)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class ActivityEvent(BaseModel):
+    id: int
+    kind: str
+    severity: str
+    title: str
+    detail: str | None = None
+    ref_type: str | None = None
+    ref_id: str | None = None
+    actor: str | None = None
+    source: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ActivityPage(BaseModel):
+    items: list[ActivityEvent]
+    # Pass as before_id for the next page; null on the last page
+    next_before_id: int | None = None
+
+
+class AuditEntry(BaseModel):
+    id: int
+    actor: str
+    action: str
+    target_type: str | None = None
+    target_id: str | None = None
+    before: dict[str, Any] | None = None
+    after: dict[str, Any] | None = None
+    client_ip: str | None = None
+    user_agent: str | None = None
+    created_at: datetime
+
+
+class AuditPage(BaseModel):
+    items: list[AuditEntry]
+    next_before_id: int | None = None
+
+
 ChatResponse.model_rebuild()

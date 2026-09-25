@@ -28,6 +28,8 @@ def init_schema() -> None:
         return
     try:
         with clients.db() as conn:
+            # One replica at a time: the files recreate a trigger, which concurrent starts would race on
+            conn.execute("SELECT pg_advisory_xact_lock(4715)")
             for path in sorted(SQL_DIR.glob("*.sql")):
                 conn.execute(path.read_text())
             conn.commit()
@@ -53,6 +55,31 @@ def _run(query: str, params: tuple = (), fetch: bool = False):
 def run(query: str, params: tuple = (), fetch: bool = False):
     """Run one statement with the same graceful degradation as every other helper here."""
     return _run(query, params, fetch)
+
+
+def select_page(
+    table: str,
+    columns: str,
+    equals: dict[str, Any],
+    since: datetime | None = None,
+    until: datetime | None = None,
+    before_id: int | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """One page of an append-only table, newest first, filtered by exact values and a time range.
+    `table`, `columns` and the keys of `equals` are constants in the code, never request input."""
+    where, params = [], []
+    for column, value in equals.items():
+        if value is not None:
+            where.append(f"{column} = %s")
+            params.append(value)
+    for clause, value in (("created_at >= %s", since), ("created_at < %s", until), ("id < %s", before_id)):
+        if value is not None:
+            where.append(clause)
+            params.append(value)
+    query = f"SELECT {columns} FROM {table}" + (" WHERE " + " AND ".join(where) if where else "")
+    rows = _run(query + " ORDER BY id DESC LIMIT %s", (*params, limit), fetch=True)
+    return [dict(r) for r in rows or []]
 
 
 def ensure_conversation(session_id: str, user_id: str | None, channel: str) -> None:

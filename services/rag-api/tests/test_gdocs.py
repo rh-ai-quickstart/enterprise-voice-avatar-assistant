@@ -14,6 +14,7 @@ def test_not_configured_means_no_document(monkeypatch):
 
 
 def test_multipart_body_and_document_link(monkeypatch):
+    monkeypatch.setattr(settings, "google_docs_enabled", True)
     monkeypatch.setattr(settings, "google_service_account_json", SA)
     monkeypatch.setattr(settings, "google_docs_folder_id", "folder123")
     assert gdocs.service_account_email() == "assistant@project.iam.gserviceaccount.com"
@@ -39,7 +40,17 @@ def test_multipart_body_and_document_link(monkeypatch):
     assert data.endswith(b"hello world\r\n--" + gdocs.BOUNDARY.encode() + b"--")
 
 
+def test_keys_without_the_flag_mean_no_document(monkeypatch):
+    monkeypatch.setattr(settings, "google_docs_enabled", False)
+    monkeypatch.setattr(settings, "google_service_account_json", SA)
+    monkeypatch.setattr(settings, "google_docs_folder_id", "folder123")
+    monkeypatch.setattr(gdocs, "_session", lambda: (_ for _ in ()).throw(AssertionError("Drive called")))
+    assert gdocs.keys_present() is True and gdocs.configured() is False
+    assert gdocs.create_document("t", "x") is None
+
+
 def test_drive_refusal_is_logged_not_raised(monkeypatch):
+    monkeypatch.setattr(settings, "google_docs_enabled", True)
     monkeypatch.setattr(settings, "google_service_account_json", SA)
     monkeypatch.setattr(settings, "google_docs_folder_id", "folder123")
 

@@ -1,13 +1,23 @@
 """RAG API.
 
+Public (the chat UI and the voice agent; the frontend's nginx forwards only these and /v1/admin):
 GET  /healthz, /readyz
 POST /v1/chat                       grounded answer with citations, memory, guardrails (text or voice mode)
 POST /v1/chat/stream                the same answer as newline-delimited JSON while it is generated
-POST /v1/search                     retrieval only
 GET  /v1/sessions/{id}/messages     conversation history
+GET  /v1/sessions/{id}/notifications, POST .../notifications/ack   outcome notices for the conversation
 POST /v1/sessions/{id}/archive       trigger the transcript archival workflow (WF5)
-GET  /v1/sessions/{id}/transcript   plain-text transcript (for archival workflows)
 DELETE /v1/sessions/{id}            forget a conversation
+GET  /v1/voice/token                LiveKit token for the browser (face_id picks the avatar face)
+GET  /v1/voice/faces                avatar faces to choose from, with the voice each one speaks with
+GET  /v1/voice/faces/{id}/poster    still image of a face for the picker (cut from the Tavus thumbnail video)
+GET  /v1/info                       active models and providers (for the diagnostics panel)
+
+Admin portal, with the session cookie: /v1/admin/* (admin.py)
+
+Internal, with Authorization: Bearer $INTERNAL_API_TOKEN (n8n, the ingestion service, scripts):
+POST /v1/search                     retrieval only
+GET  /v1/sessions/{id}/transcript   plain-text transcript (for archival workflows)
 GET/PUT/DELETE /v1/users/{id}/memory   long-lived facts injected into prompts
 POST /v1/classify                   document type and fields (text, or bucket/key via the ingestion service)
 POST /v1/tickets, GET /v1/tickets, GET /v1/tickets/{ref}, PATCH /v1/tickets/{ref}
@@ -15,10 +25,7 @@ GET  /v1/tickets/stale              tickets past SLA thresholds (for escalation 
 POST /v1/tickets/stale/escalate     bump priority of a stale ticket
 POST /v1/requests                   service request intake: classify, create ticket, notify n8n
 GET  /v1/knowledge-gaps/digest      aggregated unanswered questions over a time window
-GET  /v1/voice/token                LiveKit token for the browser (face_id picks the avatar face)
-GET  /v1/voice/faces                avatar faces to choose from, with the voice each one speaks with
-GET  /v1/voice/faces/{id}/poster    still image of a face for the picker (cut from the Tavus thumbnail video)
-GET  /v1/info                       active models and providers (for the diagnostics panel)
+POST /v1/internal/events            record an activity event the RAG API cannot see itself
 """
 
 import asyncio
@@ -28,13 +35,30 @@ import threading
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
-from . import classify, clients, faces, knowledge_gaps, memory, notifications, rag, retrieval, tickets, voice
+from . import (
+    admin,
+    auth,
+    classify,
+    clients,
+    events,
+    faces,
+    gdocs,
+    knowledge_gaps,
+    memory,
+    notifications,
+    rag,
+    retrieval,
+    stream,
+    tickets,
+    voice,
+)
 from .config import settings
 from .schemas import (
+    ActivityEventIn,
     ChatRequest,
     ChatResponse,
     ClassifyRequest,
@@ -70,10 +94,21 @@ async def lifespan(_: FastAPI):
         settings.guardrails_provider,
         settings.qdrant_url,
     )
+    if not settings.internal_api_token:
+        log.warning(
+            "INTERNAL_API_TOKEN is empty: internal routes are open to anyone who can reach this service"
+        )
+    if settings.admin_enabled and not auth.admin_configured():
+        log.warning(
+            "admin portal enabled but ADMIN_PASSWORD or ADMIN_SESSION_SECRET is empty: sign-in answers 503"
+        )
     await asyncio.to_thread(memory.init_schema)
+    if settings.admin_enabled and memory.enabled():
+        stream.hub.start(asyncio.get_running_loop())
     if faces.catalog() and settings.tavus_api_key:
         threading.Thread(target=faces.warm_posters, name="face-posters", daemon=True).start()
     yield
+    await asyncio.to_thread(stream.hub.stop)
 
 
 app = FastAPI(title="Enterprise voice avatar assistant - RAG API", version="0.1.0", lifespan=lifespan)
@@ -83,6 +118,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(admin.router)
+# Routes that are not public: n8n, the ingestion service and the scripts send the internal token
+INTERNAL = [Depends(auth.require_internal_token)]
 
 
 @app.exception_handler(tickets.TicketError)
@@ -123,7 +163,7 @@ def info():
             "min_score": settings.rag_min_score,
         },
         "memory": memory.enabled(),
-        "archival": {"google_docs": __import__("app.gdocs", fromlist=["configured"]).configured()},
+        "archival": {"google_docs": gdocs.configured()},
         "voice": {
             "livekit_url": settings.livekit_public_url or settings.livekit_url,
             "avatar_provider": settings.avatar_provider,
@@ -155,7 +195,7 @@ def chat_stream(request: ChatRequest):
     return StreamingResponse(lines(), media_type="application/x-ndjson")
 
 
-@app.post("/v1/search", response_model=SearchResponse)
+@app.post("/v1/search", response_model=SearchResponse, dependencies=INTERNAL)
 async def search(request: SearchRequest):
     hits = await asyncio.to_thread(retrieval.search, request.query, request.top_k, request.min_score)
     return SearchResponse(hits=[h.to_citation(n) for n, h in enumerate(hits, start=1)])
@@ -186,7 +226,7 @@ async def archive_session(session_id: str):
     return {"session_id": session_id, "requested": result["requested"], "doc_url": result.get("doc_url")}
 
 
-@app.get("/v1/sessions/{session_id}/transcript", response_class=PlainTextResponse)
+@app.get("/v1/sessions/{session_id}/transcript", response_class=PlainTextResponse, dependencies=INTERNAL)
 async def session_transcript(session_id: str):
     return await asyncio.to_thread(memory.transcript, session_id)
 
@@ -197,24 +237,24 @@ async def delete_session(session_id: str):
     return {"deleted": session_id}
 
 
-@app.get("/v1/users/{user_id}/memory")
+@app.get("/v1/users/{user_id}/memory", dependencies=INTERNAL)
 async def get_user_memory(user_id: str):
     return await asyncio.to_thread(memory.get_user_memory, user_id)
 
 
-@app.put("/v1/users/{user_id}/memory")
+@app.put("/v1/users/{user_id}/memory", dependencies=INTERNAL)
 async def put_user_memory(user_id: str, item: UserMemoryItem):
     await asyncio.to_thread(memory.set_user_memory, user_id, item.key, item.value)
     return {"user_id": user_id, item.key: item.value}
 
 
-@app.delete("/v1/users/{user_id}/memory/{key}")
+@app.delete("/v1/users/{user_id}/memory/{key}", dependencies=INTERNAL)
 async def delete_user_memory(user_id: str, key: str):
     await asyncio.to_thread(memory.delete_user_memory, user_id, key)
     return {"deleted": key}
 
 
-@app.post("/v1/classify", response_model=ClassifyResponse)
+@app.post("/v1/classify", response_model=ClassifyResponse, dependencies=INTERNAL)
 async def classify_document(request: ClassifyRequest):
     try:
         return await asyncio.to_thread(classify.classify_document, request)
@@ -222,17 +262,17 @@ async def classify_document(request: ClassifyRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/v1/tickets", response_model=Ticket, status_code=201)
+@app.post("/v1/tickets", response_model=Ticket, status_code=201, dependencies=INTERNAL)
 async def create_ticket(data: TicketCreate):
     return await asyncio.to_thread(tickets.create, data)
 
 
-@app.get("/v1/tickets", response_model=list[Ticket])
+@app.get("/v1/tickets", response_model=list[Ticket], dependencies=INTERNAL)
 async def list_tickets(status: str | None = None, limit: int = Query(default=50, ge=1, le=500)):
     return await asyncio.to_thread(tickets.list_tickets, status, limit)
 
 
-@app.get("/v1/tickets/stale")
+@app.get("/v1/tickets/stale", dependencies=INTERNAL)
 async def stale_tickets(
     reminder_minutes: int | None = None,
     escalation_minutes: int | None = None,
@@ -240,7 +280,7 @@ async def stale_tickets(
     return await asyncio.to_thread(knowledge_gaps.stale_tickets, reminder_minutes, escalation_minutes)
 
 
-@app.post("/v1/tickets/stale/escalate")
+@app.post("/v1/tickets/stale/escalate", dependencies=INTERNAL)
 async def escalate_stale_ticket(ticket_ref: str = Query(...), current_priority: str = Query(...)):
     result = await asyncio.to_thread(knowledge_gaps.escalate_ticket, ticket_ref, current_priority)
     if result is None:
@@ -248,25 +288,43 @@ async def escalate_stale_ticket(ticket_ref: str = Query(...), current_priority: 
     return result
 
 
-@app.get("/v1/tickets/{ref}", response_model=Ticket)
+@app.get("/v1/tickets/{ref}", response_model=Ticket, dependencies=INTERNAL)
 async def get_ticket(ref: str):
     return await asyncio.to_thread(tickets.get, ref)
 
 
-@app.patch("/v1/tickets/{ref}", response_model=Ticket)
+@app.patch("/v1/tickets/{ref}", response_model=Ticket, dependencies=INTERNAL)
 async def update_ticket(ref: str, data: TicketUpdate):
     return await asyncio.to_thread(tickets.update, ref, data)
 
 
-@app.post("/v1/requests", response_model=RequestIntakeResponse, status_code=201)
+@app.post("/v1/requests", response_model=RequestIntakeResponse, status_code=201, dependencies=INTERNAL)
 async def request_intake(request: RequestIntake):
     ticket, classification, notified = await asyncio.to_thread(tickets.intake, request)
     return RequestIntakeResponse(ticket=ticket, classification=classification, notified=notified)
 
 
-@app.get("/v1/knowledge-gaps/digest")
+@app.get("/v1/knowledge-gaps/digest", dependencies=INTERNAL)
 async def knowledge_gap_digest(hours: int = Query(default=24, ge=1, le=720)):
     return await asyncio.to_thread(knowledge_gaps.digest, hours)
+
+
+@app.post("/v1/internal/events", status_code=201, dependencies=INTERNAL)
+async def internal_event(data: ActivityEventIn):
+    """An event the workflows saw (ingestion results, SLA reminders, Slack failures, the digest)."""
+    event_id = await asyncio.to_thread(
+        events.record,
+        data.kind,
+        data.title,
+        severity=data.severity,
+        detail=data.detail,
+        ref_type=data.ref_type,
+        ref_id=data.ref_id,
+        actor=data.actor,
+        source=data.source,
+        data=data.data,
+    )
+    return {"id": event_id}
 
 
 @app.get("/v1/voice/token", response_model=VoiceTokenResponse)

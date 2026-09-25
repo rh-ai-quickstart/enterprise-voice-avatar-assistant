@@ -15,9 +15,11 @@ cleanup() { docker rm -f "$IMAGE" >/dev/null 2>&1 || true; [ -n "${STUB:-}" ] &&
 trap cleanup EXIT
 
 cp "$HERE"/app.conf "$HERE"/admin.conf "$HERE"/api-allowlist.conf "$HERE"/entrypoint.sh "$WORK"/
-echo '<html>app</html>' > "$WORK/index.html"
+mkdir -p "$WORK/site/admin"
+echo '<html>app</html>' > "$WORK/site/index.html"
+echo '<html>admin portal</html>' > "$WORK/site/admin/index.html"
 sed -n '/^FROM registry.access.redhat.com\/ubi9\/nginx/,$p' "$HERE/../Containerfile" \
-  | sed 's|^COPY --from=build .*|COPY --chown=1001:0 index.html /opt/app-root/src/index.html|; s|nginx/||g' > "$WORK/Dockerfile"
+  | sed 's|^COPY --from=build .*|COPY --chown=1001:0 site/ /opt/app-root/src/|; s|nginx/||g' > "$WORK/Dockerfile"
 docker build -q -t "$IMAGE" "$WORK" >/dev/null
 
 cat > "$WORK/stub.py" <<'EOF'
@@ -73,6 +75,15 @@ for r in "GET /api/v1/chat" "PATCH /api/v1/tickets/REQ-000001" "GET /api/v1/tick
 done
 grep -q '"detail"' "$WORK/body" || { echo "  FAIL  a refused route should answer JSON, not the app"; failed=1; }
 expect 200 GET /some/app/route
+grep -q "<html>app</html>" "$WORK/body" || { echo "  FAIL  unknown paths should serve the chat app"; failed=1; }
+for p in /admin/ /admin/tickets/REQ-000001 "/admin/approvals?x=1"; do
+  expect 200 GET "$p"
+  grep -q "admin portal" "$WORK/body" || { echo "  FAIL  $p should serve the portal's page"; failed=1; }
+done
+expect 301 GET /admin
+location=$(curl -s -o /dev/null -w '%{redirect_url}' "http://localhost:$PORT/admin")
+case "$location" in */admin/) ;; *) echo "  FAIL  /admin redirects to $location"; failed=1;; esac
+curl -sI "http://localhost:$PORT/admin" | grep -qi '^location: /admin/' && echo "  ok    /admin redirects relatively" || { echo "  FAIL  the /admin redirect is not relative"; failed=1; }
 client=$(curl -s -H 'X-Forwarded-For: 198.51.100.1, 203.0.113.5' -H 'X-Client-Address: 192.0.2.1' "http://localhost:$PORT/api/v1/info")
 case "$client" in *'"client": "203.0.113.5"'*) echo "  ok    X-Client-Address is the last X-Forwarded-For entry";; *) echo "  FAIL  X-Client-Address: $client"; failed=1;; esac
 # Seconds between the two events as curl receives them; buffered, they would arrive together
@@ -85,6 +96,8 @@ start false
 expect 404 GET /api/v1/admin/me
 expect 404 POST /api/v1/admin/login
 expect 404 GET /api/v1/admin/stream
+expect 404 GET /admin/
+grep -q "turned off" "$WORK/body" || { echo "  FAIL  /admin/ should say the portal is off"; failed=1; }
 expect 200 POST /api/v1/chat
 
 [ "$failed" = 0 ] && echo "proxy OK" || { echo "proxy checks failed"; exit 1; }

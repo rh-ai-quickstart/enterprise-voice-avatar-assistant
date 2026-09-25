@@ -549,7 +549,7 @@ def notify_n8n(ticket: Ticket, classification: dict[str, Any], channel: str) -> 
     body = {"ticket": ticket.model_dump(mode="json"), "classification": classification, "channel": channel}
     try:
         with httpx.Client(timeout=10) as http:
-            response = http.post(url, json=body)
+            response = http.post(url, json=body, headers=auth.internal_headers())
         if response.status_code >= 400:
             log.warning("n8n request webhook returned %s", response.status_code)
             return False

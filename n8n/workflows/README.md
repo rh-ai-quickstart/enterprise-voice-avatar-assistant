@@ -11,7 +11,7 @@ cluster-specific values.
 | `wf2-document-ingestion.json` | `POST /webhook/minio-event` (MinIO bucket notification) | `documents` and `transcripts` objects are sent to the ingestion service, the job is polled to completion, and `#assistant-ingestion` is notified; `inbox` objects are handed to WF3 |
 | `wf3-classification-extraction.json` | `POST /webhook/classify` | calls the RAG API classifier, posts the type, summary and extracted fields to `#assistant-documents`, and forwards the JSON to `DOWNSTREAM_URL` when set |
 | `wf4-request-intake-approval.json` | `POST /webhook/request-intake` (from the RAG API), `POST /webhook/slack-interactions` (Slack buttons) and `POST /webhook/ticket-decided` (decisions in the admin portal, from the RAG API with the internal token) | posts an approval card with Approve and Reject buttons to `#assistant-approvals` and stores where it was posted on the ticket (`payload.slack`); a click, once its Slack signature is verified, is recorded on the ticket; a click or a portal decision then fulfils approved requests (mock), notifies `#assistant-tickets`, and updates the card with the outcome (`chat.update`). A click on a ticket that was decided meanwhile changes nothing: the clicker gets an ephemeral reply ("already approved in the portal by Dana") and the card shows the real outcome |
-| `wf5-transcript-archival.json` | `POST /webhook/archive-transcript` with `{session_id}` | fetches the session transcript, writes it to a Google Doc when `GOOGLE_DOCS_FOLDER_ID` is set, and re-ingests it into the `transcripts` bucket |
+| `wf5-transcript-archival.json` | `POST /webhook/archive-transcript` with `{session_id, title, doc_url, archive_id}` (from the RAG API, with the internal token) | fetches the session transcript, re-ingests it into the `transcripts` bucket as `transcript-<session>.md`, waits for the job, and reports the result to the RAG API (`PATCH /v1/internal/archives/{archive_id}`: indexed or failed); the Google Doc, when that integration is on, is created by the RAG API before |
 | `wf6-sla-escalation.json` | Schedule (every 15 min) | checks for tickets stuck in `pending_approval`; sends a reminder to `#assistant-approvals` after `SLA_REMINDER_MINUTES` (default 60) and escalates priority after `SLA_ESCALATION_MINUTES` (default 240), posting to `#assistant-tickets` |
 | `wf7-knowledge-gap-digest.json` | Schedule (weekdays 9 AM) | fetches unanswered questions from the last 24 hours, groups and ranks them, and posts a digest to `#assistant-knowledge-gaps` so content owners know what to add |
 
@@ -77,9 +77,11 @@ curl -s -X POST $N8N/webhook/chat -H 'Content-Type: application/json' -d '{"mess
 curl -s -X POST $N8N/webhook/minio-event -H 'Content-Type: application/json' -d '{"EventName":"s3:ObjectCreated:Put","Key":"documents/password-policy.md"}'
 # WF3: classify an object from the inbox bucket
 curl -s -X POST $N8N/webhook/classify -H 'Content-Type: application/json' -d '{"bucket":"documents","key":"password-policy.md"}'
-# WF5: archive a session transcript
-curl -s -X POST $N8N/webhook/archive-transcript -H 'Content-Type: application/json' -d '{"session_id":"<session id from the UI>"}'
 ```
+
+WF4's request intake and WF5 only act on calls from the RAG API (with the internal token), so
+start them through it: file a request in the chat, or archive a conversation with
+`NS=voice-avatar-assistant scripts/archive-transcript.sh [session id]`.
 
 ```bash
 # WF6 and WF7 are schedule-triggered; test the underlying API endpoints directly, from the
@@ -98,5 +100,6 @@ Executions and their inputs and outputs are visible under *Executions* in n8n.
   HMAC-SHA256 of `v0:<timestamp>:<raw body>` with `SLACK_SIGNING_SECRET`, and a
   timestamp within five minutes. Unsigned, forged or replayed clicks, and every
   click while the secret is empty, are refused before the ticket is touched.
-- **Portal decisions need the internal token.** `/webhook/ticket-decided` acts
-  only on calls that carry `Authorization: Bearer $INTERNAL_API_TOKEN`.
+- **Calls from the RAG API need the internal token.** `/webhook/request-intake`,
+  `/webhook/archive-transcript` and `/webhook/ticket-decided` act only on calls
+  that carry `Authorization: Bearer $INTERNAL_API_TOKEN`.

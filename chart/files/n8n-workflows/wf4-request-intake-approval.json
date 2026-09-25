@@ -21,6 +21,39 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "24f846fc-71c2-5fec-92bb-bc07d9cb8803",
+              "leftValue": "={{ $json.headers.authorization || '' }}",
+              "rightValue": "={{ $env.INTERNAL_API_TOKEN ? 'Bearer ' + $env.INTERNAL_API_TOKEN : '' }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c9fcb0c9-b8c1-5ae7-97a5-4bff2e3586c8",
+      "name": "From the RAG API? (Request intake)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        260,
+        -400
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "const b = $input.first().json.body;\nconst t = b.ticket, cls = b.classification || {};\nconst summary = cls.summary || t.description || '';\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: `Service request ${t.ticket_ref}` } },\n  { type: 'section', text: { type: 'mrkdwn', text: `*${t.title}*\\n${summary}` } },\n  { type: 'section', fields: [\n    { type: 'mrkdwn', text: `*Category*\\n${t.category || '-'}` },\n    { type: 'mrkdwn', text: `*Priority*\\n${t.priority || '-'}` },\n    { type: 'mrkdwn', text: `*Requester*\\n${t.requester || '-'}` },\n    { type: 'mrkdwn', text: `*Channel*\\n${b.channel || '-'}` } ] },\n  { type: 'actions', elements: [\n    { type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Approve' }, action_id: 'approve_request', value: t.ticket_ref },\n    { type: 'button', style: 'danger', text: { type: 'plain_text', text: 'Reject' }, action_id: 'reject_request', value: t.ticket_ref } ] }\n];\nreturn [{ json: { ticket_ref: t.ticket_ref, title: t.title, needs_approval: cls.needs_approval !== false, blocks: JSON.stringify({ blocks }), text: `Service request ${t.ticket_ref}: ${t.title}` } }];"
       },
       "id": "8f5f0040-fa7b-5ec6-8814-f58a829f66b6",
@@ -28,7 +61,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        260,
+        520,
         -400
       ]
     },
@@ -62,7 +95,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        520,
+        780,
         -400
       ]
     },
@@ -95,7 +128,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        780,
+        1040,
         -500
       ]
     },
@@ -119,7 +152,7 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.3,
       "position": [
-        1040,
+        1300,
         -500
       ],
       "continueOnFail": true,
@@ -139,7 +172,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1300,
+        1560,
         -500
       ]
     },
@@ -169,7 +202,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1560,
+        1820,
         -500
       ],
       "continueOnFail": true,
@@ -203,7 +236,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1820,
+        2080,
         -500
       ],
       "retryOnFail": true,
@@ -233,7 +266,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        780,
+        1040,
         -300
       ],
       "retryOnFail": true,
@@ -475,7 +508,7 @@
         "options": {}
       },
       "id": "e792a15e-357c-5b3e-9b59-9b5fb16b6300",
-      "name": "From the RAG API?",
+      "name": "From the RAG API? (Ticket decided)",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -850,11 +883,23 @@
       "main": [
         [
           {
-            "node": "Build approval message",
+            "node": "From the RAG API? (Request intake)",
             "type": "main",
             "index": 0
           }
         ]
+      ]
+    },
+    "From the RAG API? (Request intake)": {
+      "main": [
+        [
+          {
+            "node": "Build approval message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
       ]
     },
     "Build approval message": {
@@ -1026,14 +1071,14 @@
       "main": [
         [
           {
-            "node": "From the RAG API?",
+            "node": "From the RAG API? (Ticket decided)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "From the RAG API?": {
+    "From the RAG API? (Ticket decided)": {
       "main": [
         [
           {

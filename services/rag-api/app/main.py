@@ -339,7 +339,9 @@ async def internal_archive_result(archive_id: int, data: ArchiveResult):
     )
     if archive is None:
         raise HTTPException(status_code=404, detail="archive not found")
-    return archive
+    # No "error" key: n8n's HTTP node treats a JSON answer with a non-empty error as a failure and
+    # retries it, which would record the result three times
+    return {"id": archive["id"], "session_id": archive["session_id"], "status": archive["status"]}
 
 
 @app.get("/v1/voice/token", response_model=VoiceTokenResponse)

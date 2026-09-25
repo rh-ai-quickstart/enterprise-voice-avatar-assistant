@@ -28,10 +28,6 @@ export function info() {
   return request<Info>("/v1/info");
 }
 
-export function deleteSession(sessionId: string) {
-  return request<{ deleted: string }>(`/v1/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
-}
-
 export function voiceToken(params: { session_id: string; identity: string; name?: string; face_id?: string }) {
   const query = new URLSearchParams({ session_id: params.session_id, identity: params.identity });
   if (params.name) query.set("name", params.name);

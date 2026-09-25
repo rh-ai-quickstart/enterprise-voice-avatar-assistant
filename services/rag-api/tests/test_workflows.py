@@ -108,12 +108,15 @@ def test_the_webhooks_the_rag_api_calls_exist():
         assert path.removeprefix("/webhook/") in webhooks, path
 
 
-def test_portal_decisions_are_accepted_only_with_the_internal_token():
-    wf, hook = _webhooks()["ticket-decided"]
+@pytest.mark.parametrize("path", ["request-intake", "archive-transcript", "ticket-decided"])
+def test_the_webhooks_the_rag_api_calls_accept_only_the_internal_token(path):
+    wf, hook = _webhooks()[path]
     (check,) = _next_nodes(wf, hook["name"])
     condition = check["parameters"]["conditions"]["conditions"][0]
     assert check["type"] == "n8n-nodes-base.if"
     assert "authorization" in condition["leftValue"] and "$env.INTERNAL_API_TOKEN" in condition["rightValue"]
+    # Nothing runs on the false branch
+    assert wf["connections"][check["name"]]["main"][1] == []
 
 
 def test_slack_clicks_are_verified_before_anything_else():

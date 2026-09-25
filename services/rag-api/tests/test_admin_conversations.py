@@ -134,7 +134,8 @@ def test_archive_record_workflow_result_and_download(three, admin_client, n8n, m
         json={"status": "indexed", "object_key": "transcript-s-alex.md", "doc_id": "doc-1", "job_id": "j1"},
         headers={"Authorization": "Bearer tok"},
     )
-    assert report.status_code == 200 and report.json()["status"] == "indexed"
+    assert report.status_code == 200
+    assert report.json() == {"id": body["archive_id"], "session_id": "s-alex", "status": "indexed"}
     assert (
         admin_client.patch(
             "/v1/internal/archives/999", json={"status": "failed"}, headers={"Authorization": "Bearer tok"}
@@ -155,6 +156,13 @@ def test_archive_record_workflow_result_and_download(three, admin_client, n8n, m
         ).status_code
         == 404
     )
+    # A failed result answers without an "error" key too: n8n would retry the call and record it again
+    failed = admin_client.patch(
+        f"/v1/internal/archives/{body['archive_id']}",
+        json={"status": "failed", "error": "ConversionError"},
+        headers={"Authorization": "Bearer tok"},
+    ).json()
+    assert "error" not in failed and failed["status"] == "failed"
 
 
 def test_archive_that_cannot_reach_n8n_is_marked_failed(three, monkeypatch):

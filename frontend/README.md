@@ -7,7 +7,10 @@ from the RAG API. Voice mode connects to the LiveKit room and shows the avatar v
 provider is configured; the header has New conversation and Archive transcript.
 
 Calls go to `/api/...`, which nginx proxies to the RAG API inside the cluster
-(`RAG_API_UPSTREAM`, default `rag-api:8080`). The session id is kept in
+(`RAG_API_UPSTREAM`, default `rag-api:8080`). The proxy forwards only the routes the chat UI and
+the admin portal call ([nginx/api-allowlist.conf](nginx/api-allowlist.conf)) and answers 404 for
+every other RAG API route, which needs the internal token; `ADMIN_ENABLED=false` refuses
+`/api/v1/admin/*` as well. The session id is kept in
 `sessionStorage`, the optional user name in `localStorage`; both are sent with
 every question so memory works across turns.
 

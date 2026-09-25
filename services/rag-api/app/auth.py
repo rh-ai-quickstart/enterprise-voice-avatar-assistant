@@ -20,11 +20,12 @@ from dataclasses import dataclass
 from fastapi import HTTPException, Request
 
 from .config import settings
+from .notifications import WORKFLOW_ACTORS
 
 COOKIE = "admin_session"
 CSRF_HEADER = "X-Admin-Request"
 # Actors the workflows write into tickets; a person signing in as one would read as a machine
-RESERVED_NAMES = {"n8n", "assistant", "system", "slack", "sla-escalation"}
+RESERVED_NAMES = WORKFLOW_ACTORS
 
 
 # ---------------------------------------------------------------- internal token -------------

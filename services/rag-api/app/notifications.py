@@ -2,7 +2,8 @@
 
 A notice is written when a ticket changes state and read by whichever client is live for the
 session: the voice agent speaks it, the frontend shows it. Only the newest undelivered notice
-per ticket is handed out; older ones are marked delivered as superseded.
+per ticket and kind is handed out (a decision does not supersede a message from an admin, or the
+reverse); older ones are marked delivered as superseded.
 """
 
 import logging
@@ -13,14 +14,15 @@ from .schemas import Notification, Ticket
 log = logging.getLogger("rag.notifications")
 
 NOTIFY_STATES = ("approved", "rejected", "fulfilled", "cancelled")
-_WORKFLOW_ACTORS = {"n8n", "assistant", "system"}
+# Actors that are not people: a notice never says "approved by n8n"
+WORKFLOW_ACTORS = {"n8n", "assistant", "system", "slack", "sla-escalation"}
 _GENERIC_NOTES = {"decided in Slack", "no approval required"}
 
 
 def ticket_text(ticket: Ticket) -> str | None:
     """Spoken-style sentence for a ticket outcome, or None when the state is not worth announcing."""
     title = ticket.title.rstrip(".")
-    who = f" by {ticket.approver}" if ticket.approver and ticket.approver not in _WORKFLOW_ACTORS else ""
+    who = f" by {ticket.approver}" if ticket.approver and ticket.approver not in WORKFLOW_ACTORS else ""
     if ticket.status == "fulfilled":
         return f"Good news: your request {ticket.ticket_ref}, {title}, was approved{who} and has been fulfilled. You're all set."
     if ticket.status == "approved":
@@ -54,6 +56,19 @@ def notify_ticket(ticket: Ticket) -> None:
     log.info("notice queued for session %s: %s -> %s", ticket.session_id, ticket.ticket_ref, ticket.status)
 
 
+def notify_message(ticket: Ticket, actor: str, text: str) -> None:
+    """A message from an admin to the person who filed the ticket."""
+    memory.ensure_conversation(ticket.session_id, ticket.requester, "system")
+    memory.run(
+        "INSERT INTO session_notifications (session_id, ticket_ref, kind, text) VALUES (%s, %s, 'admin_message', %s)",
+        (
+            ticket.session_id,
+            ticket.ticket_ref,
+            f"A message from {actor} about your request {ticket.ticket_ref}: {text}",
+        ),
+    )
+
+
 def pending(session_id: str) -> list[Notification]:
     rows = (
         memory.run(
@@ -67,13 +82,13 @@ def pending(session_id: str) -> list[Notification]:
     latest: dict[str, dict] = {}
     superseded: list[int] = []
     for row in rows:
-        key = row["ticket_ref"] or f"id-{row['id']}"
+        key = (row["ticket_ref"], row["kind"]) if row["ticket_ref"] else f"id-{row['id']}"
         if key in latest:
             superseded.append(int(latest[key]["id"]))
         latest[key] = row
     if superseded:
         _mark_delivered(session_id, superseded)
-    return [Notification(**row) for row in latest.values()]
+    return [Notification(**row) for row in sorted(latest.values(), key=lambda r: r["id"])]
 
 
 def ack(session_id: str, ids: list[int]) -> None:

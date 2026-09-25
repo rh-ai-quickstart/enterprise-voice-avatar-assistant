@@ -101,6 +101,10 @@ class TicketUpdate(BaseModel):
     note: str | None = None
     actor: str | None = None
     payload: dict[str, Any] | None = None
+    priority: Literal["low", "normal", "high", "urgent"] | None = None
+    category: str | None = None
+    # Where a decision was taken (portal, slack, workflow); kept on the ticket as payload.decision
+    via: str | None = Field(default=None, max_length=40)
 
 
 class TicketEvent(BaseModel):
@@ -127,6 +131,72 @@ class Ticket(BaseModel):
     created_at: datetime
     updated_at: datetime
     events: list[TicketEvent] = Field(default_factory=list)
+
+
+class AdminTicket(Ticket):
+    channel: str | None = None
+    # When the ticket entered pending_approval, while it waits there
+    pending_since: datetime | None = None
+    pending_minutes: float | None = None
+
+
+class TicketPage(BaseModel):
+    items: list[AdminTicket]
+    total: int
+    page: int
+    limit: int
+
+
+class TicketSla(BaseModel):
+    reminder_minutes: int
+    escalation_minutes: int
+    # ok, reminder or escalation while pending; null otherwise
+    level: str | None = None
+
+
+class TicketConversation(BaseModel):
+    session_id: str
+    exists: bool
+    channel: str | None = None
+    user_id: str | None = None
+    messages: int = 0
+    started: datetime | None = None
+    last_activity: datetime | None = None
+
+
+class AdminTicketDetail(AdminTicket):
+    sla: TicketSla
+    conversation: TicketConversation | None = None
+    # The approval card, when Slack posted one: {channel, ts, permalink}
+    slack: dict[str, Any] | None = None
+    # What the portal may do now: approve, reject, cancel, fulfil, edit, message
+    actions: list[str] = Field(default_factory=list)
+
+
+class TicketDecision(BaseModel):
+    decision: Literal["approved", "rejected"]
+    # Required for a rejection: the requester hears it
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class TicketNote(BaseModel):
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class TicketEdit(BaseModel):
+    priority: Literal["low", "normal", "high", "urgent"] | None = None
+    category: str | None = None
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class TicketMessage(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class TicketActionResult(BaseModel):
+    ticket: AdminTicketDetail
+    # The workflow was told (fulfilment, the Slack card); false when n8n could not be reached
+    workflow_notified: bool | None = None
 
 
 class RequestIntake(BaseModel):

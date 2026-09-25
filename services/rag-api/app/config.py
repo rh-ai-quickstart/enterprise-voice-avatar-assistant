@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     n8n_url: str = "http://n8n:5678"
     n8n_request_webhook_path: str = "/webhook/request-intake"
     n8n_archive_webhook_path: str = "/webhook/archive-transcript"
+    # WF4: a decision taken in the admin portal (fulfilment, notices, the Slack card)
+    n8n_decision_webhook_path: str = "/webhook/ticket-decided"
     # Transcript archival to Google Docs with a service account (see gdocs.py); both empty = off
     google_service_account_json: str | None = None
     google_docs_folder_id: str | None = None

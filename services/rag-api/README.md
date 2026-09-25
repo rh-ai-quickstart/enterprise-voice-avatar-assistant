@@ -26,7 +26,7 @@ scripts send. Public routes are marked below.
 | POST | `/v1/classify` | `{"text"}` or `{"bucket", "key"}` → `doc_type`, `fields`, `summary`, `confidence` |
 | POST | `/v1/tickets` | create a ticket |
 | GET | `/v1/tickets`, `/v1/tickets/{ref}` | list, or fetch by id or `REQ-000123` |
-| PATCH | `/v1/tickets/{ref}` | `{"status", "actor", "note", "payload"}`; transitions are validated |
+| PATCH | `/v1/tickets/{ref}` | `{"status", "actor", "note", "payload", "priority", "category", "via"}`; transitions are validated; a decision is kept as `payload.decision` (`via`: `portal`, `slack`, `workflow`) |
 | GET | `/v1/tickets/stale` | tickets past the reminder and escalation thresholds (SLA workflow) |
 | POST | `/v1/tickets/stale/escalate` | `?ticket_ref=&current_priority=` raises the priority one step |
 | POST | `/v1/requests` | service request intake: classify, create the ticket, notify n8n |
@@ -38,6 +38,13 @@ scripts send. Public routes are marked below.
 | POST | `/v1/internal/events` | `{"kind", "title", "severity"?, "detail"?, "ref_type"?, "ref_id"?, "actor"?, "data"?}` records an activity event the RAG API cannot see itself (n8n: ingestion results, SLA reminders, Slack failures) |
 | POST | `/v1/admin/login`, `/v1/admin/logout` | `{"password", "name"}`: the shared admin password and the display name decisions are attributed to; sets the `admin_session` cookie |
 | GET | `/v1/admin/me` | the signed-in name and when the session expires |
+| GET | `/v1/admin/overview` | pending approvals and the oldest one's age, approved tickets not fulfilled after five minutes, tickets per status over seven days, the last ten events |
+| GET | `/v1/admin/tickets` | `status`, `category`, `priority`, `requester`, `channel`, `q`, `from`, `to`, `order` (`newest`, `oldest`), `page`, `limit` → `{items, total, page, limit}`; pending tickets carry `pending_since` and `pending_minutes` |
+| GET | `/v1/admin/tickets/{ref}` | the ticket with its events, SLA level, conversation summary, Slack card link and the `actions` the portal may take |
+| POST | `/v1/admin/tickets/{ref}/decision` | `{"decision": "approved"\|"rejected", "note"}` (a rejection needs the note, which the requester hears); WF4 is told at `/webhook/ticket-decided` to fulfil and update the Slack card |
+| POST | `/v1/admin/tickets/{ref}/cancel`, `/fulfil` | `{"note"}`: cancel an open ticket (WF4 updates the card); mark an approved one fulfilled when fulfilment never ran |
+| PATCH | `/v1/admin/tickets/{ref}` | `{"priority", "category", "note"}` on an open ticket; not announced to the requester |
+| POST | `/v1/admin/tickets/{ref}/message` | `{"text"}`: a notice in the requester's conversation (409 when the ticket has none) |
 | GET | `/v1/admin/activity` | the activity feed, newest first: `kind`, `severity`, `from`, `to`, `before_id`, `limit` |
 | GET | `/v1/admin/audit` | who did what in the portal: `actor`, `action`, `from`, `to`, `before_id`, `limit` |
 | GET | `/v1/admin/stream` | server-sent events (`event: activity`, `{id, kind, ref_type, ref_id}`) fed by PostgreSQL `LISTEN admin_events`; `Last-Event-ID` replays what was missed |
@@ -62,7 +69,9 @@ Before retrieval, an intent check classifies the message as a question or a serv
 ## Ticket states
 
 `intake → classified → pending_approval → approved → fulfilled`, with `rejected`
-from pending approval and `cancelled` from any open state. `/v1/requests` runs
+from pending approval and `cancelled` from any open state. Every change, from the chat, n8n,
+Slack or the admin portal, goes through `tickets.update`: it locks the ticket row, validates the
+transition, writes the ticket event and an activity event, and queues the requester's notice. `/v1/requests` runs
 intake and classification, moves the ticket to `pending_approval` when the
 request needs it, and posts `{ticket, classification, channel}` to the n8n
 webhook at `N8N_URL` + `N8N_REQUEST_WEBHOOK_PATH` (default `/webhook/request-intake`).

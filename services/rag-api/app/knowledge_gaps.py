@@ -69,13 +69,10 @@ def escalate_ticket(ticket_ref: str, current_priority: str) -> dict[str, Any] | 
         ticket_ref,
         tickets.TicketUpdate(
             actor="sla-escalation",
-            note=f"SLA escalation: priority raised from {current_priority} to {new_priority} (pending > {settings.sla_escalation_minutes}m)",
-            payload={"priority": new_priority},
+            priority=new_priority,
+            note=f"SLA escalation: pending over {settings.sla_escalation_minutes} minutes",
         ),
-    )
-    memory.run(
-        "UPDATE tickets SET priority = %s, updated_at = now() WHERE ticket_ref = %s",
-        (new_priority, ticket_ref),
+        edit_kind="ticket.escalated",
     )
     return {"ticket_ref": ticket_ref, "old_priority": current_priority, "new_priority": new_priority}
 

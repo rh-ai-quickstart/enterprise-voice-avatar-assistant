@@ -57,6 +57,11 @@ CREATE TABLE IF NOT EXISTS transcript_archives (
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS transcript_archives_session_idx ON transcript_archives (session_id, id);
+-- The transcript as archived (the portal's download), and what re-ingestion reported
+ALTER TABLE transcript_archives ADD COLUMN IF NOT EXISTS transcript TEXT;
+ALTER TABLE transcript_archives ADD COLUMN IF NOT EXISTS doc_id TEXT;
+ALTER TABLE transcript_archives ADD COLUMN IF NOT EXISTS job_id TEXT;
+ALTER TABLE transcript_archives ADD COLUMN IF NOT EXISTS error TEXT;
 
 -- Knowledge gaps can be resolved or dismissed, and grouped by meaning.
 ALTER TABLE knowledge_gaps ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open';

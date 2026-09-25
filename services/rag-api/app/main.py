@@ -26,6 +26,7 @@ POST /v1/tickets/stale/escalate     bump priority of a stale ticket
 POST /v1/requests                   service request intake: classify, create ticket, notify n8n
 GET  /v1/knowledge-gaps/digest      aggregated unanswered questions over a time window
 POST /v1/internal/events            record an activity event the RAG API cannot see itself
+PATCH /v1/internal/archives/{id}    what re-ingestion of an archived transcript came to (WF5)
 """
 
 import asyncio
@@ -41,9 +42,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response, Streami
 
 from . import (
     admin,
+    archives,
     auth,
     classify,
     clients,
+    conversations,
     events,
     faces,
     gdocs,
@@ -59,6 +62,7 @@ from . import (
 from .config import settings
 from .schemas import (
     ActivityEventIn,
+    ArchiveResult,
     ChatRequest,
     ChatResponse,
     ClassifyRequest,
@@ -126,7 +130,8 @@ INTERNAL = [Depends(auth.require_internal_token)]
 
 
 @app.exception_handler(tickets.TicketError)
-async def ticket_error(_, exc: tickets.TicketError):
+@app.exception_handler(conversations.ConversationError)
+async def domain_error(_, exc: tickets.TicketError | conversations.ConversationError):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
@@ -220,10 +225,10 @@ async def ack_notifications(session_id: str, data: NotificationAck):
 
 @app.post("/v1/sessions/{session_id}/archive", status_code=202)
 async def archive_session(session_id: str):
-    """Create the Google Doc (when a service account is configured) and hand the session to the
-    archival workflow for re-ingestion and the Slack notice."""
-    result = await asyncio.to_thread(memory.request_archive, session_id)
-    return {"session_id": session_id, "requested": result["requested"], "doc_url": result.get("doc_url")}
+    """Record the archive, create the Google Doc (when that integration is on) and hand the session
+    to the archival workflow for re-ingestion and the Slack notice."""
+    result = await asyncio.to_thread(archives.request, session_id)
+    return {"session_id": session_id, **result}
 
 
 @app.get("/v1/sessions/{session_id}/transcript", response_class=PlainTextResponse, dependencies=INTERNAL)
@@ -325,6 +330,16 @@ async def internal_event(data: ActivityEventIn):
         data=data.data,
     )
     return {"id": event_id}
+
+
+@app.patch("/v1/internal/archives/{archive_id}", dependencies=INTERNAL)
+async def internal_archive_result(archive_id: int, data: ArchiveResult):
+    archive = await asyncio.to_thread(
+        archives.record_result, archive_id, data.status, data.object_key, data.doc_id, data.job_id, data.error
+    )
+    if archive is None:
+        raise HTTPException(status_code=404, detail="archive not found")
+    return archive
 
 
 @app.get("/v1/voice/token", response_model=VoiceTokenResponse)

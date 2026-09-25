@@ -199,6 +199,98 @@ class TicketActionResult(BaseModel):
     workflow_notified: bool | None = None
 
 
+class SearchMatch(BaseModel):
+    id: int
+    role: str
+    # The matched words sit between \x01 and \x02
+    snippet: str
+
+
+class ConversationSummary(BaseModel):
+    session_id: str
+    user_id: str | None = None
+    channel: str | None = None
+    started: datetime
+    last_activity: datetime
+    messages: int
+    blocked: int
+    tickets: int
+    archives: int
+    matches: list[SearchMatch] = Field(default_factory=list)
+
+
+class ConversationPage(BaseModel):
+    items: list[ConversationSummary]
+    total: int
+    page: int
+    limit: int
+
+
+class StoredMessage(BaseModel):
+    id: int
+    role: str
+    content: str
+    citations: list[dict[str, Any]] = Field(default_factory=list)
+    blocked: bool = False
+    created_at: datetime
+
+
+class StoredNotice(BaseModel):
+    id: int
+    ticket_ref: str | None = None
+    kind: str
+    text: str
+    created_at: datetime
+    delivered_at: datetime | None = None
+
+
+class ConversationTicket(BaseModel):
+    ticket_ref: str
+    title: str
+    status: str
+    priority: str
+    category: str | None = None
+    created_at: datetime
+
+
+class ArchiveRecord(BaseModel):
+    id: int
+    session_id: str
+    title: str
+    doc_url: str | None = None
+    object_key: str | None = None
+    doc_id: str | None = None
+    job_id: str | None = None
+    # requested, indexed or failed
+    status: str
+    error: str | None = None
+    requested_by: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationDetail(BaseModel):
+    session_id: str
+    user_id: str | None = None
+    channel: str | None = None
+    started: datetime
+    updated_at: datetime
+    messages: list[StoredMessage]
+    notices: list[StoredNotice]
+    tickets: list[ConversationTicket]
+    archives: list[ArchiveRecord]
+
+
+class ArchiveResult(BaseModel):
+    """What WF5 reports once re-ingestion of an archived transcript has finished."""
+
+    status: Literal["indexed", "failed"]
+    object_key: str | None = Field(default=None, max_length=500)
+    doc_id: str | None = Field(default=None, max_length=100)
+    job_id: str | None = Field(default=None, max_length=100)
+    error: str | None = Field(default=None, max_length=2000)
+
+
 class RequestIntake(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     session_id: str | None = None

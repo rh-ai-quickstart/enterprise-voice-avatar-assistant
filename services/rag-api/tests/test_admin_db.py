@@ -111,7 +111,7 @@ def test_notify_trigger_reaches_the_hub(database):
         hub.start(asyncio.get_running_loop())
         queue = hub.subscribe()
         try:
-            await asyncio.sleep(0.5)  # the listener connects
+            assert await asyncio.to_thread(hub.listening.wait, 10), "the listener did not connect"
             event_id = await asyncio.to_thread(
                 events.record, "ticket.approved", "REQ-1 approved", ref_type="ticket", ref_id="REQ-000001"
             )

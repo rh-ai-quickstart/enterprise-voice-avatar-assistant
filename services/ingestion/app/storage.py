@@ -37,6 +37,10 @@ def download(bucket: str, key: str) -> Path:
     return path
 
 
+def delete_object(bucket: str, key: str) -> None:
+    client().delete_object(Bucket=bucket, Key=key)
+
+
 def put_bytes(bucket: str, key: str, data: bytes, content_type: str | None = None) -> None:
     extra = {"ContentType": content_type} if content_type else {}
     client().put_object(Bucket=bucket, Key=key, Body=data, **extra)

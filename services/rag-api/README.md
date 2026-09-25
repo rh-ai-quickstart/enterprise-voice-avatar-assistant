@@ -19,7 +19,7 @@ scripts send. Public routes are marked below.
 | GET | `/v1/sessions/{id}/messages` (public) | conversation history with citations |
 | GET | `/v1/sessions/{id}/notifications` (public) | undelivered outcome notices for the session (ticket decisions), newest per ticket |
 | POST | `/v1/sessions/{id}/notifications/ack` (public) | `{"ids": [...]}` marks notices delivered and records them in the transcript |
-| POST | `/v1/sessions/{id}/archive` (public) | hands the session to the transcript archival workflow (WF5) |
+| POST | `/v1/sessions/{id}/archive` (public) | records an archive (kept with the transcript as archived), creates the Google Doc when that integration is on, and hands the session to the transcript archival workflow (WF5); `{requested, doc_url, archive_id}` |
 | GET | `/v1/sessions/{id}/transcript` | plain-text transcript (transcript archival workflow) |
 | DELETE | `/v1/sessions/{id}` (public) | forget a conversation |
 | GET, PUT, DELETE | `/v1/users/{id}/memory` | long-lived facts about a user, injected into prompts |
@@ -35,6 +35,7 @@ scripts send. Public routes are marked below.
 | GET | `/v1/voice/faces` (public) | avatar faces to choose from (`AVATAR_FACES`), with the voice each one speaks with; names and thumbnail URLs from Tavus when `TAVUS_API_KEY` is set |
 | GET | `/v1/voice/faces/{id}/poster` (public) | JPEG still of a face for the picker, cut from the Tavus thumbnail video and cached in the pod |
 | GET | `/v1/info` (public) | active models and providers |
+| PATCH | `/v1/internal/archives/{id}` | `{"status": "indexed"\|"failed", "object_key", "doc_id", "job_id", "error"}`: what re-ingestion made of an archive (WF5); records `transcript.archived` or `transcript.archive_failed` |
 | POST | `/v1/internal/events` | `{"kind", "title", "severity"?, "detail"?, "ref_type"?, "ref_id"?, "actor"?, "data"?}` records an activity event the RAG API cannot see itself (n8n: ingestion results, SLA reminders, Slack failures) |
 | POST | `/v1/admin/login`, `/v1/admin/logout` | `{"password", "name"}`: the shared admin password and the display name decisions are attributed to; sets the `admin_session` cookie |
 | GET | `/v1/admin/me` | the signed-in name and when the session expires |
@@ -44,6 +45,12 @@ scripts send. Public routes are marked below.
 | POST | `/v1/admin/tickets/{ref}/decision` | `{"decision": "approved"\|"rejected", "note"}` (a rejection needs the note, which the requester hears); WF4 is told at `/webhook/ticket-decided` to fulfil and update the Slack card |
 | POST | `/v1/admin/tickets/{ref}/cancel`, `/fulfil` | `{"note"}`: cancel an open ticket (WF4 updates the card); mark an approved one fulfilled when fulfilment never ran |
 | PATCH | `/v1/admin/tickets/{ref}` | `{"priority", "category", "note"}` on an open ticket; not announced to the requester |
+| GET | `/v1/admin/conversations` | `q` (full-text search over every message, matches returned with the matched words between `\x01` and `\x02`), `user`, `channel`, `from`, `to`, `has_ticket`, `archived`, `blocked`, `page`, `limit` |
+| GET | `/v1/admin/conversations/{id}` | messages with citations, notices, tickets filed from it, archive records |
+| POST | `/v1/admin/conversations/{id}/archive` | the chat's archive path, attributed to the admin |
+| GET | `/v1/admin/conversations/{id}/export` | `?format=md\|txt`: the transcript as a download |
+| GET | `/v1/admin/conversations/{id}/archives/{archive_id}/download` | the transcript as it was archived |
+| DELETE | `/v1/admin/conversations/{id}` | the conversation, its messages, notices and archive records, and the archived copy in the transcripts bucket and Qdrant (through the ingestion service); tickets are kept, Google Docs are not touched |
 | POST | `/v1/admin/tickets/{ref}/message` | `{"text"}`: a notice in the requester's conversation (409 when the ticket has none) |
 | GET | `/v1/admin/activity` | the activity feed, newest first: `kind`, `severity`, `from`, `to`, `before_id`, `limit` |
 | GET | `/v1/admin/audit` | who did what in the portal: `actor`, `action`, `from`, `to`, `before_id`, `limit` |

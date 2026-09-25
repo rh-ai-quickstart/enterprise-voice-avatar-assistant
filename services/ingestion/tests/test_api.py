@@ -47,3 +47,22 @@ def test_write_routes_refuse_a_missing_or_wrong_token(monkeypatch):
         assert client.post("/v1/events/minio", json=event, headers={"Authorization": "Bearer tok"}).status_code == 200
         # Reads stay open inside the cluster
         assert client.get("/v1/jobs").status_code == 200
+
+
+def test_delete_can_purge_the_object(monkeypatch):
+    from app import db, main, storage, vectorstore
+
+    removed, calls = [], []
+    monkeypatch.setattr(vectorstore, "delete_document", lambda d: calls.append(("vectors", d)))
+    monkeypatch.setattr(db, "delete_document", lambda d: calls.append(("record", d)))
+    monkeypatch.setattr(db, "source_uri", lambda d: "s3://transcripts/transcript-abc.md" if d == "d1" else None)
+    monkeypatch.setattr(storage, "delete_object", lambda b, k: removed.append((b, k)))
+    with TestClient(main.app) as client:
+        kept = client.delete("/v1/documents/d1").json()
+        assert kept == {"deleted": "d1", "object": None} and removed == []
+        purged = client.delete("/v1/documents/d1", params={"purge_object": "true"}).json()
+        assert purged == {"deleted": "d1", "object": "s3://transcripts/transcript-abc.md"}
+        assert removed == [("transcripts", "transcript-abc.md")]
+        # Not recorded: the vectors go, the object cannot be found
+        assert client.delete("/v1/documents/d2", params={"purge_object": "true"}).json()["object"] is None
+    assert ("vectors", "d2") in calls and ("record", "d2") in calls

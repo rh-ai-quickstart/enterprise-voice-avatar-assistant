@@ -7,6 +7,11 @@ POST /tickets/{ref}/decision          approve or reject; the workflow fulfils an
 POST /tickets/{ref}/cancel, /fulfil   cancel an open ticket; mark an approved one fulfilled
 PATCH /tickets/{ref}                  change the priority or the category
 POST /tickets/{ref}/message           a notice to the requester, spoken by the avatar
+GET  /conversations, /conversations/{id}   full-text search and filters; one with messages, notices, tickets
+POST /conversations/{id}/archive      the chat's archive path, attributed to the admin
+GET  /conversations/{id}/export       the transcript as Markdown or plain text
+GET  /conversations/{id}/archives/{archive_id}/download   the transcript as it was archived
+DELETE /conversations/{id}            messages, notices, archive records and the archived copy
 GET  /activity                        the activity feed, newest first
 GET  /audit                           the audit log, newest first
 GET  /stream                          server-sent events for live updates (stream.py)
@@ -20,9 +25,9 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
-from . import audit, auth, events, gdocs, stream, tickets
+from . import archives, audit, auth, conversations, events, gdocs, stream, tickets
 from .config import settings
 from .schemas import (
     ActivityPage,
@@ -30,6 +35,8 @@ from .schemas import (
     AdminMe,
     AdminTicketDetail,
     AuditPage,
+    ConversationDetail,
+    ConversationPage,
     TicketActionResult,
     TicketDecision,
     TicketEdit,
@@ -108,8 +115,10 @@ def me(session: Admin):
 async def overview(_: Admin):
     counts = await asyncio.to_thread(tickets.dashboard)
     recent = await asyncio.to_thread(events.recent, limit=10)
+    today = await asyncio.to_thread(conversations.today)
     return {
         **counts,
+        "conversations_today": today,
         "recent_activity": recent,
         "integrations": {"slack": settings.slack_enabled, "google_docs": gdocs.configured()},
     }
@@ -202,6 +211,107 @@ async def ticket_message(ref: str, data: TicketMessage, session: Admin, request:
     await asyncio.to_thread(tickets.message, ref, session.name, data.text)
     after = await _acted(ref, before, session, request, "ticket.message", {"text": data.text})
     return TicketActionResult(ticket=after)
+
+
+# ---------------------------------------------------------------- conversations --------------
+
+
+@router.get("/conversations", response_model=ConversationPage)
+async def list_conversations(
+    _: Admin,
+    q: str | None = None,
+    user: str | None = None,
+    channel: Annotated[str | None, Query(pattern="^(chat|voice|system)$")] = None,
+    since: Annotated[datetime | None, Query(alias="from")] = None,
+    until: Annotated[datetime | None, Query(alias="to")] = None,
+    has_ticket: bool | None = None,
+    archived: bool | None = None,
+    blocked: bool | None = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Limit = 50,
+):
+    items, total = await asyncio.to_thread(
+        conversations.search, q, user, channel, since, until, has_ticket, archived, blocked, page, limit
+    )
+    return ConversationPage(items=items, total=total, page=page, limit=limit)
+
+
+@router.get("/conversations/{session_id}", response_model=ConversationDetail)
+async def conversation_detail(session_id: str, _: Admin):
+    return await asyncio.to_thread(conversations.detail, session_id)
+
+
+@router.post("/conversations/{session_id}/archive")
+async def conversation_archive(session_id: str, session: Admin, request: Request):
+    await asyncio.to_thread(conversations.detail, session_id)  # 404 for an unknown conversation
+    result = await asyncio.to_thread(archives.request, session_id, session.name)
+    await asyncio.to_thread(
+        audit.record, session.name, "conversation.archive", request, "conversation", session_id, None, result
+    )
+    return {"session_id": session_id, **result}
+
+
+def _download(filename: str, text: str, media_type: str) -> PlainTextResponse:
+    return PlainTextResponse(
+        text, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@router.get("/conversations/{session_id}/export")
+async def conversation_export(
+    session_id: str,
+    session: Admin,
+    request: Request,
+    format: Annotated[str, Query(pattern="^(md|txt)$")] = "md",
+):
+    filename, text = await asyncio.to_thread(conversations.export, session_id, format)
+    await asyncio.to_thread(
+        audit.record,
+        session.name,
+        "conversation.export",
+        request,
+        "conversation",
+        session_id,
+        None,
+        {"format": format},
+    )
+    return _download(filename, text, "text/markdown" if format == "md" else "text/plain")
+
+
+@router.get("/conversations/{session_id}/archives/{archive_id}/download")
+async def archive_download(session_id: str, archive_id: int, session: Admin, request: Request):
+    archive = await asyncio.to_thread(archives.transcript, session_id, archive_id)
+    if archive is None or not archive["transcript"]:
+        raise HTTPException(status_code=404, detail="archive not found")
+    await asyncio.to_thread(
+        audit.record,
+        session.name,
+        "conversation.export",
+        request,
+        "conversation",
+        session_id,
+        None,
+        {"archive_id": archive_id},
+    )
+    return _download(
+        f"{archive['title'].replace(' ', '-').replace(':', '')}.txt", archive["transcript"], "text/plain"
+    )
+
+
+@router.delete("/conversations/{session_id}")
+async def conversation_delete(session_id: str, session: Admin, request: Request):
+    result = await asyncio.to_thread(conversations.delete, session_id, session.name)
+    await asyncio.to_thread(
+        audit.record,
+        session.name,
+        "conversation.delete",
+        request,
+        "conversation",
+        session_id,
+        {"messages": result["messages"], "archives": result["archives"]},
+        result,
+    )
+    return result
 
 
 # ---------------------------------------------------------------- activity and audit ---------

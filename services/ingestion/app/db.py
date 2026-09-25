@@ -111,6 +111,19 @@ def delete_document(doc_id: str) -> None:
         log.warning("could not delete document %s: %s", doc_id, exc)
 
 
+def source_uri(doc_id: str) -> str | None:
+    """Where a document came from (s3://bucket/key), or None when it is not recorded."""
+    if not enabled():
+        return None
+    try:
+        with _connect() as conn:
+            row = conn.execute("SELECT source_uri FROM documents WHERE doc_id = %s", (doc_id,)).fetchone()
+        return row[0] if row else None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not look up document %s: %s", doc_id, exc)
+        return None
+
+
 def list_documents(limit: int = 200) -> list[dict[str, Any]] | None:
     if not enabled():
         return None

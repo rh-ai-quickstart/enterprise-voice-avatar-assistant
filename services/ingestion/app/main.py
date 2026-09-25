@@ -9,7 +9,7 @@ Endpoints
   GET  /v1/jobs, /v1/jobs/{id}  job status
   POST /v1/extract              convert one object and return its text as Markdown (for classification)
   GET  /v1/documents            documents known to the database (501 without a database)
-  DELETE /v1/documents/{doc_id} remove a document's vectors and record
+  DELETE /v1/documents/{doc_id} remove a document's vectors and record; ?purge_object=true also the object
 
 Every POST and DELETE needs Authorization: Bearer $INTERNAL_API_TOKEN (the RAG API and n8n send it).
 """
@@ -160,7 +160,15 @@ async def list_documents():
 
 
 @app.delete("/v1/documents/{doc_id}", dependencies=WRITE)
-async def delete_document(doc_id: str):
+async def delete_document(doc_id: str, purge_object: bool = False):
+    """Vectors and record; with purge_object the object in its bucket too (found from the record)."""
+    removed = None
+    if purge_object:
+        uri = await asyncio.to_thread(db.source_uri, doc_id)
+        if uri and uri.startswith("s3://"):
+            bucket, _, key = uri.removeprefix("s3://").partition("/")
+            await asyncio.to_thread(storage.delete_object, bucket, key)
+            removed = uri
     await asyncio.to_thread(vectorstore.delete_document, doc_id)
     await asyncio.to_thread(db.delete_document, doc_id)
-    return {"deleted": doc_id}
+    return {"deleted": doc_id, "object": removed}

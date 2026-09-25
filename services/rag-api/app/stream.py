@@ -38,6 +38,8 @@ class Hub:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Set while the listener holds a connection with LISTEN in effect
+        self.listening = threading.Event()
 
     # ------------------------------------------------------------ listener thread -------------
 
@@ -63,12 +65,15 @@ class Hub:
             try:
                 with psycopg.connect(settings.database_url, autocommit=True, connect_timeout=5) as conn:
                     conn.execute(f"LISTEN {CHANNEL}")
+                    self.listening.set()
                     log.info("listening for activity events on %s", CHANNEL)
                     backoff = 1.0
                     while not self._stop.is_set():
                         for notice in conn.notifies(timeout=1.0):
                             self._hand_over(notice.payload)
+                self.listening.clear()
             except Exception as exc:  # noqa: BLE001 - the database went away; streams catch up when idle
+                self.listening.clear()
                 log.warning("activity listener lost the database (%s); retrying in %.0fs", exc, backoff)
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, 30.0)

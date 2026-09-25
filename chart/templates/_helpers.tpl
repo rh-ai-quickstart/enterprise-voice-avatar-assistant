@@ -159,6 +159,15 @@ same database, encryption key, public URL and service URLs. Pass the root contex
   value: http://rag-api:8080
 - name: INGESTION_URL
   value: http://ingestion:8080
+# Bearer token the workflows send to the RAG API and the ingestion service
+- name: INTERNAL_API_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.admin }}
+      key: INTERNAL_API_TOKEN
+# The workflows post to Slack only when it is on (an IF node in front of every Slack node)
+- name: SLACK_ENABLED
+  value: {{ .Values.integrations.slack.enabled | quote }}
 - name: S3_ENDPOINT_URL
   value: http://minio:9000
 - name: NODE_EXTRA_CA_CERTS

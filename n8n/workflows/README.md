@@ -15,7 +15,15 @@ cluster-specific values.
 | `wf6-sla-escalation.json` | Schedule (every 15 min) | checks for tickets stuck in `pending_approval`; sends a reminder to `#assistant-approvals` after `SLA_REMINDER_MINUTES` (default 60) and escalates priority after `SLA_ESCALATION_MINUTES` (default 240), posting to `#assistant-tickets` |
 | `wf7-knowledge-gap-digest.json` | Schedule (weekdays 9 AM) | fetches unanswered questions from the last 24 hours, groups and ranks them, and posts a digest to `#assistant-knowledge-gaps` so content owners know what to add |
 
-The workflow JSON files live in `chart/files/n8n-workflows/` so the Helm chart can ship them: an init container on the n8n Deployment imports and publishes them on first start (values `n8n.workflows.*`), and creates the Slack credential from `SLACK_BOT_TOKEN` in the integrations secret when it is set.
+The workflow JSON files live in `chart/files/n8n-workflows/` so the Helm chart can ship them: an init container on the n8n Deployment imports and publishes them on first start (values `n8n.workflows.*`), and creates the Slack credential from `SLACK_BOT_TOKEN` in the integrations secret when it is set. Without a token it imports a placeholder credential of the same type, so the workflows are published and ingestion, approvals and archival run with Slack off.
+
+Two rules every workflow follows (`services/rag-api/tests/test_workflows.py` checks them):
+
+- **Slack is optional.** Every Slack node sits behind an IF node named `Slack on? (<node>)` that
+  reads `$env.SLACK_ENABLED` (`integrations.slack.enabled` in the chart). With Slack off the
+  workflow carries on without it; the admin portal is where approvals and notices appear.
+- **Calls to the RAG API and the ingestion service send the internal token**:
+  `Authorization: Bearer {{ $env.INTERNAL_API_TOKEN }}`, from the admin secret.
 
 ## Import
 
@@ -35,7 +43,7 @@ the workflow (menu, *Download*) over the file here and commit it.
 
 | Credential | Used by | Where the value comes from |
 |---|---|---|
-| Slack API (bot token) | WF2, WF3, WF4, WF5 Slack nodes | the Slack app created from `n8n/slack-app-manifest.json`; set the interactivity request URL to `https://<n8n host>/webhook/slack-interactions` |
+| Slack API (bot token) | the Slack nodes of WF2 to WF7 | the Slack app created from `n8n/slack-app-manifest.json`; set the interactivity request URL to `https://<n8n host>/webhook/slack-interactions` |
 | Google Docs OAuth2 | WF5 | a Google Cloud project with the Docs and Drive APIs enabled; also set `GOOGLE_DOCS_FOLDER_ID` in `n8n.extraEnv` |
 
 Open each imported workflow once and pick the credential on the Slack and
@@ -44,12 +52,14 @@ failure so the rest of each workflow still runs.
 
 ## Environment variables read by the workflows
 
-Set through `n8n.extraEnv` in the Helm values, except the first two, which the
+Set through `n8n.extraEnv` in the Helm values, except the first three, which the
 chart always sets.
 
 | Variable | Purpose |
 |---|---|
 | `RAG_API_URL`, `INGESTION_URL` | in-cluster service URLs |
+| `INTERNAL_API_TOKEN` | bearer token for the RAG API and the ingestion service (secret `assistant-admin`) |
+| `SLACK_ENABLED` | `true` posts to Slack; anything else skips the Slack nodes (`integrations.slack.enabled`) |
 | `DOWNSTREAM_URL` | optional HTTP endpoint that receives classified document JSON (WF3) |
 | `GOOGLE_DOCS_FOLDER_ID` | Drive folder for transcripts (WF5); empty skips Google Docs |
 | `SLA_REMINDER_MINUTES` | minutes before a pending ticket gets a Slack reminder (WF6, default 60) |
@@ -70,11 +80,11 @@ curl -s -X POST $N8N/webhook/archive-transcript -H 'Content-Type: application/js
 ```
 
 ```bash
-# WF6 and WF7 are schedule-triggered; test the underlying API endpoints directly:
-# Stale tickets (SLA)
-curl -s $RAG/v1/tickets/stale | python3 -m json.tool
-# Knowledge gap digest
-curl -s $RAG/v1/knowledge-gaps/digest?hours=24 | python3 -m json.tool
+# WF6 and WF7 are schedule-triggered; test the underlying API endpoints directly, from the
+# RAG API pod, which has the internal token in its environment:
+rag() { oc exec deploy/rag-api -n voice-avatar-assistant -- sh -c "curl -s -H \"Authorization: Bearer \$INTERNAL_API_TOKEN\" http://localhost:8080$1"; }
+rag /v1/tickets/stale | python3 -m json.tool                     # stale tickets (SLA)
+rag '/v1/knowledge-gaps/digest?hours=24' | python3 -m json.tool  # knowledge gap digest
 ```
 
 Executions and their inputs and outputs are visible under *Executions* in n8n.

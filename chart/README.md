@@ -1,6 +1,6 @@
 # enterprise-voice-avatar-assistant Helm chart
 
-Deploys the whole quickstart into one OpenShift project: the datastores (PostgreSQL, Qdrant, MinIO), n8n with the workflows shipped in `files/n8n-workflows/`, a self-hosted LiveKit server with TURN over TLS, the application services built from this repository (frontend, RAG API, ingestion, voice agent), and, optionally, the models as vLLM InferenceServices on OpenShift AI. Everything runs under the restricted SCC as a regular project user; no cluster-admin permission is needed.
+Deploys the whole quickstart into one OpenShift project: the datastores (PostgreSQL, Qdrant, a VersityGW S3 object store), n8n with the workflows shipped in `files/n8n-workflows/`, a self-hosted LiveKit server with TURN over TLS, the application services built from this repository (frontend, RAG API, ingestion, voice agent), and, optionally, the models as vLLM InferenceServices on OpenShift AI. Everything runs under the restricted SCC as a regular project user; no cluster-admin permission is needed.
 
 The top-level [README](../README.md) covers requirements, the deployment walkthrough, validation and troubleshooting. This file is the reference for the chart itself.
 
@@ -35,8 +35,8 @@ helm uninstall assistant -n ${PROJECT}            # keeps PVCs and Secrets; dele
 
 | Component | Kind | Notes |
 |---|---|---|
-| postgres, qdrant, minio | Deployment, Service, PVC | Fixed service names so workflows and configuration stay stable across release names |
-| minio-setup | Job (Argo CD `Sync` hook) | Creates the buckets and the bucket notifications to n8n |
+| postgres, qdrant, object-store | Deployment, Service, PVC | Fixed service names so workflows and configuration stay stable across release names |
+| object-store | Route, ConfigMap | VersityGW's web UI at `/ui/`; the event filter (new objects only) for its notifications to n8n. The ingestion service creates the buckets |
 | n8n | Deployment, PVC, Route | Init container imports and publishes the workflows on first start (`n8n.workflows`) |
 | livekit | Deployment, Routes | WebSocket signaling Route plus a passthrough Route for TURN over TLS (`livekit.turn`) |
 | llm, stt, embeddings, guardrails | ServingRuntime, InferenceService | Only when `deploy: true`; Recreate strategy and external autoscaler class so an update never needs a second GPU |
@@ -72,12 +72,12 @@ Application images built from this repository and published by CI as <registry>/
 
 ### `secrets`
 
-Names of the pre-created Secrets. Keys per secret: postgres:     POSTGRESQL_USER, POSTGRESQL_PASSWORD, POSTGRESQL_DATABASE, DATABASE_URL minio:        MINIO_ROOT_USER, MINIO_ROOT_PASSWORD n8n:          N8N_ENCRYPTION_KEY livekit:      LIVEKIT_API_KEY, LIVEKIT_API_SECRET models:       LLM_API_KEY, STT_API_KEY, TTS_API_KEY, EMBEDDINGS_API_KEY, GUARDRAILS_API_KEY, HF_TOKEN integrations: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SIMLI_API_KEY, SIMLI_FACE_ID, TAVUS_API_KEY, TAVUS_FACE_ID, TAVUS_PAL_ID (optional), GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID admin:        ADMIN_PASSWORD, ADMIN_SESSION_SECRET, INTERNAL_API_TOKEN (required: the RAG API, the ingestion service and n8n do not start without it)
+Names of the pre-created Secrets. Keys per secret: postgres:     POSTGRESQL_USER, POSTGRESQL_PASSWORD, POSTGRESQL_DATABASE, DATABASE_URL objectStore:  S3_ACCESS_KEY, S3_SECRET_KEY n8n:          N8N_ENCRYPTION_KEY livekit:      LIVEKIT_API_KEY, LIVEKIT_API_SECRET models:       LLM_API_KEY, STT_API_KEY, TTS_API_KEY, EMBEDDINGS_API_KEY, GUARDRAILS_API_KEY, HF_TOKEN integrations: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SIMLI_API_KEY, SIMLI_FACE_ID, TAVUS_API_KEY, TAVUS_FACE_ID, TAVUS_PAL_ID (optional), GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID admin:        ADMIN_PASSWORD, ADMIN_SESSION_SECRET, INTERNAL_API_TOKEN (required: the RAG API, the ingestion service and n8n do not start without it)
 
 | Key | Default | Description |
 |---|---|---|
 | `secrets.postgres` | `assistant-postgres` | Name of the pre-created Secret holding the keys listed above. |
-| `secrets.minio` | `assistant-minio` | Name of the pre-created Secret holding the keys listed above. |
+| `secrets.objectStore` | `assistant-object-store` | Name of the pre-created Secret holding the keys listed above. |
 | `secrets.n8n` | `assistant-n8n` | Name of the pre-created Secret holding the keys listed above. |
 | `secrets.livekit` | `assistant-livekit` | Name of the pre-created Secret holding the keys listed above. |
 | `secrets.models` | `assistant-models` | Name of the pre-created Secret holding the keys listed above. |
@@ -132,22 +132,23 @@ Datastores and infrastructure. All run under the restricted SCC (no fixed UID).
 | `qdrant.resources.limits.cpu` | `"1"` | CPU limit. |
 | `qdrant.resources.limits.memory` | `2Gi` | Memory limit. |
 
-### `minio`
+### `objectStore`
+
+S3-compatible object storage: VersityGW (https://github.com/versity/versitygw), an Apache 2.0 S3 gateway that keeps the objects as files on its volume. Every new object is announced to n8n (WF2), which ingests or classifies the ones in `eventBuckets`.
 
 | Key | Default | Description |
 |---|---|---|
-| `minio.enabled` | `true` | Deploy this component. |
-| `minio.image` | `quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z` | Container image (full reference). |
-| `minio.mcImage` | `quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z` | MinIO client image used by the bucket setup Job. |
-| `minio.buckets` | `[documents, inbox, transcripts]` | Buckets created after install. `eventBuckets` also notify n8n on new objects. |
-| `minio.eventBuckets` | `[documents, inbox]` | Buckets whose uploads notify n8n. |
-| `minio.storage` | `20Gi` | Size of the persistent volume. |
-| `minio.console.route` | `true` | Expose through an OpenShift Route. |
-| `minio.console.publicHost` | `""` | Public hostname; computed from `global.domain` when empty. |
-| `minio.resources.requests.cpu` | `250m` | CPU request. |
-| `minio.resources.requests.memory` | `512Mi` | Memory request. |
-| `minio.resources.limits.cpu` | `"1"` | CPU limit. |
-| `minio.resources.limits.memory` | `1Gi` | Memory limit. |
+| `objectStore.enabled` | `true` | Deploy this component. |
+| `objectStore.image` | `ghcr.io/versity/versitygw:v1.8.0` | Container image (full reference). |
+| `objectStore.buckets` | `[documents, inbox, transcripts]` | Buckets the ingestion service creates when they are missing. |
+| `objectStore.eventBuckets` | `[documents, inbox]` | Buckets whose new objects WF2 acts on: documents are indexed, inbox files classified. (transcripts are indexed by the archival workflow itself.) |
+| `objectStore.storage` | `20Gi` | Size of the persistent volume. |
+| `objectStore.console.route` | `true` | Expose through an OpenShift Route. |
+| `objectStore.console.publicHost` | `""` | Public hostname; computed from `global.domain` when empty. |
+| `objectStore.resources.requests.cpu` | `100m` | CPU request. |
+| `objectStore.resources.requests.memory` | `128Mi` | Memory request. |
+| `objectStore.resources.limits.cpu` | `"1"` | CPU limit. |
+| `objectStore.resources.limits.memory` | `512Mi` | Memory limit. |
 
 ### `n8n`
 

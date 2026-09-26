@@ -180,8 +180,8 @@ Four tabs:
   key and value table.
 - **Ingestion jobs.** Recent jobs with status, duration and the error for failed ones.
 - **Upload.** Drop files into `documents` (to index) or `inbox` (to classify). The object is written to
-  the bucket and the bucket notification drives the usual workflows, the same path as the MinIO
-  console and `scripts/load-sample-docs.sh`. Up to 25 MiB per file, the proxy's existing limit.
+  the bucket and the object store's notification drives the usual workflows, the same path as its
+  web UI and `scripts/load-sample-docs.sh`. Up to 25 MiB per file, the proxy's existing limit.
 
 ### Activity
 

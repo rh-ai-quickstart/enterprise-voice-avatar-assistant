@@ -172,7 +172,10 @@ same database, encryption key, public URL and service URLs. Pass the root contex
 - name: NODE_FUNCTION_ALLOW_BUILTIN
   value: crypto
 - name: S3_ENDPOINT_URL
-  value: http://minio:9000
+  value: http://object-store:7070
+# The buckets whose new objects WF2 ingests or classifies (objectStore.eventBuckets)
+- name: EVENT_BUCKETS
+  value: {{ join "," .Values.objectStore.eventBuckets | quote }}
 - name: NODE_EXTRA_CA_CERTS
   value: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
 {{- range $k, $v := .Values.n8n.extraEnv }}

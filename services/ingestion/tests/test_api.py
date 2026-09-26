@@ -19,7 +19,7 @@ def test_doc_id_is_stable():
 def test_events_for_other_buckets_are_ignored():
     with TestClient(app) as client:
         response = client.post(
-            "/v1/events/minio",
+            "/v1/events/s3",
             json={"EventName": "s3:ObjectCreated:Put", "Key": "inbox/invoice.pdf"},
         )
     assert response.status_code == 200
@@ -41,10 +41,10 @@ def test_write_routes_refuse_a_missing_or_wrong_token(monkeypatch):
     monkeypatch.setattr(settings, "internal_api_token", "tok")
     event = {"EventName": "s3:ObjectCreated:Put", "Key": "inbox/invoice.pdf"}
     with TestClient(app) as client:
-        assert client.post("/v1/events/minio", json=event).status_code == 401
-        assert client.post("/v1/events/minio", json=event, headers={"Authorization": "Bearer no"}).status_code == 401
+        assert client.post("/v1/events/s3", json=event).status_code == 401
+        assert client.post("/v1/events/s3", json=event, headers={"Authorization": "Bearer no"}).status_code == 401
         assert client.delete("/v1/documents/d1").status_code == 401
-        assert client.post("/v1/events/minio", json=event, headers={"Authorization": "Bearer tok"}).status_code == 200
+        assert client.post("/v1/events/s3", json=event, headers={"Authorization": "Bearer tok"}).status_code == 200
         # Reads stay open inside the cluster
         assert client.get("/v1/jobs").status_code == 200
 
@@ -66,3 +66,25 @@ def test_delete_can_purge_the_object(monkeypatch):
         # Not recorded: the vectors go, the object cannot be found
         assert client.delete("/v1/documents/d2", params={"purge_object": "true"}).json()["object"] is None
     assert ("vectors", "d2") in calls and ("record", "d2") in calls
+
+
+def test_missing_buckets_are_created(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    from app import storage
+
+    existing, created = {"documents"}, []
+
+    class Client:
+        def head_bucket(self, Bucket):
+            if Bucket not in existing:
+                raise ClientError({"Error": {"Code": "404"}}, "HeadBucket")
+
+        def create_bucket(self, Bucket):
+            created.append(Bucket)
+            existing.add(Bucket)
+
+    monkeypatch.setattr(storage, "client", lambda: Client())
+    assert storage.ensure_buckets(["documents", "inbox", "transcripts"]) == ["inbox", "transcripts"]
+    assert storage.ensure_buckets(["documents", "inbox", "transcripts"]) == []
+    assert created == ["inbox", "transcripts"]

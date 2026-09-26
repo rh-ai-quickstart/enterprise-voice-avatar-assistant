@@ -5,12 +5,12 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "minio-event",
+        "path": "object-created",
         "responseMode": "onReceived",
         "options": {}
       },
       "id": "4dbc8f26-49b0-5e63-aa63-f54e6724036d",
-      "name": "MinIO event",
+      "name": "Object created",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
@@ -21,10 +21,10 @@
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst out = [];\nfor (const r of body.Records || []) {\n  const bucket = r.s3 && r.s3.bucket && r.s3.bucket.name;\n  const rawKey = (r.s3 && r.s3.object && r.s3.object.key) || '';\n  const key = decodeURIComponent(rawKey.replace(/\\+/g, ' '));\n  const event = r.eventName || body.EventName || '';\n  if (bucket && key) out.push({ json: { bucket, key, event, created: event.includes('ObjectCreated') } });\n}\nif (!out.length && body.Key) {\n  const [bucket, ...rest] = String(body.Key).split('/');\n  const event = body.EventName || '';\n  out.push({ json: { bucket, key: rest.join('/'), event, created: event.includes('ObjectCreated') } });\n}\nreturn out;"
+        "jsCode": "// S3 bucket notifications from the object store (VersityGW): AWS-style Records. VersityGW sends\n// the object key as it is; set S3_EVENT_KEYS_ENCODED=true for a store that URL-encodes it (AWS S3).\n// Only the buckets in EVENT_BUCKETS go on: transcripts are indexed by the archival workflow itself.\nconst body = $input.first().json.body || $input.first().json;\nconst buckets = String($env.EVENT_BUCKETS || 'documents,inbox').split(',').map((b) => b.trim()).filter(Boolean);\nconst encoded = String($env.S3_EVENT_KEYS_ENCODED || '').toLowerCase() === 'true';\nconst decode = (key) => { try { return decodeURIComponent(key.replace(/\\+/g, ' ')); } catch (e) { return key; } };\nconst out = [];\nfor (const r of body.Records || []) {\n  const bucket = r.s3 && r.s3.bucket && r.s3.bucket.name;\n  const rawKey = (r.s3 && r.s3.object && r.s3.object.key) || '';\n  const key = encoded ? decode(rawKey) : rawKey;\n  const event = r.eventName || '';\n  if (bucket && key && buckets.includes(bucket)) out.push({ json: { bucket, key, event, created: event.includes('ObjectCreated') } });\n}\nreturn out;"
       },
       "id": "ec5a5176-c2e7-50f9-8ffd-95b120d2e7cd",
-      "name": "Parse MinIO event",
+      "name": "Parse object event",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -287,18 +287,18 @@
     }
   ],
   "connections": {
-    "MinIO event": {
+    "Object created": {
       "main": [
         [
           {
-            "node": "Parse MinIO event",
+            "node": "Parse object event",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Parse MinIO event": {
+    "Parse object event": {
       "main": [
         [
           {

@@ -24,8 +24,10 @@ data:
   # Datastores
   QDRANT_URL: "http://qdrant:6333"
   QDRANT_COLLECTION: {{ .Values.qdrant.collection | quote }}
-  S3_ENDPOINT_URL: "http://minio:9000"
-  S3_BUCKET: {{ index .Values.minio.buckets 0 | quote }}
+  S3_ENDPOINT_URL: "http://object-store:7070"
+  S3_BUCKET: {{ index .Values.objectStore.buckets 0 | quote }}
+  # Created by the ingestion service when missing
+  S3_BUCKETS: {{ join "," .Values.objectStore.buckets | quote }}
   S3_INBOX_BUCKET: "inbox"
   S3_TRANSCRIPTS_BUCKET: "transcripts"
   # Services

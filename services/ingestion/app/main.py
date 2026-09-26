@@ -5,7 +5,8 @@ Endpoints
   GET  /readyz                  readiness (Qdrant and the documents bucket reachable)
   POST /v1/ingest               ingest one object from a bucket (202, returns a job)
   POST /v1/ingest/upload        upload a file; it is stored in the bucket and ingested (202)
-  POST /v1/events/minio         MinIO bucket notification webhook (created -> ingest, removed -> delete)
+  POST /v1/events/s3            S3 bucket notification (created -> ingest, removed -> delete); the chart
+                                routes notifications through n8n (WF2) instead
   GET  /v1/jobs, /v1/jobs/{id}  job status
   POST /v1/extract              convert one object and return its text as Markdown (for classification)
   GET  /v1/documents            documents known to the database (501 without a database)
@@ -25,7 +26,7 @@ from fastapi.responses import JSONResponse
 
 from . import db, storage, vectorstore
 from .config import settings
-from .events import CREATED, REMOVED, parse_minio_event
+from .events import CREATED, REMOVED, parse_s3_event
 from .jobs import Job, JobManager
 from .pipeline import extract_text, make_doc_id
 from .schemas import (
@@ -50,10 +51,26 @@ async def lifespan(_: FastAPI):
     if not settings.internal_api_token:
         log.warning("INTERNAL_API_TOKEN is empty: the write routes are open to anyone who can reach this service")
     await asyncio.to_thread(db.init_schema)
+    buckets = asyncio.create_task(_ensure_buckets())
     yield
+    buckets.cancel()
 
 
 app = FastAPI(title="Enterprise voice avatar assistant - ingestion", version="0.1.0", lifespan=lifespan)
+
+
+async def _ensure_buckets() -> None:
+    """Create the missing buckets, retrying until the object store answers (it may start later)."""
+    delay = 2.0
+    while True:
+        try:
+            created = await asyncio.to_thread(storage.ensure_buckets, settings.bucket_list)
+            log.info("buckets ready: %s%s", ", ".join(settings.bucket_list), f" (created {', '.join(created)})" if created else "")
+            return
+        except Exception as exc:  # noqa: BLE001 - the object store is not up yet
+            log.info("object store not ready (%s); retrying in %.0fs", type(exc).__name__, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 30.0)
 
 
 def require_internal_token(request: Request) -> None:
@@ -110,10 +127,10 @@ async def ingest_upload(file: Annotated[UploadFile, File()], bucket: Annotated[s
     return IngestAccepted(job_id=job.job_id, doc_id=doc_id, status=job.status)
 
 
-@app.post("/v1/events/minio", response_model=EventResponse, dependencies=WRITE)
-async def minio_event(event: dict):
+@app.post("/v1/events/s3", response_model=EventResponse, dependencies=WRITE)
+async def s3_event(event: dict):
     response = EventResponse()
-    for kind, bucket, key in parse_minio_event(event):
+    for kind, bucket, key in parse_s3_event(event):
         if bucket not in settings.ingest_bucket_set:
             response.ignored.append(f"{bucket}/{key}")
             continue

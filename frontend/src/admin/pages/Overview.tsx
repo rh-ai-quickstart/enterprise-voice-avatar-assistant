@@ -60,6 +60,19 @@ export function OverviewPage() {
           </CardFooter>
         </Card>
         <Card isCompact>
+          <CardTitle>Conversations today</CardTitle>
+          <CardBody>
+            <div className="admin-tile__number">{o.conversations_today.chat + o.conversations_today.voice}</div>
+            <Content component="small">
+              {o.conversations_today.chat} chat, {o.conversations_today.voice} voice
+              {o.conversations_today.blocked > 0 && <>; {o.conversations_today.blocked} with a message blocked by the guardrails</>}
+            </Content>
+          </CardBody>
+          <CardFooter>
+            <Link to="/conversations">Open conversations</Link>
+          </CardFooter>
+        </Card>
+        <Card isCompact>
           <CardTitle>Tickets in the last 7 days</CardTitle>
           <CardBody>
             {week.length === 0 ? (

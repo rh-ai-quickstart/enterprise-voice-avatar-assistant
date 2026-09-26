@@ -91,8 +91,74 @@ export interface ActivityEvent {
   created_at: string;
 }
 
+export interface Citation {
+  n: number;
+  used: boolean;
+  doc_id: string;
+  source: string;
+  page: number | null;
+  snippet: string;
+  score: number;
+}
+
+export interface ConversationSummary {
+  session_id: string;
+  user_id: string | null;
+  channel: string | null;
+  started: string;
+  last_activity: string;
+  messages: number;
+  blocked: number;
+  tickets: number;
+  archives: number;
+  /** With a search: the matching messages, the matched words between \x01 and \x02 */
+  matches: { id: number; role: string; snippet: string }[];
+}
+
+export interface ConversationPage {
+  items: ConversationSummary[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface ArchiveRecord {
+  id: number;
+  session_id: string;
+  title: string;
+  doc_url: string | null;
+  object_key: string | null;
+  status: "requested" | "indexed" | "failed";
+  error: string | null;
+  requested_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationDetail {
+  session_id: string;
+  user_id: string | null;
+  channel: string | null;
+  started: string;
+  updated_at: string;
+  messages: { id: number; role: string; content: string; citations: Citation[]; blocked: boolean; created_at: string }[];
+  notices: { id: number; ticket_ref: string | null; kind: string; text: string; created_at: string; delivered_at: string | null }[];
+  tickets: { ticket_ref: string; title: string; status: TicketStatus; priority: string; category: string | null; created_at: string }[];
+  archives: ArchiveRecord[];
+}
+
+export interface DeleteResult {
+  session_id: string;
+  messages: number;
+  notices: number;
+  archives: number;
+  tickets_kept: string[];
+  google_docs_kept: string[];
+}
+
 export interface Overview {
   sla: Sla;
+  conversations_today: { chat: number; voice: number; blocked: number };
   pending: { count: number; oldest_ref: string | null; oldest_minutes: number | null };
   approved_not_fulfilled: { count: number; oldest_ref: string | null };
   tickets_last_7_days: Partial<Record<TicketStatus, number>>;

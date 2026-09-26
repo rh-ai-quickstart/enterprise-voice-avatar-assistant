@@ -17,6 +17,7 @@ import {
 } from "@patternfly/react-core";
 import { ExternalLinkAltIcon } from "@patternfly/react-icons/dist/esm/icons/external-link-alt-icon";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router";
 import { api } from "../api";
 import { duration, when, words } from "../format";
 import type { TicketDetail } from "../types";
@@ -109,8 +110,15 @@ function Details({ ticket }: { ticket: TicketDetail }) {
       {ticket.conversation ? (
         <DescriptionList isHorizontal isCompact>
           <Field term="Session">
-            <code>{ticket.conversation.session_id}</code>
-            {!ticket.conversation.exists && " (conversation deleted)"}
+            {ticket.conversation.exists ? (
+              <Link to={`/conversations/${ticket.conversation.session_id}`}>
+                <code>{ticket.conversation.session_id.slice(0, 8)}</code> (open)
+              </Link>
+            ) : (
+              <>
+                <code>{ticket.conversation.session_id.slice(0, 8)}</code> (conversation deleted)
+              </>
+            )}
           </Field>
           {ticket.conversation.exists && (
             <>

@@ -1,4 +1,14 @@
-import type { ActivityEvent, Me, Overview, TicketActionResult, TicketDetail, TicketPage } from "./types";
+import type {
+  ActivityEvent,
+  ConversationDetail,
+  ConversationPage,
+  DeleteResult,
+  Me,
+  Overview,
+  TicketActionResult,
+  TicketDetail,
+  TicketPage,
+} from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
@@ -36,6 +46,10 @@ export async function call<T>(path: string, options: { method?: string; json?: u
   return response.json() as Promise<T>;
 }
 
+export type ConversationFilters = Partial<
+  Record<"q" | "user" | "channel" | "from" | "to" | "has_ticket" | "archived" | "blocked", string>
+> & { page?: number; limit?: number };
+
 export type TicketFilters = Partial<
   Record<"status" | "category" | "priority" | "requester" | "channel" | "q" | "from" | "to" | "order", string>
 > & { page?: number; limit?: number };
@@ -68,6 +82,18 @@ export const api = {
     call<TicketActionResult>(`/tickets/${ref(r)}`, { method: "PATCH", json: changes }),
   message: (r: string, text: string) =>
     call<TicketActionResult>(`/tickets/${ref(r)}/message`, { method: "POST", json: { text } }),
+  conversations: (filters: ConversationFilters) => call<ConversationPage>(`/conversations${query(filters)}`),
+  conversation: (id: string) => call<ConversationDetail>(`/conversations/${ref(id)}`),
+  archive: (id: string) =>
+    call<{ requested: boolean; doc_url: string | null; archive_id: number | null; reason?: string }>(
+      `/conversations/${ref(id)}/archive`,
+      { method: "POST" },
+    ),
+  deleteConversation: (id: string) => call<DeleteResult>(`/conversations/${ref(id)}`, { method: "DELETE" }),
+  /** Links the browser downloads with the session cookie (GET needs no extra header) */
+  exportUrl: (id: string, format: "md" | "txt") => `${API_BASE}/v1/admin/conversations/${ref(id)}/export?format=${format}`,
+  archiveUrl: (id: string, archiveId: number) =>
+    `${API_BASE}/v1/admin/conversations/${ref(id)}/archives/${archiveId}/download`,
   activity: (params: { kind?: string; severity?: string; limit?: number }) =>
     call<{ items: ActivityEvent[]; next_before_id: number | null }>(`/activity${query(params)}`),
 };

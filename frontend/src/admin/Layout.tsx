@@ -31,6 +31,12 @@ export function invalidateFor(client: QueryClient, message: StreamMessage) {
   if (message.ref_type === "ticket" || message.kind.startsWith("ticket.")) {
     client.invalidateQueries({ queryKey: ["tickets"] });
     if (message.ref_id) client.invalidateQueries({ queryKey: ["ticket", message.ref_id] });
+    // A ticket's conversation lists it, and its notices
+    client.invalidateQueries({ queryKey: ["conversation"] });
+  }
+  if (message.ref_type === "conversation") {
+    client.invalidateQueries({ queryKey: ["conversations"] });
+    if (message.ref_id) client.invalidateQueries({ queryKey: ["conversation", message.ref_id] });
   }
 }
 
@@ -44,6 +50,7 @@ const SECTIONS = [
   { to: "/", label: "Overview", component: linkTo("/") },
   { to: "/approvals", label: "Approvals", component: linkTo("/approvals") },
   { to: "/tickets", label: "Tickets", component: linkTo("/tickets") },
+  { to: "/conversations", label: "Conversations", component: linkTo("/conversations") },
 ];
 
 const STREAM_LABELS: Record<StreamState, { text: string; color: "green" | "grey" | "orange"; title: string }> = {

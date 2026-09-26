@@ -4,6 +4,8 @@ import { Navigate, Route, Routes } from "react-router";
 import { ApiError, api } from "./api";
 import { Layout } from "./Layout";
 import { ApprovalsPage } from "./pages/Approvals";
+import { ConversationPage } from "./pages/Conversation";
+import { ConversationsPage } from "./pages/Conversations";
 import { Login } from "./pages/Login";
 import { OverviewPage } from "./pages/Overview";
 import { TicketsPage } from "./pages/Tickets";
@@ -53,6 +55,8 @@ export function App() {
         <Route path="/approvals/:ref" element={<ApprovalsPage />} />
         <Route path="/tickets" element={<TicketsPage />} />
         <Route path="/tickets/:ref" element={<TicketsPage />} />
+        <Route path="/conversations" element={<ConversationsPage />} />
+        <Route path="/conversations/:id" element={<ConversationPage />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

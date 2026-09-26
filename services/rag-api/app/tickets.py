@@ -465,10 +465,16 @@ def notify_decision(ticket: Ticket, decision: str, actor: str, note: str | None)
             response = http.post(url, json=body, headers=auth.internal_headers())
         if response.status_code >= 400:
             log.warning("n8n decision webhook returned %s", response.status_code)
+            events.integration_error(
+                "n8n", f"Portal decision on {ticket.ticket_ref}: n8n answered {response.status_code}"
+            )
             return False
         return True
     except httpx.HTTPError as exc:
         log.warning("n8n decision webhook unreachable: %s", exc)
+        events.integration_error(
+            "n8n", f"Portal decision on {ticket.ticket_ref}: n8n unreachable", str(exc)[:500]
+        )
         return False
 
 
@@ -552,10 +558,16 @@ def notify_n8n(ticket: Ticket, classification: dict[str, Any], channel: str) -> 
             response = http.post(url, json=body, headers=auth.internal_headers())
         if response.status_code >= 400:
             log.warning("n8n request webhook returned %s", response.status_code)
+            events.integration_error(
+                "n8n", f"Request intake: n8n answered {response.status_code} for {ticket.ticket_ref}"
+            )
             return False
         return True
     except httpx.HTTPError as exc:
         log.warning("n8n request webhook unreachable: %s", exc)
+        events.integration_error(
+            "n8n", f"Request intake: n8n unreachable for {ticket.ticket_ref}", str(exc)[:500]
+        )
         return False
 
 

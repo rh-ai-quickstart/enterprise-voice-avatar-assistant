@@ -60,6 +60,8 @@ scripts send. Public routes are marked below.
 | POST | `/v1/admin/documents/upload` | multipart `file` (up to 25 MiB) and `bucket` (`documents` to index, `inbox` to classify): the ingestion service writes the object and the object store's notification starts the workflow |
 | POST | `/v1/admin/documents/{doc_id}/reingest`, DELETE `/v1/admin/documents/{doc_id}` | through the ingestion service; delete removes the vectors, the record and the object |
 | GET | `/v1/admin/ingestion/jobs` | recent ingestion jobs with their status, duration and error |
+| GET | `/v1/admin/integrations` | Slack, Google Docs, avatar, n8n and each model: `off`, `misconfigured` (a key missing), `failing` (the last test failed, or an `integration.error` came after the last passing test) or `on`, the settings without secrets, the last test and error |
+| POST | `/v1/admin/integrations/{name}/test` | a live test, recorded as `integration.test`: Slack `auth.test` and the five channels with the app in each; the Drive folder writable by the service account; the Tavus faces found with the key; all seven workflows active in n8n (`N8N_API_KEY`); the served model name in `GET /models` |
 | GET | `/v1/admin/activity` | the activity feed, newest first: `kind`, `severity`, `from`, `to`, `before_id`, `limit` |
 | GET | `/v1/admin/audit` | who did what in the portal: `actor`, `action`, `from`, `to`, `before_id`, `limit` |
 | GET | `/v1/admin/stream` | server-sent events (`event: activity`, `{id, kind, ref_type, ref_id}`) fed by PostgreSQL `LISTEN admin_events`; `Last-Event-ID` replays what was missed |

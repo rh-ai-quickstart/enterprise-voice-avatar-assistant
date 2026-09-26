@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 
+from . import events
 from .config import settings
 
 log = logging.getLogger("rag.gdocs")
@@ -77,6 +78,11 @@ def create_document(title: str, text: str) -> str | None:
             log.warning(
                 "Google Drive refused the document (%s): %s", response.status_code, response.text[:300]
             )
+            events.integration_error(
+                "google_docs",
+                f"Google Drive refused the transcript document ({response.status_code})",
+                response.text[:500],
+            )
             return None
         body = response.json()
         link = body.get("webViewLink") or f"https://docs.google.com/document/d/{body['id']}/edit"
@@ -84,4 +90,7 @@ def create_document(title: str, text: str) -> str | None:
         return link
     except Exception as exc:  # noqa: BLE001 - network, auth or JSON problems are all "no document"
         log.warning("Google Doc not created: %s", exc)
+        events.integration_error(
+            "google_docs", "The transcript document was not created", f"{type(exc).__name__}: {exc}"[:500]
+        )
         return None

@@ -18,6 +18,7 @@ GET  /documents, /documents/{doc_id}  indexed and classified documents; one with
 POST /documents/upload                multipart file and bucket (documents or inbox)
 POST /documents/{doc_id}/reingest, DELETE /documents/{doc_id}   through the ingestion service
 GET  /ingestion/jobs                  recent ingestion jobs
+GET  /integrations                    each integration's state; POST /integrations/{name}/test runs a live test
 GET  /activity                        the activity feed, newest first
 GET  /audit                           the audit log, newest first
 GET  /stream                          server-sent events for live updates (stream.py)
@@ -37,6 +38,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Path,
     Query,
     Request,
     Response,
@@ -44,7 +46,18 @@ from fastapi import (
 )
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
-from . import archives, audit, auth, conversations, documents, events, gdocs, knowledge_gaps, stream, tickets
+from . import (
+    archives,
+    audit,
+    auth,
+    conversations,
+    documents,
+    events,
+    integrations,
+    knowledge_gaps,
+    stream,
+    tickets,
+)
 from .config import settings
 from .schemas import (
     ActivityPage,
@@ -146,7 +159,10 @@ async def overview(_: Admin):
             "top_groups": [{"question": g["question"], "count": g["count"]} for g in week[:3]],
         },
         "recent_activity": recent,
-        "integrations": {"slack": settings.slack_enabled, "google_docs": gdocs.configured()},
+        "integrations": [
+            {"name": i["name"], "label": i["label"], "state": i["state"]}
+            for i in await asyncio.to_thread(integrations.status_all)
+        ],
     }
 
 
@@ -462,6 +478,34 @@ async def document_delete(doc_id: str, session: Admin, request: Request):
 @router.get("/ingestion/jobs")
 async def ingestion_jobs(_: Admin, limit: Limit = 50):
     return {"items": await asyncio.to_thread(documents.jobs, None, limit)}
+
+
+# ---------------------------------------------------------------- integrations ---------------
+
+
+@router.get("/integrations")
+async def integrations_list(_: Admin):
+    return {"items": await asyncio.to_thread(integrations.status_all)}
+
+
+@router.post("/integrations/{name}/test")
+async def integration_test(
+    name: Annotated[str, Path(pattern="^(" + "|".join(integrations.LABELS) + ")$")],
+    session: Admin,
+    request: Request,
+):
+    result = await asyncio.to_thread(integrations.test, name, session.name)
+    await asyncio.to_thread(
+        audit.record,
+        session.name,
+        "integration.test",
+        request,
+        "integration",
+        name,
+        None,
+        {"ok": result["ok"], "checks": result["checks"]},
+    )
+    return result
 
 
 # ---------------------------------------------------------------- activity and audit ---------

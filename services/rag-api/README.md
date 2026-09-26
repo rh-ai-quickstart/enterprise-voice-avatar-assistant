@@ -30,7 +30,7 @@ scripts send. Public routes are marked below.
 | GET | `/v1/tickets/stale` | tickets past the reminder and escalation thresholds (SLA workflow) |
 | POST | `/v1/tickets/stale/escalate` | `?ticket_ref=&current_priority=` raises the priority one step |
 | POST | `/v1/requests` | service request intake: classify, create the ticket, notify n8n |
-| GET | `/v1/knowledge-gaps/digest` | `?hours=24` aggregated low-confidence questions (knowledge-gap workflow) |
+| GET | `/v1/knowledge-gaps/digest` | `?hours=24` open low-confidence questions: counts, the most-asked and the groups (knowledge-gap workflow) |
 | GET | `/v1/voice/token` (public) | LiveKit token; `session_id` maps to room `session-<id>`; `face_id` puts the chosen avatar face in the token |
 | GET | `/v1/voice/faces` (public) | avatar faces to choose from (`AVATAR_FACES`), with the voice each one speaks with; names and thumbnail URLs from Tavus when `TAVUS_API_KEY` is set |
 | GET | `/v1/voice/faces/{id}/poster` (public) | JPEG still of a face for the picker, cut from the Tavus thumbnail video and cached in the pod |
@@ -52,6 +52,9 @@ scripts send. Public routes are marked below.
 | GET | `/v1/admin/conversations/{id}/archives/{archive_id}/download` | the transcript as it was archived |
 | DELETE | `/v1/admin/conversations/{id}` | the conversation, its messages, notices and archive records, and the archived copy in the transcripts bucket and Qdrant (through the ingestion service); tickets are kept, Google Docs are not touched |
 | POST | `/v1/admin/tickets/{ref}/message` | `{"text"}`: a notice in the requester's conversation (409 when the ticket has none) |
+| GET | `/v1/admin/knowledge-gaps` | `status` (`open`, `resolved`, `dismissed`, `all`), `from` (default: seven days ago), `to`, `group` (default true: grouped by meaning, `GAP_GROUP_THRESHOLD`, most-asked wording first; older gaps are embedded on the first request) |
+| POST | `/v1/admin/knowledge-gaps/resolve` | `{"ids", "status": "resolved"\|"dismissed"\|"open", "note"}`; resolved and dismissed gaps leave the open list and the digest |
+| POST | `/v1/admin/knowledge-gaps/{id}/retest` | retrieval for the question now (no language model call): the top passages and whether the best score clears `GAP_SCORE_THRESHOLD` |
 | GET | `/v1/admin/activity` | the activity feed, newest first: `kind`, `severity`, `from`, `to`, `before_id`, `limit` |
 | GET | `/v1/admin/audit` | who did what in the portal: `actor`, `action`, `from`, `to`, `before_id`, `limit` |
 | GET | `/v1/admin/stream` | server-sent events (`event: activity`, `{id, kind, ref_type, ref_id}`) fed by PostgreSQL `LISTEN admin_events`; `Last-Event-ID` replays what was missed |

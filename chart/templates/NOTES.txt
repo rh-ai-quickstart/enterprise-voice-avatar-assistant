@@ -7,8 +7,8 @@ Routes (hosts are assigned by OpenShift when global.domain is empty):
 {{- if .Values.n8n.enabled }}
   n8n            https://{{ include "assistant.publicHost" (dict "root" . "name" "n8n" "override" .Values.n8n.publicHost) | default "<see oc get route n8n>" }}
 {{- end }}
-{{- if and .Values.minio.enabled .Values.minio.console.route }}
-  minio console  https://{{ include "assistant.publicHost" (dict "root" . "name" "minio-console" "override" .Values.minio.console.publicHost) | default "<see oc get route minio-console>" }}
+{{- if and .Values.objectStore.enabled .Values.objectStore.console.route }}
+  object store   https://{{ include "assistant.publicHost" (dict "root" . "name" "object-store" "override" .Values.objectStore.console.publicHost) | default "<see oc get route object-store>" }}/ui/
 {{- end }}
 {{- if .Values.livekit.enabled }}
   livekit        wss://{{ include "assistant.publicHost" (dict "root" . "name" "livekit" "override" .Values.livekit.publicHost) | default "<see oc get route livekit>" }}

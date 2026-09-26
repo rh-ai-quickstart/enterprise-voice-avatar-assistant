@@ -33,13 +33,13 @@ spec:
             - name: S3_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secrets.minio }}
-                  key: MINIO_ROOT_USER
+                  name: {{ .Values.secrets.objectStore }}
+                  key: S3_ACCESS_KEY
             - name: S3_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secrets.minio }}
-                  key: MINIO_ROOT_PASSWORD
+                  name: {{ .Values.secrets.objectStore }}
+                  key: S3_SECRET_KEY
             {{- if .Values.qdrant.apiKeySecret }}
             - name: QDRANT_API_KEY
               valueFrom:

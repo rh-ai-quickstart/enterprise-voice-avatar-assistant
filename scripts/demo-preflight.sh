@@ -30,7 +30,7 @@ echo "=== connectivity test pod ==="
 if oc get route n8n -n "$NS" >/dev/null 2>&1; then
   N8N="https://$(oc get route n8n -n "$NS" -o jsonpath='{.spec.host}')"
   echo "=== n8n webhooks ==="
-  for p in chat minio-event classify request-intake slack-interactions archive-transcript; do
+  for p in chat object-created classify request-intake slack-interactions archive-transcript; do
     msg=$(curl -s --max-time 15 "$N8N/webhook/$p" | python3 -c "import sys,json
 try: print(json.load(sys.stdin).get('message',''))
 except Exception: print('no JSON response')")

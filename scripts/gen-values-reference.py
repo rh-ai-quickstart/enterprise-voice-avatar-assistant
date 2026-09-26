@@ -86,7 +86,6 @@ GENERIC = {
     "topK": "Number of chunks retrieved per question.",
     "timezone": "Time zone for schedules and logs.",
     "voice": "Kokoro voice (af_*/bf_* female, am_*/bm_* male).",
-    "mcImage": "MinIO client image used by the bucket setup Job.",
     "buckets": "Buckets created after install.",
     "eventBuckets": "Buckets whose uploads notify n8n.",
     "logLevel": "Log level.",

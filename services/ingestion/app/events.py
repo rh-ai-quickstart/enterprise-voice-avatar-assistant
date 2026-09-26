@@ -1,4 +1,4 @@
-"""Parsing of MinIO (S3-style) bucket notifications."""
+"""Parsing of S3 bucket notifications (AWS-style Records; MinIO's top-level Key as a fallback)."""
 
 from urllib.parse import unquote_plus
 
@@ -6,12 +6,11 @@ CREATED = "created"
 REMOVED = "removed"
 
 
-def parse_minio_event(event: dict) -> list[tuple[str, str, str]]:
-    """Return (kind, bucket, key) triples for every record in a MinIO webhook payload.
+def parse_s3_event(event: dict) -> list[tuple[str, str, str]]:
+    """Return (kind, bucket, key) triples for every record in an S3 notification.
 
-    MinIO sends a top-level EventName plus S3-compatible Records. Object keys in
-    Records are URL-encoded; the top-level Key is "bucket/key" and is used as a
-    fallback when Records is missing.
+    Object keys in AWS-style Records are URL-encoded; a top-level Key ("bucket/key", as MinIO
+    sends) is used as a fallback when Records is missing.
     """
     results: list[tuple[str, str, str]] = []
     name = str(event.get("EventName", ""))

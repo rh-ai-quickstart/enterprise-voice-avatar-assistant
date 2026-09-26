@@ -29,8 +29,9 @@ rand() { openssl rand -hex "${1:-16}"; }
 POSTGRES_USER="${POSTGRES_USER:-$(existing assistant-postgres POSTGRESQL_USER)}"; POSTGRES_USER="${POSTGRES_USER:-assistant}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(existing assistant-postgres POSTGRESQL_PASSWORD)}"; POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(rand 16)}"
 POSTGRES_DB="${POSTGRES_DB:-$(existing assistant-postgres POSTGRESQL_DATABASE)}"; POSTGRES_DB="${POSTGRES_DB:-assistant}"
-MINIO_ROOT_USER="${MINIO_ROOT_USER:-$(existing assistant-minio MINIO_ROOT_USER)}"; MINIO_ROOT_USER="${MINIO_ROOT_USER:-minioadmin}"
-MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-$(existing assistant-minio MINIO_ROOT_PASSWORD)}"; MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-$(rand 16)}"
+# Object store (VersityGW) credentials: the S3 access key and secret, also the web UI login
+S3_ACCESS_KEY="${S3_ACCESS_KEY:-$(existing assistant-object-store S3_ACCESS_KEY)}"; S3_ACCESS_KEY="${S3_ACCESS_KEY:-assistant}"
+S3_SECRET_KEY="${S3_SECRET_KEY:-$(existing assistant-object-store S3_SECRET_KEY)}"; S3_SECRET_KEY="${S3_SECRET_KEY:-$(rand 20)}"
 N8N_ENCRYPTION_KEY="${N8N_ENCRYPTION_KEY:-$(existing assistant-n8n N8N_ENCRYPTION_KEY)}"; N8N_ENCRYPTION_KEY="${N8N_ENCRYPTION_KEY:-$(rand 32)}"
 # n8n owner account, created by the chart's n8n-setup Job; the password needs a capital and a digit
 N8N_OWNER_EMAIL="${N8N_OWNER_EMAIL:-$(existing assistant-n8n N8N_OWNER_EMAIL)}"; N8N_OWNER_EMAIL="${N8N_OWNER_EMAIL:-admin@example.com}"
@@ -65,9 +66,9 @@ make_secret assistant-postgres \
   --from-literal=POSTGRESQL_DATABASE="${POSTGRES_DB}" \
   --from-literal=DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
 
-make_secret assistant-minio \
-  --from-literal=MINIO_ROOT_USER="${MINIO_ROOT_USER}" \
-  --from-literal=MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD}"
+make_secret assistant-object-store \
+  --from-literal=S3_ACCESS_KEY="${S3_ACCESS_KEY}" \
+  --from-literal=S3_SECRET_KEY="${S3_SECRET_KEY}"
 
 make_secret assistant-n8n \
   --from-literal=N8N_ENCRYPTION_KEY="${N8N_ENCRYPTION_KEY}" \

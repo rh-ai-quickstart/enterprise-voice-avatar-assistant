@@ -72,6 +72,6 @@ for path in files:
         state = f"not activated ({exc})"
     print(f"{action:8s} {wf['name']:40s} id={wid} {state}")
 print("\nWebhook URLs (production):")
-for path in ("chat", "minio-event", "classify", "request-intake", "slack-interactions", "archive-transcript"):
+for path in ("chat", "object-created", "classify", "request-intake", "slack-interactions", "archive-transcript"):
     print(f"  {base}/webhook/{path}")
 PY

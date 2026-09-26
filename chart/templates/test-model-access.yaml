@@ -62,8 +62,8 @@ spec:
           {{- if .Values.qdrant.enabled }}
           check qdrant http://qdrant:6333/readyz
           {{- end }}
-          {{- if .Values.minio.enabled }}
-          check minio http://minio:9000/minio/health/live
+          {{- if .Values.objectStore.enabled }}
+          check object-store http://object-store:7070/health
           {{- end }}
           {{- if .Values.n8n.enabled }}
           check n8n http://n8n:5678/healthz

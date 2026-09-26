@@ -21,7 +21,7 @@ DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain
 oc new-project ${PROJECT}
 ```
 
-3. Create the secrets. The script generates passwords for PostgreSQL, MinIO, n8n, and LiveKit, and stores any API keys you export beforehand (the variable names are listed in the script header). Secrets are never stored in git.
+3. Create the secrets. The script generates passwords for PostgreSQL, the object store, n8n, and LiveKit, and stores any API keys you export beforehand (the variable names are listed in the script header). Secrets are never stored in git.
 
 ```bash
 NAMESPACE=${PROJECT} scripts/create-secrets.sh
@@ -107,17 +107,17 @@ Everything below is optional; the assistant runs without any of it. Keys go into
 | Secret | Keys |
 |---|---|
 | `assistant-postgres` | `POSTGRESQL_USER`, `POSTGRESQL_PASSWORD`, `POSTGRESQL_DATABASE`, `DATABASE_URL` |
-| `assistant-minio` | `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` |
+| `assistant-object-store` | `S3_ACCESS_KEY`, `S3_SECRET_KEY` (also the login of the object store's web UI) |
 | `assistant-n8n` | `N8N_ENCRYPTION_KEY`, `N8N_OWNER_EMAIL`, `N8N_OWNER_PASSWORD` (the owner account the `n8n-setup` job creates; the job also writes the API key it creates into `assistant-n8n-api`) |
 | `assistant-qdrant` | `QDRANT_API_KEY` |
 | `assistant-livekit` | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
 | `assistant-models` | `LLM_API_KEY`, `STT_API_KEY`, `TTS_API_KEY`, `EMBEDDINGS_API_KEY`, `GUARDRAILS_API_KEY`, `HF_TOKEN` |
 | `assistant-integrations` | `SLACK_BOT_TOKEN`, `TAVUS_API_KEY`, `TAVUS_FACE_ID`, `TAVUS_PAL_ID`, `SIMLI_API_KEY`, `SIMLI_FACE_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_DOCS_FOLDER_ID` |
 
-Read a value, for example the MinIO console login:
+Read a value, for example the object store's web UI login:
 
 ```bash
-oc extract secret/assistant-minio -n ${PROJECT} --to=-
+oc extract secret/assistant-object-store -n ${PROJECT} --to=-
 ```
 
 Add or rotate one key without touching the others, then restart the pod that reads it (the config map and secrets are read at start):
@@ -127,4 +127,4 @@ oc set data secret/assistant-integrations -n ${PROJECT} TAVUS_API_KEY=<value>
 oc rollout restart deployment/voice-agent -n ${PROJECT}
 ```
 
-Back up `assistant-n8n`: losing `N8N_ENCRYPTION_KEY` makes every credential stored in n8n unreadable. `FORCE=1 scripts/create-secrets.sh` regenerates all passwords and is only for a fresh install; on a running deployment it would lock the services out of PostgreSQL and MinIO.
+Back up `assistant-n8n`: losing `N8N_ENCRYPTION_KEY` makes every credential stored in n8n unreadable. `FORCE=1 scripts/create-secrets.sh` regenerates all passwords and is only for a fresh install; on a running deployment it would lock the services out of PostgreSQL and the object store.

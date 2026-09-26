@@ -1,10 +1,11 @@
-"""S3-compatible object storage access (MinIO in the chart)."""
+"""S3-compatible object storage access (VersityGW in the chart)."""
 
 import tempfile
 from pathlib import Path
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from .config import settings
 
@@ -27,6 +28,20 @@ def client():
 
 def head_bucket(bucket: str) -> None:
     client().head_bucket(Bucket=bucket)
+
+
+def ensure_buckets(buckets: list[str]) -> list[str]:
+    """Create the buckets that do not exist yet; returns the ones created."""
+    created = []
+    for bucket in buckets:
+        try:
+            client().head_bucket(Bucket=bucket)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") not in ("404", "NoSuchBucket", "NotFound"):
+                raise
+            client().create_bucket(Bucket=bucket)
+            created.append(bucket)
+    return created
 
 
 def download(bucket: str, key: str) -> Path:

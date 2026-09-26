@@ -6,12 +6,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Object storage (MinIO or any S3)
-    s3_endpoint_url: str = "http://localhost:9000"
-    s3_access_key: str = "minioadmin"
-    s3_secret_key: str = "minioadmin"
+    # Object storage (VersityGW in the chart, or any S3)
+    s3_endpoint_url: str = "http://localhost:7070"
+    s3_access_key: str = "assistant"
+    s3_secret_key: str = "assistant-secret"
     s3_region: str = "us-east-1"
     s3_bucket: str = "documents"
+    # Buckets created at startup when missing (the chart's objectStore.buckets)
+    s3_buckets: str = "documents,inbox,transcripts"
     # Buckets whose object-created events are ingested. Events for other buckets
     # (for example the classification inbox) are acknowledged and ignored.
     ingest_buckets: str = "documents,transcripts"
@@ -39,6 +41,10 @@ class Settings(BaseSettings):
     docling_artifacts_path: str | None = None
     max_concurrent_jobs: int = 2
     log_level: str = "INFO"
+
+    @property
+    def bucket_list(self) -> list[str]:
+        return [b.strip() for b in self.s3_buckets.split(",") if b.strip()]
 
     @property
     def ingest_bucket_set(self) -> set[str]:

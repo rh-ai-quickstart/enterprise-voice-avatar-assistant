@@ -37,10 +37,11 @@ the ingestion pipeline exercises Docling on office formats, not only on text.
 NS=voice-avatar-assistant scripts/load-sample-docs.sh
 ```
 
-The script uploads from a short-lived pod with the MinIO client: policies to
-`documents`, invoices and contracts to `inbox`. MinIO notifies n8n, which runs
-the ingestion workflow (WF2) for `documents` and hands `inbox` objects to the
-classification workflow (WF3). Pass file names to upload a subset.
+The script uploads through the ingestion pod: policies to `documents`, invoices
+and contracts to `inbox`. The object store notifies n8n, which runs the
+ingestion workflow (WF2) for `documents` and hands `inbox` objects to the
+classification workflow (WF3). Pass file names to upload a subset, or paths to
+files of your own (`BUCKET=inbox` sends them to classification).
 
 To bypass n8n during development, call the ingestion service directly:
 

@@ -73,7 +73,7 @@ flowchart LR
     RAG[RAG API<br/>retrieval, memory, guardrails,<br/>classification, tickets]
     ING[Ingestion service<br/>Docling, chunking, embeddings]
     N8N[n8n workflows]
-    S3[(MinIO / ODF S3)]
+    S3[(Object store: VersityGW / ODF S3)]
     PG[(PostgreSQL)]
     QD[(Qdrant)]
     LK <--> VA
@@ -110,7 +110,7 @@ flowchart LR
 
 How data moves through the system:
 
-1. **Ingestion.** Documents land in an S3 bucket (MinIO or OpenShift Data Foundation) or Google Drive. A bucket notification triggers the n8n ingestion workflow, which calls the ingestion service. Docling parses the file, chunks are embedded with the embeddings model, and vectors with source and page metadata are upserted into Qdrant.
+1. **Ingestion.** Documents land in an S3 bucket (VersityGW, deployed by the chart, or OpenShift Data Foundation) or Google Drive. A bucket notification triggers the n8n ingestion workflow, which calls the ingestion service. Docling parses the file, chunks are embedded with the embeddings model, and vectors with source and page metadata are upserted into Qdrant.
 2. **Text question.** The frontend calls the RAG API. The API checks input guardrails, retrieves the top chunks from Qdrant, loads recent history from PostgreSQL, calls the LLM, checks output guardrails, stores the exchange, and returns an answer with citations.
 3. **Voice question.** The browser connects over WebRTC to the LiveKit server. The voice agent transcribes speech with Whisper, calls the same RAG API, synthesizes the reply with the TTS model, and hands audio to the avatar provider, which publishes lip-synced video back into the room.
 4. **Service requests.** When a chat or voice message is a request rather than a question, the RAG API classifies it, opens a ticket in PostgreSQL, and hands it to the n8n approval workflow. The decision made in Slack is written back to the ticket and pushed into the same conversation as a notice, which the avatar speaks and the chat shows.
@@ -120,12 +120,12 @@ How data moves through the system:
 |---|---|---|---|
 | Frontend | Chat with citations, voice session, avatar video | nginx serving a React app, proxies `/api` to the RAG API | RAG API, LiveKit |
 | RAG API | Retrieval, guardrails, memory, request intake, tickets, notices | FastAPI | LLM, embeddings, guardrails model, Qdrant, PostgreSQL, n8n |
-| Ingestion | Docling parsing, chunking, embedding, indexing | FastAPI | MinIO, embeddings model, Qdrant, PostgreSQL |
+| Ingestion | Docling parsing, chunking, embedding, indexing | FastAPI | object store, embeddings model, Qdrant, PostgreSQL |
 | Voice agent | Turn detection, transcription, spoken answers, avatar hand-off | LiveKit Agents worker | LiveKit, Whisper, RAG API, TTS, avatar provider |
 | LiveKit | WebRTC signaling and media, TURN over TLS | LiveKit server | browsers, voice agent, avatar provider |
 | n8n | Ingestion, classification, approvals, archival, SLA and digest workflows | n8n with the workflows shipped in the chart | RAG API, ingestion, Slack, Google Docs |
 | Models | Llama 3.1 8B or the cluster's Llama 3.2 3B (LLM), Whisper (STT), BGE-M3 (embeddings), Kokoro (TTS); Granite Guardian (guardrails) optional, off in the demo | vLLM on OpenShift AI (GPU); Kokoro on CPU | called over OpenAI-compatible APIs |
-| Datastores | PostgreSQL (conversations, memory, tickets, notices), Qdrant (vectors), MinIO (documents, inbox, transcripts) | Deployments with PVCs | the services above |
+| Datastores | PostgreSQL (conversations, memory, tickets, notices), Qdrant (vectors), VersityGW S3 object store (documents, inbox, transcripts) | Deployments with PVCs | the services above |
 
 ## Requirements
 
@@ -143,7 +143,7 @@ Application components, per replica, using the chart defaults:
 | n8n | 250m / 1 vCPU | 512 MiB / 1 GiB | 8 GiB PVC |
 | PostgreSQL | 250m / 1 vCPU | 512 MiB / 1 GiB | 10 GiB PVC |
 | Qdrant | 250m / 1 vCPU | 512 MiB / 2 GiB | 10 GiB PVC |
-| MinIO | 250m / 1 vCPU | 512 MiB / 1 GiB | 20 GiB PVC |
+| Object store (VersityGW) | 100m / 1 vCPU | 128 MiB / 512 MiB | 20 GiB PVC |
 
 Models served on OpenShift AI, only if you deploy them with the chart instead of pointing at existing endpoints:
 
@@ -182,7 +182,7 @@ Tested with (September 2026, single node with 4x NVIDIA L4):
 | cert-manager operator (optional, trusted ingress certificate) | 1.20.0 |
 | n8n | 2.37.11 |
 | LiveKit server | 1.13.6 |
-| PostgreSQL / Qdrant / MinIO | 16 / 1.19.1 / RELEASE.2025-07-23 |
+| PostgreSQL / Qdrant / VersityGW | 16 / 1.19.1 / 1.8.0 |
 | Kokoro TTS (kokoro-fastapi) | 0.8.2 |
 | Helm client | 3.14 or later (tested with 3.17 and 4.2) |
 
@@ -198,7 +198,7 @@ This quickstart deploys as a regular OpenShift user with:
 
 No cluster admin access is required. Two caveats:
 
-- PostgreSQL, Qdrant, MinIO, and n8n are deployed by the chart itself rather than by cluster-wide operators, so no operator installation is needed.
+- PostgreSQL, Qdrant, the object store (VersityGW), and n8n are deployed by the chart itself rather than by cluster-wide operators, so no operator installation is needed.
 - The LiveKit server must expose WebRTC media to browsers. On OpenShift this is done with LiveKit's built-in TURN server over TLS behind a passthrough Route, which needs a certificate the browser trusts. See `livekit.turn` in the values file.
 
 Cluster administrators who start from a bare cluster can install the platform prerequisites with the manifests in [deploy/bootstrap/](deploy/bootstrap/README.md).
@@ -342,10 +342,10 @@ echo https://$(oc get route/frontend -n ${PROJECT} --template='{{.spec.host}}')
 helm test assistant --namespace ${PROJECT} --logs
 ```
 
-4. Load the sample documents with `NS=${PROJECT} scripts/load-sample-docs.sh`. It uploads the policies in `data/sample-docs/` to the `documents` bucket and the invoices and contracts to `inbox`; the ingestion and classification workflows in n8n run within a few seconds. You can also upload single files through the MinIO console.
+4. Load the sample documents with `NS=${PROJECT} scripts/load-sample-docs.sh`. It uploads the policies in `data/sample-docs/` to the `documents` bucket and the invoices and contracts to `inbox`; the ingestion and classification workflows in n8n run within a few seconds. You can also upload single files through the object store's web UI (below; sign in with the keys in `assistant-object-store`) or with `scripts/load-sample-docs.sh <path>`.
 
 ```bash
-echo https://$(oc get route/minio-console -n ${PROJECT} --template='{{.spec.host}}')
+echo https://$(oc get route/object-store -n ${PROJECT} --template='{{.spec.host}}')/ui/
 ```
 
 5. Ask a question about the uploaded document in the frontend. The answer should include citations pointing at the file and page.
@@ -375,7 +375,7 @@ oc delete project ${PROJECT}
 The demo follows one storyline, from deployment to portability. Each step builds on the previous one.
 
 1. **Deploy the full stack** with a single `helm install` (or an Argo CD sync), then show the pods, Routes, and InferenceServices coming up.
-2. **Upload company documents** to the MinIO bucket and watch the ingestion workflow run in n8n: parse, chunk, embed, index, notify.
+2. **Upload company documents** to the `documents` bucket (the object store's web UI, or `scripts/load-sample-docs.sh <file>`) and watch the ingestion workflow run in n8n: parse, chunk, embed, index, notify.
 3. **Ask a question in text.** The answer is grounded in the uploaded documents and the citations panel shows the source file and page.
 4. **Ask the same question by voice.** The avatar answers with lip-synced speech. Interrupt it mid-sentence to show barge-in.
 5. **Ask a follow-up question** that only makes sense with context. The assistant uses conversation memory from PostgreSQL to resolve it.
@@ -419,7 +419,7 @@ A presenter script with timings, exact questions and expected answers is in [doc
 
 **Workflows.** The seven n8n workflows (chat, ingestion, classification, request approval, transcript archival, SLA escalation, knowledge-gap digest) call the RAG API and ingestion service by their in-cluster service names. n8n imports them on first start; the Slack credential is created from the integrations secret, the Google Docs credential is added once in the n8n UI. The **Archive transcript** button in the chat header hands the current conversation to the archival workflow through the RAG API.
 
-**Naming.** Application services use fixed names (`frontend`, `rag-api`, `ingestion`, `voice-agent`, `postgres`, `qdrant`, `minio`, `n8n`, `livekit`) so that workflows and configuration are stable regardless of the Helm release name. Deploy one release per project.
+**Naming.** Application services use fixed names (`frontend`, `rag-api`, `ingestion`, `voice-agent`, `postgres`, `qdrant`, `object-store`, `n8n`, `livekit`) so that workflows and configuration are stable regardless of the Helm release name. Deploy one release per project.
 
 ### Configuration
 

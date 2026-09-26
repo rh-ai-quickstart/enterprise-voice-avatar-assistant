@@ -10,13 +10,11 @@ Symptoms first, then the cause, the command that confirms it, and the fix. Every
 
 **PodSecurity warnings ("would violate PodSecurity restricted") on `oc apply`.** A pod without `seccompProfile`, `runAsNonRoot`, dropped capabilities or `allowPrivilegeEscalation: false`. Every chart pod carries all four through the `assistant.securityContext` helper; a raw `oc run` does not. Use `scripts/test-services.sh` instead of ad hoc pods.
 
-**Argo CD sync stuck in Progressing, MinIO setup Job never completes.** The setup Job must be a `Sync` hook, not `PostSync` (PostSync waits for global health, which waits for the Job). Check `oc get job -n <project>`; the chart's Job carries `argocd.argoproj.io/hook: Sync`. A stuck operation is cleared with `argocd app terminate-op` or by patching `status.operationState.phase` to `Terminating`.
-
 **`oc get application` returns the wrong kind.** The short name clashes with another CRD on OpenShift; use `oc get applications.argoproj.io -n openshift-gitops`.
 
 **Service starts with `LIVEKIT_PORT=tcp://…` or similar in its environment and crashes.** Kubernetes service links inject variables named after every Service in the namespace. Every chart pod sets `enableServiceLinks: false`; keep that when adding pods.
 
-**Image pull errors from Docker Hub (`toomanyrequests`).** Docker Hub's anonymous pull limit is shared by the whole cluster egress IP. Use images from `ghcr.io`, `quay.io` or `registry.redhat.io`; the chart already does (n8n from ghcr, MinIO and PostgreSQL from quay).
+**Image pull errors from Docker Hub (`toomanyrequests`).** Docker Hub's anonymous pull limit is shared by the whole cluster egress IP. Use images from `ghcr.io`, `quay.io` or `registry.redhat.io`; the chart already does (n8n and the VersityGW object store from ghcr, PostgreSQL from quay).
 
 ## Models and GPUs
 
@@ -38,7 +36,9 @@ Symptoms first, then the cause, the command that confirms it, and the fix. Every
 
 **PDF ingestion fails with `ImportError: libGL.so.1`.** Docling's OCR dependency pulls `opencv-python`, whose wheel needs a GL library the UBI image lacks. The ingestion image swaps it for `opencv-python-headless` at build time; if you rebuild the image, keep that step in `services/ingestion/Containerfile`.
 
-**Uploads to MinIO do not trigger n8n.** Check the bucket notification: run `mc event ls local/documents` from a pod with the MinIO client (see `scripts/load-sample-docs.sh` for the pod spec). The setup Job registers the `arn:minio:sqs::N8N:webhook` target for `documents` and `inbox`; it can only do so once n8n is reachable, so re-run the Job (Argo CD sync, or `helm upgrade`) if n8n came up later.
+**Uploads do not trigger n8n.** The object store (VersityGW) sends a notification for every new object to `http://n8n:5678/webhook/object-created` (`VGW_EVENT_WEBHOOK_URL` on the `object-store` Deployment), and WF2 acts on the buckets in `EVENT_BUCKETS` (`objectStore.eventBuckets`: `documents` and `inbox`). Check that WF2 is active and look at its executions (`scripts/n8n-executions.sh`); an upload that left no execution did not reach n8n: `oc logs deploy/object-store` shows failed deliveries.
+
+**Documents missing after the move from MinIO.** The chart's MinIO images disappeared from Docker Hub and quay.io in September 2026, and the object store is now VersityGW, with a new volume (`object-store-data`). Load the documents again with `scripts/load-sample-docs.sh`; the old `minio-data` volume is kept (not pruned) until you delete it: `oc delete pvc minio-data -n <project>`.
 
 **A document shows up twice in citations.** Documents are keyed by bucket and object name; the same content under two names is two documents. List them: `oc exec deploy/rag-api -- .venv/bin/python -c "import urllib.request; print(urllib.request.urlopen('http://ingestion:8080/v1/documents').read().decode())"`, delete one with `DELETE http://ingestion:8080/v1/documents/<doc_id>`. Re-uploading under the same name replaces all chunks.
 

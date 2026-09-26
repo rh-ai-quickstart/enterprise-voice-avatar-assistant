@@ -31,16 +31,16 @@ voiceAgent:
     - id: rf6b1c8d5e9d
       name: Samantha
       gender: female
-  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-voice-agent:sha-48e2dab
+  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-voice-agent:sha-2c3f7ce
 frontend:
   enabled: true
-  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-frontend:sha-48e2dab
+  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-frontend:sha-2c3f7ce
 ragApi:
   enabled: true
-  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-rag-api:sha-48e2dab
+  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-rag-api:sha-2c3f7ce
 ingestion:
   enabled: true
-  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-ingestion:sha-48e2dab
+  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-ingestion:sha-2c3f7ce
 
 # The language model is the Llama 3.2 3B Instruct already served on the cluster
 # (llama-32-3b-instruct, a prerequisite in SETUP.md). scripts/deploy-argocd.sh finds it and

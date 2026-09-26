@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from . import clients, memory
+from . import auth, clients, memory
 from .config import settings
 from .schemas import ClassifyRequest, ClassifyResponse
 
@@ -37,7 +37,9 @@ def make_doc_id(bucket: str, key: str) -> str:
 def extract_text(bucket: str, key: str) -> dict[str, Any]:
     url = settings.ingestion_url.rstrip("/") + "/v1/extract"
     with httpx.Client(timeout=180) as http:
-        response = http.post(url, json={"bucket": bucket, "key": key, "max_chars": MAX_TEXT})
+        response = http.post(
+            url, json={"bucket": bucket, "key": key, "max_chars": MAX_TEXT}, headers=auth.internal_headers()
+        )
         response.raise_for_status()
         return response.json()
 

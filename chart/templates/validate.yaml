@@ -28,3 +28,6 @@ cannot reach a model. Renders nothing.
 {{- fail (printf "voiceAgent.faces[%s].gender is %q; use female or male, or set voice instead" $f.id $f.gender) }}
 {{- end }}
 {{- end }}
+{{- if and .Values.ragApi.requestsRequireApproval (not .Values.integrations.slack.enabled) (not .Values.admin.enabled) }}
+{{- fail "requests need an approval surface: enable Slack (integrations.slack.enabled) or the admin portal (admin.enabled), or set ragApi.requestsRequireApproval=false" }}
+{{- end }}

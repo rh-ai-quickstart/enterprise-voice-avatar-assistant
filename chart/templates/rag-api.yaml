@@ -34,6 +34,9 @@ spec:
             - secretRef:
                 name: {{ .Values.secrets.integrations }}
                 optional: true
+            # ADMIN_PASSWORD, ADMIN_SESSION_SECRET, INTERNAL_API_TOKEN
+            - secretRef:
+                name: {{ .Values.secrets.admin }}
           env:
             - name: S3_ACCESS_KEY
               valueFrom:

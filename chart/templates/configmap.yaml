@@ -38,6 +38,11 @@ data:
   LIVEKIT_PUBLIC_URL: {{ if $livekitHost }}{{ printf "wss://%s" $livekitHost | quote }}{{ else }}""{{ end }}
   RAG_TOP_K: {{ .Values.ragApi.topK | quote }}
   REQUESTS_REQUIRE_APPROVAL: {{ .Values.ragApi.requestsRequireApproval | quote }}
+  # Integrations the deployment turned on, and the admin portal
+  SLACK_ENABLED: {{ .Values.integrations.slack.enabled | quote }}
+  GOOGLE_DOCS_ENABLED: {{ .Values.integrations.googleDocs.enabled | quote }}
+  ADMIN_ENABLED: {{ .Values.admin.enabled | quote }}
+  ADMIN_SESSION_HOURS: {{ .Values.admin.sessionHours | quote }}
   # OpenShift service CA, trusted for in-cluster model endpoints served over TLS
   SERVICE_CA_FILE: "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
   AVATAR_PROVIDER: {{ .Values.voiceAgent.avatarProvider | quote }}

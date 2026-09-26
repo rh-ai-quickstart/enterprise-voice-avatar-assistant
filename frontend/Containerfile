@@ -9,8 +9,10 @@ RUN npm run build
 # Runtime: UBI nginx serving the static bundle and proxying /api to the RAG API.
 FROM registry.access.redhat.com/ubi9/nginx-124:latest
 COPY --from=build --chown=1001:0 /opt/app-root/src/dist/ /opt/app-root/src/
-COPY --chown=1001:0 nginx/app.conf /opt/app-root/etc/nginx.default.d/app.conf
+COPY --chown=1001:0 nginx/app.conf nginx/admin.conf /opt/app-root/etc/nginx.default.d/
+COPY --chown=1001:0 nginx/api-allowlist.conf /opt/app-root/etc/nginx.d/api-allowlist.conf
 COPY --chown=1001:0 nginx/entrypoint.sh /opt/app-root/entrypoint.sh
-RUN chmod g+w /opt/app-root/etc/nginx.default.d/app.conf
+RUN chmod g+w /opt/app-root/etc/nginx.default.d/app.conf /opt/app-root/etc/nginx.default.d/admin.conf \
+      /opt/app-root/etc/nginx.d/api-allowlist.conf
 EXPOSE 8080
 CMD ["/opt/app-root/entrypoint.sh"]

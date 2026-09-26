@@ -2,7 +2,8 @@
 
 No OAuth consent screen and no sign-in: the service account (GOOGLE_SERVICE_ACCOUNT_JSON)
 creates the document in a Drive folder shared with it (GOOGLE_DOCS_FOLDER_ID). The transcript is
-uploaded as plain text and Drive converts it into a Google Doc.
+uploaded as plain text and Drive converts it into a Google Doc. Only when GOOGLE_DOCS_ENABLED is
+true (integrations.googleDocs.enabled in the chart); archival works without it.
 """
 
 from __future__ import annotations
@@ -19,8 +20,13 @@ UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 BOUNDARY = "assistant-transcript-boundary"
 
 
-def configured() -> bool:
+def keys_present() -> bool:
     return bool(settings.google_service_account_json and settings.google_docs_folder_id)
+
+
+def configured() -> bool:
+    """Archival creates Google Docs: the deployment turned the integration on and the keys are there."""
+    return settings.google_docs_enabled and keys_present()
 
 
 def service_account_email() -> str | None:

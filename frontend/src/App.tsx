@@ -107,14 +107,13 @@ export default function App() {
     [busy, sessionId, userName],
   );
 
+  // A new conversation leaves the old one stored: the admin portal lists it until an admin deletes it
   const reset = useCallback(async () => {
-    const old = sessionId;
     setMessages([]);
     setCitations([]);
     setSelected(null);
     setSessionId(newId());
-    api.deleteSession(old).catch(() => undefined);
-  }, [sessionId]);
+  }, []);
 
   const archive = useCallback(async () => {
     try {

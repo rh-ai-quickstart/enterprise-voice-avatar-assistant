@@ -7,7 +7,7 @@ the chat path keeps working (without memory).
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,8 @@ def init_schema() -> None:
         return
     try:
         with clients.db() as conn:
+            # One replica at a time: the files recreate a trigger, which concurrent starts would race on
+            conn.execute("SELECT pg_advisory_xact_lock(4715)")
             for path in sorted(SQL_DIR.glob("*.sql")):
                 conn.execute(path.read_text())
             conn.commit()
@@ -53,6 +55,31 @@ def _run(query: str, params: tuple = (), fetch: bool = False):
 def run(query: str, params: tuple = (), fetch: bool = False):
     """Run one statement with the same graceful degradation as every other helper here."""
     return _run(query, params, fetch)
+
+
+def select_page(
+    table: str,
+    columns: str,
+    equals: dict[str, Any],
+    since: datetime | None = None,
+    until: datetime | None = None,
+    before_id: int | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """One page of an append-only table, newest first, filtered by exact values and a time range.
+    `table`, `columns` and the keys of `equals` are constants in the code, never request input."""
+    where, params = [], []
+    for column, value in equals.items():
+        if value is not None:
+            where.append(f"{column} = %s")
+            params.append(value)
+    for clause, value in (("created_at >= %s", since), ("created_at < %s", until), ("id < %s", before_id)):
+        if value is not None:
+            where.append(clause)
+            params.append(value)
+    query = f"SELECT {columns} FROM {table}" + (" WHERE " + " AND ".join(where) if where else "")
+    rows = _run(query + " ORDER BY id DESC LIMIT %s", (*params, limit), fetch=True)
+    return [dict(r) for r in rows or []]
 
 
 def ensure_conversation(session_id: str, user_id: str | None, channel: str) -> None:
@@ -131,30 +158,3 @@ def record_extraction(
            updated_at = now()""",
         (doc_id, source, source_uri, doc_type, json.dumps(extracted)),
     )
-
-
-def request_archive(session_id: str) -> dict:
-    """Archive the session: create the Google Doc here (service account, when configured), then
-    ask n8n (WF5) to re-ingest the transcript and post the Slack notice with the link."""
-    import httpx
-
-    from . import gdocs
-
-    text = transcript(session_id)
-    stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
-    title = f"Assistant transcript {session_id[:8]} {stamp}"
-    doc_url = gdocs.create_document(title, f"Assistant transcript {session_id}\n\n{text}") if text else None
-    url = settings.n8n_url.rstrip("/") + settings.n8n_archive_webhook_path
-    requested = False
-    try:
-        with httpx.Client(timeout=10) as http:
-            response = http.post(
-                url, json={"session_id": session_id, "title": title, "doc_url": doc_url or ""}
-            )
-        if response.status_code >= 400:
-            log.warning("n8n archive webhook returned %s", response.status_code)
-        else:
-            requested = True
-    except httpx.HTTPError as exc:
-        log.warning("n8n archive webhook unreachable: %s", exc)
-    return {"requested": requested, "doc_url": doc_url}

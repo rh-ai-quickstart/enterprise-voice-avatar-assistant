@@ -72,7 +72,7 @@ Application images built from this repository and published by CI as <registry>/
 
 ### `secrets`
 
-Names of the pre-created Secrets. Keys per secret: postgres:     POSTGRESQL_USER, POSTGRESQL_PASSWORD, POSTGRESQL_DATABASE, DATABASE_URL objectStore:  S3_ACCESS_KEY, S3_SECRET_KEY n8n:          N8N_ENCRYPTION_KEY livekit:      LIVEKIT_API_KEY, LIVEKIT_API_SECRET models:       LLM_API_KEY, STT_API_KEY, TTS_API_KEY, EMBEDDINGS_API_KEY, GUARDRAILS_API_KEY, HF_TOKEN integrations: SLACK_BOT_TOKEN, SIMLI_API_KEY, SIMLI_FACE_ID, TAVUS_API_KEY, TAVUS_FACE_ID, TAVUS_PAL_ID (optional), GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID
+Names of the pre-created Secrets. Keys per secret: postgres:     POSTGRESQL_USER, POSTGRESQL_PASSWORD, POSTGRESQL_DATABASE, DATABASE_URL objectStore:  S3_ACCESS_KEY, S3_SECRET_KEY n8n:          N8N_ENCRYPTION_KEY livekit:      LIVEKIT_API_KEY, LIVEKIT_API_SECRET models:       LLM_API_KEY, STT_API_KEY, TTS_API_KEY, EMBEDDINGS_API_KEY, GUARDRAILS_API_KEY, HF_TOKEN integrations: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SIMLI_API_KEY, SIMLI_FACE_ID, TAVUS_API_KEY, TAVUS_FACE_ID, TAVUS_PAL_ID (optional), GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID admin:        ADMIN_PASSWORD, ADMIN_SESSION_SECRET, INTERNAL_API_TOKEN (required: the RAG API, the ingestion service and n8n do not start without it)
 
 | Key | Default | Description |
 |---|---|---|
@@ -82,6 +82,25 @@ Names of the pre-created Secrets. Keys per secret: postgres:     POSTGRESQL_USER
 | `secrets.livekit` | `assistant-livekit` | Name of the pre-created Secret holding the keys listed above. |
 | `secrets.models` | `assistant-models` | Name of the pre-created Secret holding the keys listed above. |
 | `secrets.integrations` | `assistant-integrations` | Name of the pre-created Secret holding the keys listed above. |
+| `secrets.admin` | `assistant-admin` | Name of the pre-created Secret holding the keys listed above. |
+
+### `integrations`
+
+External integrations the deployment uses. Off, the admin portal is where requests are approved and where the notices appear; on with its keys missing from the integrations secret, the portal reports it as misconfigured. scripts/setup.sh, deploy.sh and deploy-argocd.sh turn each one on when its keys are in the integrations secret.
+
+| Key | Default | Description |
+|---|---|---|
+| `integrations.slack.enabled` | `false` | Approval cards and notices in the Slack channels (SLACK_BOT_TOKEN; SLACK_SIGNING_SECRET to accept clicks on the cards). |
+| `integrations.googleDocs.enabled` | `false` | A Google Doc per archived transcript (GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID). |
+
+### `admin`
+
+Admin portal at /admin on the frontend host: tickets and approvals, transcripts, knowledge gaps, documents, activity, integrations and audit (docs/admin-portal.md). Sign-in uses the shared ADMIN_PASSWORD from the admin secret and a display name.
+
+| Key | Default | Description |
+|---|---|---|
+| `admin.enabled` | `true` | Serve the portal. false removes the /v1/admin routes from the RAG API and from the proxy. |
+| `admin.sessionHours` | `8` | Hours until a sign-in expires. |
 
 ### `postgres`
 
@@ -269,7 +288,7 @@ Application services built from this repository.
 | `ragApi.image` | `""` | Container image (full reference). |
 | `ragApi.replicas` | `1` | Number of pods. |
 | `ragApi.topK` | `5` | Number of chunks retrieved per question. |
-| `ragApi.requestsRequireApproval` | `true` | Every request filed from chat or voice waits for a decision on its Slack card. false: the language model decides per request whether approval is needed, and requests it judges as free of cost, access or permission changes are approved by the workflow at once. |
+| `ragApi.requestsRequireApproval` | `true` | Every request filed from chat or voice waits for a decision, in the admin portal or on its Slack card. false: the language model decides per request whether approval is needed, and requests it judges as free of cost, access or permission changes are approved by the workflow at once. true needs an approval surface: admin.enabled or integrations.slack.enabled. |
 | `ragApi.resources.requests.cpu` | `500m` | CPU request. |
 | `ragApi.resources.requests.memory` | `1Gi` | Memory request. |
 | `ragApi.resources.limits.cpu` | `"2"` | CPU limit. |

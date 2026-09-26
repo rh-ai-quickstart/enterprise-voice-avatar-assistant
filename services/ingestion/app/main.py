@@ -10,15 +10,18 @@ Endpoints
   GET  /v1/jobs, /v1/jobs/{id}  job status
   POST /v1/extract              convert one object and return its text as Markdown (for classification)
   GET  /v1/documents            documents known to the database (501 without a database)
-  DELETE /v1/documents/{doc_id} remove a document's vectors and record
+  DELETE /v1/documents/{doc_id} remove a document's vectors and record; ?purge_object=true also the object
+
+Every POST and DELETE needs Authorization: Bearer $INTERNAL_API_TOKEN (the RAG API and n8n send it).
 """
 
 import asyncio
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from . import db, storage, vectorstore
@@ -45,6 +48,8 @@ async def lifespan(_: FastAPI):
     logging.basicConfig(level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     log.info("ingestion service starting; qdrant=%s embeddings=%s buckets=%s",
              settings.qdrant_url, settings.embeddings_base_url, sorted(settings.ingest_bucket_set))
+    if not settings.internal_api_token:
+        log.warning("INTERNAL_API_TOKEN is empty: the write routes are open to anyone who can reach this service")
     await asyncio.to_thread(db.init_schema)
     buckets = asyncio.create_task(_ensure_buckets())
     yield
@@ -66,6 +71,19 @@ async def _ensure_buckets() -> None:
             log.info("object store not ready (%s); retrying in %.0fs", type(exc).__name__, delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30.0)
+
+
+def require_internal_token(request: Request) -> None:
+    token = settings.internal_api_token
+    if not token:
+        return
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(value.strip().encode(), token.encode()):
+        raise HTTPException(status_code=401, detail="this route needs the internal API token",
+                            headers={"WWW-Authenticate": "Bearer"})
+
+
+WRITE = [Depends(require_internal_token)]
 
 
 def _status(job: Job) -> JobStatus:
@@ -90,7 +108,7 @@ async def readyz():
     return {"status": "ready"}
 
 
-@app.post("/v1/ingest", status_code=202, response_model=IngestAccepted)
+@app.post("/v1/ingest", status_code=202, response_model=IngestAccepted, dependencies=WRITE)
 async def ingest(request: IngestRequest):
     bucket = request.bucket or settings.s3_bucket
     doc_id = request.doc_id or make_doc_id(bucket, request.key)
@@ -98,7 +116,7 @@ async def ingest(request: IngestRequest):
     return IngestAccepted(job_id=job.job_id, doc_id=doc_id, status=job.status)
 
 
-@app.post("/v1/ingest/upload", status_code=202, response_model=IngestAccepted)
+@app.post("/v1/ingest/upload", status_code=202, response_model=IngestAccepted, dependencies=WRITE)
 async def ingest_upload(file: Annotated[UploadFile, File()], bucket: Annotated[str | None, Form()] = None):
     bucket = bucket or settings.s3_bucket
     key = file.filename or "upload"
@@ -109,7 +127,7 @@ async def ingest_upload(file: Annotated[UploadFile, File()], bucket: Annotated[s
     return IngestAccepted(job_id=job.job_id, doc_id=doc_id, status=job.status)
 
 
-@app.post("/v1/events/s3", response_model=EventResponse)
+@app.post("/v1/events/s3", response_model=EventResponse, dependencies=WRITE)
 async def s3_event(event: dict):
     response = EventResponse()
     for kind, bucket, key in parse_s3_event(event):
@@ -127,7 +145,7 @@ async def s3_event(event: dict):
     return response
 
 
-@app.post("/v1/extract", response_model=ExtractResponse)
+@app.post("/v1/extract", response_model=ExtractResponse, dependencies=WRITE)
 async def extract(request: ExtractRequest):
     bucket = request.bucket or settings.s3_bucket
     try:
@@ -158,8 +176,16 @@ async def list_documents():
     return rows
 
 
-@app.delete("/v1/documents/{doc_id}")
-async def delete_document(doc_id: str):
+@app.delete("/v1/documents/{doc_id}", dependencies=WRITE)
+async def delete_document(doc_id: str, purge_object: bool = False):
+    """Vectors and record; with purge_object the object in its bucket too (found from the record)."""
+    removed = None
+    if purge_object:
+        uri = await asyncio.to_thread(db.source_uri, doc_id)
+        if uri and uri.startswith("s3://"):
+            bucket, _, key = uri.removeprefix("s3://").partition("/")
+            await asyncio.to_thread(storage.delete_object, bucket, key)
+            removed = uri
     await asyncio.to_thread(vectorstore.delete_document, doc_id)
     await asyncio.to_thread(db.delete_document, doc_id)
-    return {"deleted": doc_id}
+    return {"deleted": doc_id, "object": removed}

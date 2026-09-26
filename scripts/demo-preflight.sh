@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Pre-flight before a demo: models Ready, Argo CD status (when the project is managed by
-# Argo CD), the connectivity test pod, and the n8n webhooks. Read-only apart from the test pod.
+# Argo CD), the connectivity test pod, the public API proxy and the admin portal, and the n8n
+# webhooks. Read-only apart from the test pod.
 #
 # Usage: NS=<namespace> scripts/demo-preflight.sh [-f values.yaml]
 #   The values arguments are passed to the test pod render (use the same file as the
@@ -27,10 +28,23 @@ APP=$(oc get applications.argoproj.io -A -o jsonpath="{range .items[?(@.spec.des
 echo "=== connectivity test pod ==="
 "$ROOT/scripts/test-services.sh" "$@" || rc=1
 
+if oc get route frontend -n "$NS" >/dev/null 2>&1; then
+  FE="https://$(oc get route frontend -n "$NS" -o jsonpath='{.spec.host}')"
+  code() { curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$@"; }
+  echo "=== public API proxy ==="
+  if [ "$(code "$FE/api/v1/tickets")" = 404 ]; then echo "  internal routes refused (GET /api/v1/tickets: 404)"
+  else echo "  GET /api/v1/tickets is reachable from outside: the frontend image predates the allowlist"; rc=1; fi
+  case "$(code "$FE/api/v1/admin/me")" in
+    401) echo "  admin portal answers at $FE/admin (sign-in required)" ;;
+    404) echo "  admin portal off (admin.enabled=false)" ;;
+    *)   echo "  admin portal: unexpected answer from $FE/api/v1/admin/me"; rc=1 ;;
+  esac
+fi
+
 if oc get route n8n -n "$NS" >/dev/null 2>&1; then
   N8N="https://$(oc get route n8n -n "$NS" -o jsonpath='{.spec.host}')"
   echo "=== n8n webhooks ==="
-  for p in chat object-created classify request-intake slack-interactions archive-transcript; do
+  for p in chat object-created classify request-intake slack-interactions ticket-decided archive-transcript; do
     msg=$(curl -s --max-time 15 "$N8N/webhook/$p" | python3 -c "import sys,json
 try: print(json.load(sys.stdin).get('message',''))
 except Exception: print('no JSON response')")

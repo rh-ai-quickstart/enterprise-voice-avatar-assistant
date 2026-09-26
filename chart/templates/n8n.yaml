@@ -90,9 +90,17 @@ spec:
                 node -e 'const fs=require("fs");fs.writeFileSync("/tmp/credentials.json",JSON.stringify([{id:process.env.SLACK_CREDENTIAL_ID,name:"Slack account",type:"slackApi",data:{accessToken:process.env.SLACK_BOT_TOKEN}}]))'
                 n8n import:credentials --input=/tmp/credentials.json && echo "Slack credential imported as $SLACK_CREDENTIAL_ID"
                 rm -f /tmp/credentials.json
+              elif n8n export:credentials --id="$SLACK_CREDENTIAL_ID" --output=/tmp/existing.json >/dev/null 2>&1 && [ -s /tmp/existing.json ]; then
+                echo "no SLACK_BOT_TOKEN in the integrations secret; keeping the Slack credential $SLACK_CREDENTIAL_ID already in n8n"
               else
-                echo "no SLACK_BOT_TOKEN in the integrations secret; Slack nodes stay unbound until a credential is attached"
+                # Without a credential of the Slack nodes' type the workflows would not be published, and
+                # ingestion, approvals and archival need them with Slack off too. A placeholder stands in;
+                # the Slack nodes sit behind "Slack on?" and do not run while SLACK_ENABLED is false.
+                node -e 'const fs=require("fs");fs.writeFileSync("/tmp/credentials.json",JSON.stringify([{id:process.env.SLACK_CREDENTIAL_ID,name:"Slack account",type:"slackApi",data:{accessToken:"not-configured"}}]))'
+                n8n import:credentials --input=/tmp/credentials.json && echo "no SLACK_BOT_TOKEN in the integrations secret; placeholder Slack credential $SLACK_CREDENTIAL_ID imported so the workflows publish"
+                rm -f /tmp/credentials.json
               fi
+              rm -f /tmp/existing.json
               n8n import:workflow --separate --input=/workflows || exit 1
               # Publish only workflows whose credential types exist; the CLI would publish
               # regardless, and the editor then fails to save them until a credential is attached.

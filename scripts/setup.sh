@@ -455,14 +455,16 @@ step5() {
         pause "  5c. In Slack, create the channel #$c (if missing) and invite the app to it: /invite @Enterprise Assistant" || true
       fi
     done
+    # clicks on the approval cards are refused unless Slack signed them with the app's signing secret
+    need_key SLACK_SIGNING_SECRET "5d. In the app's settings, Basic Information > App Credentials, show and paste the Signing Secret" '^[0-9a-f]{32}$' "32 hexadecimal characters" "Slack buttons (approvals then happen in the admin portal only)"
     [ "${#missing[@]}" = 0 ] && [ "${#notmember[@]}" = 0 ] && ok "channels #assistant-ingestion #assistant-documents #assistant-approvals #assistant-tickets #assistant-knowledge-gaps exist and the app is in each"
     # the request URL contains this cluster's domain: set by the manifest for a new app, by hand for a reused one
     if [ "${SLACK_INTERACTIVITY_HOST:-}" = "$n8n_host" ]; then ok "Interactivity request URL confirmed for $n8n_host"
     elif [ "$YES" = 1 ]; then warn "check the app's Interactivity request URL: https://$n8n_host/webhook/slack-interactions"
     else
-      if confirm "5d. Was the app created just now from the manifest above (its request URL then already points to this cluster)?"; then save SLACK_INTERACTIVITY_HOST "$n8n_host"; ok "Interactivity request URL set by the manifest"
+      if confirm "5e. Was the app created just now from the manifest above (its request URL then already points to this cluster)?"; then save SLACK_INTERACTIVITY_HOST "$n8n_host"; ok "Interactivity request URL set by the manifest"
       else
-        pause "  5d. In the app's settings, Interactivity & Shortcuts, set the Request URL to https://$n8n_host/webhook/slack-interactions and Save Changes." && { save SLACK_INTERACTIVITY_HOST "$n8n_host"; ok "Interactivity request URL confirmed"; } || warn "request URL not confirmed: approval buttons in Slack will not reach n8n until it is set"
+        pause "  5e. In the app's settings, Interactivity & Shortcuts, set the Request URL to https://$n8n_host/webhook/slack-interactions and Save Changes." && { save SLACK_INTERACTIVITY_HOST "$n8n_host"; ok "Interactivity request URL confirmed"; } || warn "request URL not confirmed: approval buttons in Slack will not reach n8n until it is set"
       fi
     fi
   fi
@@ -470,7 +472,7 @@ step5() {
   # ---- Tavus ------------------------------------------------------------------------------
   say ""; say "  ${B}Tavus${N} (avatar video). Free plan: 25 conversational minutes a month, one stream."
   while :; do
-    [ -n "${TAVUS_API_KEY:-}" ] && ok "TAVUS_API_KEY already in the file" || need_key TAVUS_API_KEY "5e. On your laptop open https://platform.tavus.io > API Keys > Create, then paste the key" '^[A-Za-z0-9_-]{16,}$' "the key from the Tavus API Keys page" "the avatar video"
+    [ -n "${TAVUS_API_KEY:-}" ] && ok "TAVUS_API_KEY already in the file" || need_key TAVUS_API_KEY "5f. On your laptop open https://platform.tavus.io > API Keys > Create, then paste the key" '^[A-Za-z0-9_-]{16,}$' "the key from the Tavus API Keys page" "the avatar video"
     [ -n "${TAVUS_API_KEY:-}" ] || break
     local code; code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "x-api-key: $TAVUS_API_KEY" https://tavusapi.com/v2/replicas)
     case "$code" in 200) ok "Tavus accepts the key"; break;; 401|403) say "     ${Y}Tavus rejects that key${N} (HTTP $code); paste it again, or type Skip"; put TAVUS_API_KEY ""; unset TAVUS_API_KEY;; *) warn "Tavus not reachable from here (HTTP $code); keeping the key unverified"; break;; esac
@@ -485,12 +487,12 @@ step5() {
   elif [ "$YES" = 1 ]; then
     skipped GOOGLE_SERVICE_ACCOUNT_FILE "transcript archival to Google Docs"
   else
-    say "  5f. On your laptop open https://console.cloud.google.com : create or pick a project;"
+    say "  5g. On your laptop open https://console.cloud.google.com : create or pick a project;"
     say "      APIs & Services > Library > enable the Google Drive API;"
     say "      IAM & Admin > Service Accounts > Create service account (any name, no roles) > Keys > Add key > Create new key > JSON."
     say "      Open the downloaded key file in a text editor."
     while :; do
-      say "  5g. Paste the JSON key now and finish with a line containing only }  (or type a path to the file, or Skip):"
+      say "  5h. Paste the JSON key now and finish with a line containing only }  (or type a path to the file, or Skip):"
       local buf="" line first=1 path="" skip=0
       while IFS= read -rs line; do
         if [ "$first" = 1 ]; then
@@ -520,7 +522,7 @@ step5() {
   if [ -n "${GOOGLE_DOCS_FOLDER_ID:-}" ]; then ok "GOOGLE_DOCS_FOLDER_ID already in the file"
   elif [ "$YES" = 1 ] || [ -z "${GOOGLE_SERVICE_ACCOUNT_FILE:-}" ]; then skipped GOOGLE_DOCS_FOLDER_ID "transcript archival to Google Docs"
   else
-    say "  5h. In Google Drive create a folder for the transcripts and share it with $(sa_email "${GOOGLE_SERVICE_ACCOUNT_FILE/#\~/$HOME}") as Editor."
+    say "  5i. In Google Drive create a folder for the transcripts and share it with $(sa_email "${GOOGLE_SERVICE_ACCOUNT_FILE/#\~/$HOME}") as Editor."
     while :; do
       read -r -p "      Paste the folder's URL or id (Skip to leave it out): " v
       is_skip "$v" && { skipped GOOGLE_DOCS_FOLDER_ID "transcript archival to Google Docs"; break; }
@@ -553,9 +555,15 @@ step5() {
     note "creating the secrets in $PROJECT from the file (passwords are generated)"
     NAMESPACE="$PROJECT" SECRETS_FILE="$SECRETS_FILE" "$ROOT/scripts/create-secrets.sh" | sed 's/^/  /' || return 1
   fi
-  for key in SLACK_BOT_TOKEN TAVUS_API_KEY GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_DOCS_FOLDER_ID; do
-    if [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$key}" 2>/dev/null)" ]; then ok "$key in the cluster"; else warn "$key empty in the cluster (skipped; that feature stays off)"; fi
+  local key slack=off docs=off
+  in_cluster() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$1}" 2>/dev/null)" ]; }
+  for key in SLACK_BOT_TOKEN SLACK_SIGNING_SECRET TAVUS_API_KEY GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_DOCS_FOLDER_ID; do
+    if in_cluster "$key"; then ok "$key in the cluster"; else warn "$key empty in the cluster (skipped; that feature stays off)"; fi
   done
+  in_cluster SLACK_BOT_TOKEN && slack=on
+  in_cluster GOOGLE_SERVICE_ACCOUNT_JSON && in_cluster GOOGLE_DOCS_FOLDER_ID && docs=on
+  ok "step 6 deploys with Slack $slack and Google Docs $docs (integrations.*.enabled follow the keys); requests are approved in the admin portal$([ "$slack" = on ] && echo " and in Slack")"
+  note "admin portal password (generated, kept on re-runs): oc extract secret/assistant-admin -n $PROJECT --keys=ADMIN_PASSWORD --to=-"
   mark 5
 }
 step6() {
@@ -621,6 +629,7 @@ step9() {
   say "  \$ NS=$PROJECT scripts/demo-preflight.sh -f chart/values-demo-cluster.yaml ${extra[*]:-} --set global.domain=$DOMAIN ${llm_set[*]:-}"
   if NS="$PROJECT" "$ROOT/scripts/demo-preflight.sh" -f "$ROOT/chart/values-demo-cluster.yaml" "${extra[@]}" --set "global.domain=$DOMAIN" "${llm_set[@]}"; then
     mark 9; say ""; say "  ${G}Ready for the demo.${N}"; say "  frontend $FRONTEND_URL"; say "  n8n      $N8N_URL (login $(oc get secret assistant-n8n -n "$PROJECT" -o jsonpath='{.data.N8N_OWNER_EMAIL}' 2>/dev/null | base64 -d), password N8N_OWNER_PASSWORD in $SECRETS_FILE)"
+    say "  admin    $FRONTEND_URL/admin (sign in with your name and the password from: oc extract secret/assistant-admin -n $PROJECT --keys=ADMIN_PASSWORD --to=-)"
     say "  Walk through docs/demo-script.md: a cited text answer, a voice session (the browser asks for the microphone), a request by voice with its Slack card, the archive button."
     [ "${SLACK_INTERACTIVITY_HOST:-}" = "n8n-$PROJECT.$DOMAIN" ] || say "  Check once: the Slack app's Interactivity request URL must be $N8N_URL/webhook/slack-interactions (step 5 asks about it)."
     say "  Next cluster: clone, scripts/setup.sh."

@@ -47,6 +47,11 @@ spec:
                   name: {{ .Values.qdrant.apiKeySecret }}
                   key: QDRANT_API_KEY
             {{- end }}
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.admin }}
+                  key: INTERNAL_API_TOKEN
             - name: HOME
               value: /tmp
           ports:

@@ -1,0 +1,61 @@
+/* The admin portal's few additions to PatternFly (loaded by the admin entry only). */
+
+.admin-brand {
+  font-size: var(--pf-t--global--font--size--lg);
+}
+
+.admin-tile__number {
+  font-size: var(--pf-t--global--font--size--3xl);
+  font-weight: var(--pf-t--global--font--weight--heading--default);
+  line-height: 1.2;
+}
+
+.admin-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--pf-t--global--spacer--sm);
+}
+
+.admin-timeline__when {
+  color: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--sm);
+  white-space: nowrap;
+}
+
+.admin-timeline__note {
+  color: var(--pf-t--global--text--color--subtle);
+  margin-left: var(--pf-t--global--spacer--md);
+}
+
+.admin-matches td {
+  color: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--sm);
+  padding-top: 0 !important;
+}
+
+.admin-matches mark {
+  background: var(--pf-t--global--background--color--highlight--default, #fff3a8);
+  color: inherit;
+  padding: 0 1px;
+}
+
+.admin-transcript {
+  display: grid;
+  gap: var(--pf-t--global--spacer--md);
+}
+
+.admin-message {
+  border-left: 3px solid var(--pf-t--global--border--color--default);
+  padding-left: var(--pf-t--global--spacer--md);
+}
+
+.admin-message--user {
+  border-left-color: var(--pf-t--global--color--brand--default);
+}
+
+.admin-message__text {
+  white-space: pre-wrap;
+  margin-top: var(--pf-t--global--spacer--xs);
+}

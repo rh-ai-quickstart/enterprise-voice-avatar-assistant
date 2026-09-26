@@ -24,6 +24,9 @@ spec:
           env:
             - name: RAG_API_UPSTREAM
               value: rag-api:8080
+            # false: the proxy refuses /api/v1/admin/* like every other internal route
+            - name: ADMIN_ENABLED
+              value: {{ .Values.admin.enabled | quote }}
           ports:
             - name: http
               containerPort: 8080
@@ -60,6 +63,11 @@ metadata:
   name: frontend
   labels:
     {{- include "assistant.componentLabels" (dict "root" . "name" "frontend") | nindent 4 }}
+  {{- if .Values.admin.enabled }}
+  annotations:
+    # The admin portal's event stream is one long response (a comment every 15 s keeps it alive)
+    haproxy.router.openshift.io/timeout: 1h
+  {{- end }}
 spec:
   {{- if $host }}
   host: {{ $host }}

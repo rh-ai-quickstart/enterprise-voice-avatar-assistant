@@ -262,14 +262,16 @@ def test_request_reply_wording():
 
 
 def test_archive_session_calls_n8n(monkeypatch):
+    from app import archives
+
     calls = []
     monkeypatch.setattr(
-        memory,
-        "request_archive",
-        lambda sid: calls.append(sid) or {"requested": True, "doc_url": "https://docs/x"},
+        archives,
+        "request",
+        lambda sid: calls.append(sid) or {"requested": True, "doc_url": "https://docs/x", "archive_id": 3},
     )
     with TestClient(app) as client:
         r = client.post("/v1/sessions/s1/archive")
     assert r.status_code == 202
-    assert r.json() == {"session_id": "s1", "requested": True, "doc_url": "https://docs/x"}
+    assert r.json() == {"session_id": "s1", "requested": True, "doc_url": "https://docs/x", "archive_id": 3}
     assert calls == ["s1"]

@@ -14,6 +14,7 @@
 #   REPO_URL=<git url>               fork to deploy from (default: the upstream repository)
 #   TARGET_REVISION=main             branch, tag or commit
 #   DOMAIN=<apps domain>             default: read from the cluster
+#   SLACK_ENABLED, GOOGLE_DOCS_ENABLED   true/false; default: on when the keys are in assistant-integrations
 #   WAIT=1                           0 = register the application and return
 #   RUN_TESTS=0                      1 = run the connectivity test pod at the end
 #   LOG_FILE=~/assistant-deploy-<timestamp>.log
@@ -82,16 +83,22 @@ printf 'DOMAIN=%s\nPROJECT=%s\nVALUES_FILE=%s\nLLM_ENDPOINT=%s\nLLM_MODEL=%s\n' 
 
 step "Secrets"
 NAMESPACE="$PROJECT" SECRETS_FILE="${SECRETS_FILE:-}" "$ROOT/scripts/create-secrets.sh" | sed 's/^/  /'
+has_key() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$1}" 2>/dev/null)" ]; }
 for key in SLACK_BOT_TOKEN TAVUS_API_KEY GOOGLE_DOCS_FOLDER_ID; do
-  if [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$key}" 2>/dev/null)" ]; then ok "$key set"; else warn "$key empty (feature off)"; fi
+  if has_key "$key"; then ok "$key set"; else warn "$key empty (feature off)"; fi
 done
+if has_key SLACK_BOT_TOKEN && ! has_key SLACK_SIGNING_SECRET; then warn "SLACK_SIGNING_SECRET empty: clicks on the Slack approval cards are refused; approve in the admin portal, or add the secret"; fi
+# integrations.*.enabled follow the keys unless set explicitly
+if [ -z "${SLACK_ENABLED:-}" ]; then SLACK_ENABLED=false; has_key SLACK_BOT_TOKEN && SLACK_ENABLED=true; fi
+if [ -z "${GOOGLE_DOCS_ENABLED:-}" ]; then GOOGLE_DOCS_ENABLED=false; has_key GOOGLE_SERVICE_ACCOUNT_JSON && has_key GOOGLE_DOCS_FOLDER_ID && GOOGLE_DOCS_ENABLED=true; fi
+ok "integrations: Slack $SLACK_ENABLED, Google Docs $GOOGLE_DOCS_ENABLED; approvals in the admin portal$([ "$SLACK_ENABLED" = true ] && echo " and in Slack")"
 
 step "Argo CD application"
 run oc apply -f "$ROOT/deploy/argocd/appproject.yaml" >/dev/null
 oc patch appprojects.argoproj.io "$APP" -n openshift-gitops --type merge -p "{\"spec\":{\"sourceRepos\":[\"$REPO_URL\"],\"destinations\":[{\"server\":\"https://kubernetes.default.svc\",\"namespace\":\"$PROJECT\"}]}}" >/dev/null && ok "AppProject allows $REPO_URL -> $PROJECT"
 run oc apply -f "$ROOT/deploy/argocd/application.yaml" >/dev/null
-oc patch applications.argoproj.io "$APP" -n openshift-gitops --type merge -p "{\"spec\":{\"source\":{\"repoURL\":\"$REPO_URL\",\"targetRevision\":\"$TARGET_REVISION\",\"helm\":{\"valueFiles\":[\"values.yaml\",\"$VALUES_FILE\"],\"valuesObject\":$VALUES_OBJECT,\"parameters\":[{\"name\":\"global.domain\",\"value\":\"$DOMAIN\"},{\"name\":\"models.llm.endpoint\",\"value\":\"$LLM_ENDPOINT\"},{\"name\":\"models.llm.servedModelName\",\"value\":\"$LLM_MODEL\"}]}},\"destination\":{\"namespace\":\"$PROJECT\"}}}" >/dev/null \
-  && ok "Application $APP: $REPO_URL@$TARGET_REVISION, values $VALUES_FILE, global.domain=$DOMAIN, llm $LLM_MODEL at $LLM_ENDPOINT"
+oc patch applications.argoproj.io "$APP" -n openshift-gitops --type merge -p "{\"spec\":{\"source\":{\"repoURL\":\"$REPO_URL\",\"targetRevision\":\"$TARGET_REVISION\",\"helm\":{\"valueFiles\":[\"values.yaml\",\"$VALUES_FILE\"],\"valuesObject\":$VALUES_OBJECT,\"parameters\":[{\"name\":\"global.domain\",\"value\":\"$DOMAIN\"},{\"name\":\"models.llm.endpoint\",\"value\":\"$LLM_ENDPOINT\"},{\"name\":\"models.llm.servedModelName\",\"value\":\"$LLM_MODEL\"},{\"name\":\"integrations.slack.enabled\",\"value\":\"$SLACK_ENABLED\"},{\"name\":\"integrations.googleDocs.enabled\",\"value\":\"$GOOGLE_DOCS_ENABLED\"}]}},\"destination\":{\"namespace\":\"$PROJECT\"}}}" >/dev/null \
+  && ok "Application $APP: $REPO_URL@$TARGET_REVISION, values $VALUES_FILE, global.domain=$DOMAIN, llm $LLM_MODEL at $LLM_ENDPOINT, Slack $SLACK_ENABLED, Google Docs $GOOGLE_DOCS_ENABLED"
 oc annotate applications.argoproj.io "$APP" -n openshift-gitops argocd.argoproj.io/refresh=normal --overwrite >/dev/null
 # Routes are immutable in their host: any route created earlier with a different host (for
 # example by a sync that ran before the domain was set) is removed so Argo CD recreates it
@@ -190,6 +197,7 @@ step "URLs"
 for r in frontend n8n livekit qdrant; do
   host=$(oc get route "$r" -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null) && [ -n "$host" ] && printf '  %-9s https://%s\n' "$r" "$host"
 done
+host=$(oc get route frontend -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null) && [ -n "$host" ] && printf '  %-9s https://%s/admin  (password: oc extract secret/assistant-admin -n %s --keys=ADMIN_PASSWORD --to=-)\n' "admin" "$host" "$PROJECT"
 printf '  %-9s https://%s\n' "argocd" "$(oc get route openshift-gitops-server -n openshift-gitops -o jsonpath='{.spec.host}')"
 if [ "${RUN_TESTS:-0}" = "1" ]; then
   step "Connectivity test pod"

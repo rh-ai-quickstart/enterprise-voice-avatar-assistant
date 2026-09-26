@@ -55,6 +55,11 @@ scripts send. Public routes are marked below.
 | GET | `/v1/admin/knowledge-gaps` | `status` (`open`, `resolved`, `dismissed`, `all`), `from` (default: seven days ago), `to`, `group` (default true: grouped by meaning, `GAP_GROUP_THRESHOLD`, most-asked wording first; older gaps are embedded on the first request) |
 | POST | `/v1/admin/knowledge-gaps/resolve` | `{"ids", "status": "resolved"\|"dismissed"\|"open", "note"}`; resolved and dismissed gaps leave the open list and the digest |
 | POST | `/v1/admin/knowledge-gaps/{id}/retest` | retrieval for the question now (no language model call): the top passages and whether the best score clears `GAP_SCORE_THRESHOLD` |
+| GET | `/v1/admin/documents` | `kind` (`all`, `indexed`: chunks in Qdrant, `classified`: inbox files with extracted fields), `q`, `bucket`, `page`, `limit` |
+| GET | `/v1/admin/documents/{doc_id}` | a document with its extracted fields and ingestion jobs |
+| POST | `/v1/admin/documents/upload` | multipart `file` (up to 25 MiB) and `bucket` (`documents` to index, `inbox` to classify): the ingestion service writes the object and the object store's notification starts the workflow |
+| POST | `/v1/admin/documents/{doc_id}/reingest`, DELETE `/v1/admin/documents/{doc_id}` | through the ingestion service; delete removes the vectors, the record and the object |
+| GET | `/v1/admin/ingestion/jobs` | recent ingestion jobs with their status, duration and error |
 | GET | `/v1/admin/activity` | the activity feed, newest first: `kind`, `severity`, `from`, `to`, `before_id`, `limit` |
 | GET | `/v1/admin/audit` | who did what in the portal: `actor`, `action`, `from`, `to`, `before_id`, `limit` |
 | GET | `/v1/admin/stream` | server-sent events (`event: activity`, `{id, kind, ref_type, ref_id}`) fed by PostgreSQL `LISTEN admin_events`; `Last-Event-ID` replays what was missed |

@@ -14,6 +14,10 @@ GET  /conversations/{id}/archives/{archive_id}/download   the transcript as it w
 DELETE /conversations/{id}            messages, notices, archive records and the archived copy
 GET  /knowledge-gaps                  open (or resolved, dismissed) gaps, grouped by meaning or listed
 POST /knowledge-gaps/resolve          resolve, dismiss or reopen gaps; /knowledge-gaps/{id}/retest retrieves again
+GET  /documents, /documents/{doc_id}  indexed and classified documents; one with its ingestion jobs
+POST /documents/upload                multipart file and bucket (documents or inbox)
+POST /documents/{doc_id}/reingest, DELETE /documents/{doc_id}   through the ingestion service
+GET  /ingestion/jobs                  recent ingestion jobs
 GET  /activity                        the activity feed, newest first
 GET  /audit                           the audit log, newest first
 GET  /stream                          server-sent events for live updates (stream.py)
@@ -26,10 +30,21 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
-from . import archives, audit, auth, conversations, events, gdocs, knowledge_gaps, stream, tickets
+from . import archives, audit, auth, conversations, documents, events, gdocs, knowledge_gaps, stream, tickets
 from .config import settings
 from .schemas import (
     ActivityPage,
@@ -374,6 +389,79 @@ async def knowledge_gap_retest(gap_id: int, _: Admin):
     if result is None:
         raise HTTPException(status_code=404, detail="knowledge gap not found")
     return result
+
+
+# ---------------------------------------------------------------- documents ------------------
+
+UPLOAD_LIMIT = 25 * 1024 * 1024  # the frontend proxy's client_max_body_size
+
+
+@router.get("/documents")
+async def documents_list(
+    _: Admin,
+    kind: Annotated[str, Query(pattern="^(all|indexed|classified)$")] = "all",
+    q: str | None = None,
+    bucket: str | None = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Limit = 50,
+):
+    items, total = await asyncio.to_thread(documents.search, kind, q, bucket, page, limit)
+    return {"items": items, "total": total, "page": page, "limit": limit}
+
+
+@router.get("/documents/{doc_id}")
+async def document_detail(doc_id: str, _: Admin):
+    return await asyncio.to_thread(documents.detail, doc_id)
+
+
+@router.post("/documents/upload", status_code=201)
+async def document_upload(
+    session: Admin,
+    request: Request,
+    file: Annotated[UploadFile, File()],
+    bucket: Annotated[str, Form(pattern="^(documents|inbox)$")],
+):
+    data = await file.read(UPLOAD_LIMIT + 1)
+    if len(data) > UPLOAD_LIMIT:
+        raise HTTPException(status_code=413, detail="files up to 25 MiB")
+    result = await asyncio.to_thread(
+        documents.upload, bucket, file.filename or "upload", data, file.content_type, session.name
+    )
+    await asyncio.to_thread(
+        audit.record, session.name, "document.upload", request, "document", result["doc_id"], None, result
+    )
+    return result
+
+
+@router.post("/documents/{doc_id}/reingest")
+async def document_reingest(doc_id: str, session: Admin, request: Request):
+    result = await asyncio.to_thread(documents.reingest, doc_id, session.name)
+    await asyncio.to_thread(
+        audit.record, session.name, "document.reingest", request, "document", doc_id, None, result
+    )
+    return result
+
+
+@router.delete("/documents/{doc_id}")
+async def document_delete(doc_id: str, session: Admin, request: Request):
+    before = await asyncio.to_thread(documents.detail, doc_id)
+    result = await asyncio.to_thread(documents.delete, doc_id, session.name)
+    await asyncio.to_thread(
+        audit.record,
+        session.name,
+        "document.delete",
+        request,
+        "document",
+        doc_id,
+        {"source_uri": before["source_uri"], "chunks": before["chunks"]},
+        result,
+    )
+    return result
+
+
+@router.get("/ingestion/jobs")
+async def ingestion_jobs(_: Admin, limit: Limit = 50):
+    return {"items": await asyncio.to_thread(documents.jobs, None, limit)}
 
 
 # ---------------------------------------------------------------- activity and audit ---------

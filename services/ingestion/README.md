@@ -18,6 +18,7 @@ its previous chunks.
 | GET | `/v1/jobs`, `/v1/jobs/{id}` | job status: `queued`, `running`, `done`, `failed` |
 | POST | `/v1/extract` | `{"key": "inbox/invoice.pdf", "bucket": "inbox"}` → the document's text as Markdown, for classification |
 | GET | `/v1/documents` | documents recorded in PostgreSQL (501 when no database is configured) |
+| POST | `/v1/objects` | multipart `file` and `bucket` (one of `S3_BUCKETS`): stores the object without starting a job; the object store's notification drives ingestion or classification (the admin portal's upload) |
 | DELETE | `/v1/documents/{doc_id}` | remove a document's vectors and record; `?purge_object=true` also removes the object from its bucket (found from the record) |
 
 Every POST and DELETE needs `Authorization: Bearer $INTERNAL_API_TOKEN`; the RAG API and the n8n

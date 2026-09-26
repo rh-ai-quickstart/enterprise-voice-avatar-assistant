@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from . import auth, clients, memory
+from . import auth, clients, events, memory
 from .config import settings
 from .schemas import ClassifyRequest, ClassifyResponse
 
@@ -115,4 +115,16 @@ def classify_document(request: ClassifyRequest) -> ClassifyResponse:
     result = classify_text(text, filename)
     if doc_id and source:
         memory.record_extraction(doc_id, source, source_uri, result["doc_type"], result)
+        events.record(
+            "document.classified",
+            f"{source} classified as {result['doc_type']} ({round(result['confidence'] * 100)}%)",
+            detail=result["summary"] or None,
+            ref_type="document",
+            ref_id=doc_id,
+            data={
+                "doc_type": result["doc_type"],
+                "confidence": result["confidence"],
+                "fields": len(result["fields"]),
+            },
+        )
     return ClassifyResponse(doc_id=doc_id, source=source, model=settings.llm_model, **result)

@@ -47,6 +47,7 @@ from . import (
     classify,
     clients,
     conversations,
+    documents,
     events,
     faces,
     gdocs,
@@ -131,7 +132,10 @@ INTERNAL = [Depends(auth.require_internal_token)]
 
 @app.exception_handler(tickets.TicketError)
 @app.exception_handler(conversations.ConversationError)
-async def domain_error(_, exc: tickets.TicketError | conversations.ConversationError):
+@app.exception_handler(documents.DocumentError)
+async def domain_error(
+    _, exc: tickets.TicketError | conversations.ConversationError | documents.DocumentError
+):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 

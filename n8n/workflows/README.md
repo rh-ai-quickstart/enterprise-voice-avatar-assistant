@@ -8,7 +8,7 @@ cluster-specific values.
 | File | Trigger | What it does |
 |---|---|---|
 | `wf1-chat-orchestration.json` | `POST /webhook/chat` | forwards `{message, session_id, user_id, mode}` to the RAG API and returns the grounded answer; entry point for forms and other channels |
-| `wf2-document-ingestion.json` | `POST /webhook/minio-event` (MinIO bucket notification) | `documents` and `transcripts` objects are sent to the ingestion service, the job is polled to completion, and `#assistant-ingestion` is notified; `inbox` objects are handed to WF3 |
+| `wf2-document-ingestion.json` | `POST /webhook/object-created` (the object store's S3 notification; objects in `EVENT_BUCKETS` only) | `documents` and `transcripts` objects are sent to the ingestion service, the job is polled to completion, and `#assistant-ingestion` is notified; `inbox` objects are handed to WF3 |
 | `wf3-classification-extraction.json` | `POST /webhook/classify` | calls the RAG API classifier, posts the type, summary and extracted fields to `#assistant-documents`, and forwards the JSON to `DOWNSTREAM_URL` when set |
 | `wf4-request-intake-approval.json` | `POST /webhook/request-intake` (from the RAG API) and `POST /webhook/slack-interactions` (Slack buttons) | posts an approval card with Approve and Reject buttons to `#assistant-approvals`; on a click records the decision on the ticket, fulfils approved requests (mock), notifies `#assistant-tickets`, and updates the Slack card |
 | `wf5-transcript-archival.json` | `POST /webhook/archive-transcript` with `{session_id}` | fetches the session transcript, writes it to a Google Doc when `GOOGLE_DOCS_FOLDER_ID` is set, and re-ingests it into the `transcripts` bucket |
@@ -61,8 +61,8 @@ chart always sets.
 N8N=https://$(oc get route n8n -n voice-avatar-assistant -o jsonpath='{.spec.host}')
 # WF1: text question through n8n
 curl -s -X POST $N8N/webhook/chat -H 'Content-Type: application/json' -d '{"message":"How often must administrator passwords be rotated?"}'
-# WF2: simulate a MinIO event (or upload a file in the MinIO console)
-curl -s -X POST $N8N/webhook/minio-event -H 'Content-Type: application/json' -d '{"EventName":"s3:ObjectCreated:Put","Key":"documents/password-policy.md"}'
+# WF2: simulate the object store's notification (or upload a file in its web UI)
+curl -s -X POST $N8N/webhook/object-created -H 'Content-Type: application/json' -d '{"Records":[{"eventName":"s3:ObjectCreated:Put","s3":{"bucket":{"name":"documents"},"object":{"key":"password-policy.md"}}}]}'
 # WF3: classify an object from the inbox bucket
 curl -s -X POST $N8N/webhook/classify -H 'Content-Type: application/json' -d '{"bucket":"documents","key":"password-policy.md"}'
 # WF5: archive a session transcript

@@ -27,7 +27,7 @@ images:
 
 # Names of the pre-created Secrets. Keys per secret:
 #   postgres:     POSTGRESQL_USER, POSTGRESQL_PASSWORD, POSTGRESQL_DATABASE, DATABASE_URL
-#   minio:        MINIO_ROOT_USER, MINIO_ROOT_PASSWORD
+#   objectStore:  S3_ACCESS_KEY, S3_SECRET_KEY
 #   n8n:          N8N_ENCRYPTION_KEY
 #   livekit:      LIVEKIT_API_KEY, LIVEKIT_API_SECRET
 #   models:       LLM_API_KEY, STT_API_KEY, TTS_API_KEY, EMBEDDINGS_API_KEY, GUARDRAILS_API_KEY, HF_TOKEN
@@ -36,7 +36,7 @@ images:
 #                 GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DOCS_FOLDER_ID
 secrets:
   postgres: assistant-postgres
-  minio: assistant-minio
+  objectStore: assistant-object-store
   n8n: assistant-n8n
   livekit: assistant-livekit
   models: assistant-models
@@ -78,29 +78,36 @@ qdrant:
       cpu: "1"
       memory: 2Gi
 
-minio:
+# S3-compatible object storage: VersityGW (https://github.com/versity/versitygw), an Apache 2.0 S3
+# gateway that keeps the objects as files on its volume. Every new object is announced to n8n
+# (WF2), which ingests or classifies the ones in `eventBuckets`.
+objectStore:
   enabled: true
-  image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
-  mcImage: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
-  # Buckets created after install. `eventBuckets` also notify n8n on new objects.
+  image: ghcr.io/versity/versitygw:v1.8.0
+  # Buckets the ingestion service creates when they are missing.
   buckets:
     - documents
     - inbox
     - transcripts
+  # Buckets whose new objects WF2 acts on: documents are indexed, inbox files classified.
+  # (transcripts are indexed by the archival workflow itself.)
   eventBuckets:
     - documents
     - inbox
   storage: 20Gi
+  # VersityGW's web UI at https://<host>/ui/: browse the buckets and upload files (sign in with
+  # S3_ACCESS_KEY and S3_SECRET_KEY from the objectStore secret). The Route also exposes the S3
+  # API, which only answers signed requests.
   console:
     route: true
     publicHost: ""
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
+      cpu: 100m
+      memory: 128Mi
     limits:
       cpu: "1"
-      memory: 1Gi
+      memory: 512Mi
 
 n8n:
   enabled: true

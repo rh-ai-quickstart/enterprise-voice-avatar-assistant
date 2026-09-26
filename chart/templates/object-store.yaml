@@ -1,0 +1,181 @@
+{{- if .Values.objectStore.enabled }}
+{{- $consoleHost := include "assistant.publicHost" (dict "root" . "name" "object-store" "override" .Values.objectStore.console.publicHost) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: object-store-data
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "object-store") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.global.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.objectStore.storage }}
+---
+# Which S3 events VersityGW sends: new objects only. The bucket list is applied by WF2
+# (EVENT_BUCKETS), since VersityGW announces events for every bucket.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: object-store-events
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "object-store") | nindent 4 }}
+data:
+  filter.json: |
+    {
+      "s3:ObjectCreated:*": true,
+      "s3:ObjectCreated:Put": true,
+      "s3:ObjectCreated:Post": true,
+      "s3:ObjectCreated:Copy": true,
+      "s3:ObjectCreated:CompleteMultipartUpload": true,
+      "s3:ObjectRemoved:Delete": false,
+      "s3:ObjectAcl:Put": false,
+      "s3:ObjectTagging:*": false,
+      "s3:ObjectTagging:Put": false,
+      "s3:ObjectTagging:Delete": false,
+      "s3:ObjectRestore:*": false,
+      "s3:ObjectRestore:Post": false,
+      "s3:ObjectRestore:Completed": false
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: object-store
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "object-store") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "assistant.selector" (dict "root" . "name" "object-store") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "assistant.componentLabels" (dict "root" . "name" "object-store") | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: versitygw
+          image: {{ .Values.objectStore.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          # Objects are files under /data/buckets; their metadata goes to a sidecar directory rather
+          # than extended attributes, which not every storage class supports. Everything is group
+          # writable: OpenShift runs the pod with an arbitrary UID in group 0.
+          # VersityGW sends n8n a test notification when it starts and stops if that fails, which it
+          # does while n8n is still starting: it is started again every 10 seconds until it runs
+          # (the pod is not ready meanwhile), instead of the pod crash-looping with growing delays.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              mkdir -p -m 0775 /data/buckets /data/meta
+              trap 'kill -TERM "$pid" 2>/dev/null; wait "$pid"; exit 0' TERM INT
+              while :; do
+                versitygw --health /health --webui-s3-prefix /ui \
+                  posix --dir-perms 0775 --file-perms 0664 --sidecar /data/meta /data/buckets &
+                pid=$!
+                wait "$pid"
+                echo "versitygw exited ($?); starting it again in 10 s (is n8n up to take its notifications?)"
+                sleep 10 & wait $!
+              done
+          env:
+            - name: ROOT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.objectStore }}
+                  key: S3_ACCESS_KEY
+            - name: ROOT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.objectStore }}
+                  key: S3_SECRET_KEY
+            {{- if .Values.n8n.enabled }}
+            # Every new object is announced to the n8n ingestion workflow (WF2)
+            - name: VGW_EVENT_WEBHOOK_URL
+              value: http://n8n:5678/webhook/object-created
+            - name: VGW_EVENT_FILTER
+              value: /etc/versitygw/filter.json
+            {{- end }}
+          ports:
+            - name: s3
+              containerPort: 7070
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: s3
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.objectStore.resources | nindent 12 }}
+          securityContext:
+            {{- include "assistant.securityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: events
+              mountPath: /etc/versitygw
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: object-store-data
+        - name: events
+          configMap:
+            name: object-store-events
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: object-store
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "object-store") | nindent 4 }}
+spec:
+  selector:
+    {{- include "assistant.selector" (dict "root" . "name" "object-store") | nindent 4 }}
+  ports:
+    - name: s3
+      port: 7070
+      targetPort: s3
+{{- if .Values.objectStore.console.route }}
+---
+# The web UI (/ui/) and the S3 API it calls from the browser; the API answers signed requests only
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: object-store
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "object-store") | nindent 4 }}
+  annotations:
+    # Uploads of large documents through the web UI
+    haproxy.router.openshift.io/timeout: 300s
+spec:
+  {{- if $consoleHost }}
+  host: {{ $consoleHost }}
+  {{- end }}
+  to:
+    kind: Service
+    name: object-store
+  port:
+    targetPort: s3
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}
+{{- end }}

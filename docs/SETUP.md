@@ -209,7 +209,7 @@ that prints the password.
 
 ### 8 Sample documents
 
-`scripts/load-sample-docs.sh` uploads the fifteen sample files to MinIO: policies and
+`scripts/load-sample-docs.sh` uploads the fifteen sample files to the object store: policies and
 procedures into `documents`, invoices and contracts into `inbox`. The step waits until at
 least ten documents are indexed (up to fifteen minutes, with a count every minute) and prints
 `scripts/check-index.sh`. The inbox files show no chunks until their classification card is

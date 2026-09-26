@@ -76,11 +76,13 @@ if [ "$WAIT" = "1" ]; then
 fi
 
 say "URLs"
-for r in frontend n8n minio-console qdrant; do
+for r in frontend n8n qdrant; do
   h=$(oc get route "$r" -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || true)
   [ -n "$h" ] && printf '  %-14s https://%s\n' "$r" "$h"
 done
-echo "  Credentials: oc extract secret/assistant-minio -n $PROJECT --to=-   (MinIO); n8n asks you to create the owner account on first visit."
+h=$(oc get route object-store -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/null || true)
+[ -n "$h" ] && printf '  %-14s https://%s/ui/\n' "object store" "$h"
+echo "  Credentials: oc extract secret/assistant-object-store -n $PROJECT --to=-   (object store web UI); n8n: oc extract secret/assistant-n8n -n $PROJECT --keys=N8N_OWNER_PASSWORD --to=-"
 
 if [ "${RUN_TESTS:-0}" = "1" ]; then
   say "Running helm test"

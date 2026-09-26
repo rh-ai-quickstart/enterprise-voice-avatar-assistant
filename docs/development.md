@@ -27,7 +27,7 @@ oc port-forward -n $NS svc/postgres 5432:5432 &
 oc port-forward -n $NS svc/qdrant 6333:6333 &
 oc port-forward -n $NS svc/llama-3-1-8b-instruct-predictor 8000:8080 &
 oc port-forward -n $NS svc/bge-m3-predictor 8001:8080 &
-oc port-forward -n $NS svc/minio 9000:9000 &
+oc port-forward -n $NS svc/object-store 7070:7070 &
 ```
 
 ```bash
@@ -45,7 +45,7 @@ RAG API:
 cd services/rag-api && uv sync && uv run uvicorn app.main:app --reload --port 8080
 ```
 
-Ingestion (needs `S3_ENDPOINT_URL=http://localhost:9000` and the MinIO credentials from `assistant-minio`; the Docling models download on first run):
+Ingestion (needs `S3_ENDPOINT_URL=http://localhost:7070` and `S3_ACCESS_KEY`, `S3_SECRET_KEY` from `assistant-object-store`; the Docling models download on first run):
 
 ```bash
 cd services/ingestion && uv sync && uv run uvicorn app.main:app --reload --port 8081

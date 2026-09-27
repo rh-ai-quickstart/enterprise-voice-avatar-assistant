@@ -49,8 +49,10 @@ export function App() {
   }
   const signOut = async () => {
     await api.logout().catch(() => undefined);
-    client.clear();
+    // The sign-in first, so the portal gives way to the sign-in page (clearing the whole cache
+    // would detach the query above from it); then everything else that belonged to the session
     client.setQueryData(["me"], null);
+    client.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
   };
   return (
     <Layout me={me.data} onSignOut={signOut}>

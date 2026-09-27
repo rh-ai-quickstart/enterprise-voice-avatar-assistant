@@ -130,26 +130,40 @@ export function TicketsPage() {
                   <Th>Reference</Th>
                   <Th>Title</Th>
                   <Th>Status</Th>
-                  <Th>Priority</Th>
-                  <Th>Category</Th>
-                  <Th>Requester</Th>
-                  <Th>Channel</Th>
-                  <Th>Filed</Th>
+                  {!ref && (
+                    <>
+                      <Th>Priority</Th>
+                      <Th>Category</Th>
+                      <Th>Requester</Th>
+                      <Th>Channel</Th>
+                      <Th>Filed</Th>
+                    </>
+                  )}
                 </Tr>
               </Thead>
               <Tbody>
                 {tickets.data?.items.map((t) => (
                   <Tr key={t.id} isClickable isRowSelected={t.ticket_ref === ref} onRowClick={() => open(t.ticket_ref)}>
-                    <Td dataLabel="Reference">{t.ticket_ref}</Td>
-                    <Td dataLabel="Title">{t.title}</Td>
-                    <Td dataLabel="Status">
+                    <Td dataLabel="Reference" modifier="nowrap">
+                      {t.ticket_ref}
+                    </Td>
+                    <Td dataLabel="Title">
+                      {t.title}
+                      {/* With a ticket open beside the list, the panel shows the other fields */}
+                      {ref && <div className="admin-timeline__when">{t.requester ?? "-"}</div>}
+                    </Td>
+                    <Td dataLabel="Status" modifier="nowrap">
                       <StatusLabel status={t.status} />
                     </Td>
-                    <Td dataLabel="Priority">{t.priority}</Td>
-                    <Td dataLabel="Category">{words(t.category)}</Td>
-                    <Td dataLabel="Requester">{t.requester ?? "-"}</Td>
-                    <Td dataLabel="Channel">{t.channel ?? "-"}</Td>
-                    <Td dataLabel="Filed">{when(t.created_at)}</Td>
+                    {!ref && (
+                      <>
+                        <Td dataLabel="Priority">{t.priority}</Td>
+                        <Td dataLabel="Category">{words(t.category)}</Td>
+                        <Td dataLabel="Requester">{t.requester ?? "-"}</Td>
+                        <Td dataLabel="Channel">{t.channel ?? "-"}</Td>
+                        <Td dataLabel="Filed">{when(t.created_at)}</Td>
+                      </>
+                    )}
                   </Tr>
                 ))}
               </Tbody>

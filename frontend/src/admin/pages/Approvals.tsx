@@ -30,6 +30,8 @@ export function ApprovalsPage() {
   });
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const sla = overview.data?.sla ?? DEFAULT_SLA;
+  // With a request open beside it, the list keeps what tells the requests apart; the panel has the rest
+  const open = Boolean(ref);
 
   return (
     <Drawer isExpanded={Boolean(ref)} isInline>
@@ -50,29 +52,44 @@ export function ApprovalsPage() {
                   <Tr>
                     <Th>Reference</Th>
                     <Th>Request</Th>
-                    <Th>Requester</Th>
-                    <Th>Category</Th>
-                    <Th>Priority</Th>
-                    <Th>Channel</Th>
+                    {!open && (
+                      <>
+                        <Th>Requester</Th>
+                        <Th>Category</Th>
+                        <Th>Priority</Th>
+                        <Th>Channel</Th>
+                      </>
+                    )}
                     <Th>Waiting</Th>
-                    <Th screenReaderText="Decision" />
+                    {!open && <Th screenReaderText="Decision" />}
                   </Tr>
                 </Thead>
                 <Tbody>
                   {pending.data?.items.map((t) => (
                     <Tr key={t.id} isClickable isRowSelected={t.ticket_ref === ref} onRowClick={() => navigate(`/approvals/${t.ticket_ref}`)}>
-                      <Td dataLabel="Reference">{t.ticket_ref}</Td>
-                      <Td dataLabel="Request">{t.title}</Td>
-                      <Td dataLabel="Requester">{t.requester ?? "-"}</Td>
-                      <Td dataLabel="Category">{words(t.category)}</Td>
-                      <Td dataLabel="Priority">{t.priority}</Td>
-                      <Td dataLabel="Channel">{t.channel ?? "-"}</Td>
-                      <Td dataLabel="Waiting">
+                      <Td dataLabel="Reference" modifier="nowrap">
+                        {t.ticket_ref}
+                      </Td>
+                      <Td dataLabel="Request">
+                        {t.title}
+                        {open && <div className="admin-timeline__when">{t.requester ?? "-"}</div>}
+                      </Td>
+                      {!open && (
+                        <>
+                          <Td dataLabel="Requester">{t.requester ?? "-"}</Td>
+                          <Td dataLabel="Category">{words(t.category)}</Td>
+                          <Td dataLabel="Priority">{t.priority}</Td>
+                          <Td dataLabel="Channel">{t.channel ?? "-"}</Td>
+                        </>
+                      )}
+                      <Td dataLabel="Waiting" modifier="nowrap">
                         <SlaBadge minutes={t.pending_minutes} sla={sla} />
                       </Td>
-                      <Td dataLabel="Decision" onClick={(e) => e.stopPropagation()}>
-                        <TicketActions ticket={t} actions={["approve", "reject"]} />
-                      </Td>
+                      {!open && (
+                        <Td dataLabel="Decision" onClick={(e) => e.stopPropagation()}>
+                          <TicketActions ticket={t} actions={["approve", "reject"]} />
+                        </Td>
+                      )}
                     </Tr>
                   ))}
                 </Tbody>

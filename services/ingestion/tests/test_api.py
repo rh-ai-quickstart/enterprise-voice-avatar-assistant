@@ -42,9 +42,15 @@ def test_write_routes_refuse_a_missing_or_wrong_token(monkeypatch):
     event = {"EventName": "s3:ObjectCreated:Put", "Key": "inbox/invoice.pdf"}
     with TestClient(app) as client:
         assert client.post("/v1/events/s3", json=event).status_code == 401
-        assert client.post("/v1/events/s3", json=event, headers={"Authorization": "Bearer no"}).status_code == 401
+        assert (
+            client.post("/v1/events/s3", json=event, headers={"Authorization": "Bearer no"}).status_code
+            == 401
+        )
         assert client.delete("/v1/documents/d1").status_code == 401
-        assert client.post("/v1/events/s3", json=event, headers={"Authorization": "Bearer tok"}).status_code == 200
+        assert (
+            client.post("/v1/events/s3", json=event, headers={"Authorization": "Bearer tok"}).status_code
+            == 200
+        )
         # Reads stay open inside the cluster
         assert client.get("/v1/jobs").status_code == 200
 
@@ -55,7 +61,9 @@ def test_delete_can_purge_the_object(monkeypatch):
     removed, calls = [], []
     monkeypatch.setattr(vectorstore, "delete_document", lambda d: calls.append(("vectors", d)))
     monkeypatch.setattr(db, "delete_document", lambda d: calls.append(("record", d)))
-    monkeypatch.setattr(db, "source_uri", lambda d: "s3://transcripts/transcript-abc.md" if d == "d1" else None)
+    monkeypatch.setattr(
+        db, "source_uri", lambda d: "s3://transcripts/transcript-abc.md" if d == "d1" else None
+    )
     monkeypatch.setattr(storage, "delete_object", lambda b, k: removed.append((b, k)))
     with TestClient(main.app) as client:
         kept = client.delete("/v1/documents/d1").json()

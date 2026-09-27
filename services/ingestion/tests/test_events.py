@@ -16,8 +16,10 @@ def test_records_are_parsed_and_keys_decoded():
 
 
 def test_removed_events_are_recognised():
-    event = {"EventName": "s3:ObjectRemoved:Delete", "Records": [
-        {"s3": {"bucket": {"name": "documents"}, "object": {"key": "old.pdf"}}}]}
+    event = {
+        "EventName": "s3:ObjectRemoved:Delete",
+        "Records": [{"s3": {"bucket": {"name": "documents"}, "object": {"key": "old.pdf"}}}],
+    }
     assert parse_s3_event(event) == [(REMOVED, "documents", "old.pdf")]
 
 

@@ -77,7 +77,10 @@ def test_intent_detection_sees_the_previous_turn(monkeypatch):
         return Client()
 
     monkeypatch.setattr(intent.clients, "llm", llm)
-    assert intent.detect("place the request", "I've logged your request REQ-000002: Repair the laptop.") == "question"
+    assert (
+        intent.detect("place the request", "I've logged your request REQ-000002: Repair the laptop.")
+        == "question"
+    )
     assert "REQ-000002" in seen["content"] and "place the request" in seen["content"]
 
 
@@ -87,7 +90,14 @@ def test_intake_requires_approval_by_default(monkeypatch):
     monkeypatch.setattr(
         tickets,
         "classify_request",
-        lambda text: {"title": "Repair laptop", "category": "hardware", "priority": "normal", "summary": "", "needs_approval": False, "details": {}},
+        lambda text: {
+            "title": "Repair laptop",
+            "category": "hardware",
+            "priority": "normal",
+            "summary": "",
+            "needs_approval": False,
+            "details": {},
+        },
     )
     created = {}
 
@@ -104,7 +114,9 @@ def test_intake_requires_approval_by_default(monkeypatch):
     monkeypatch.setattr(tickets, "update", fake_update)
     monkeypatch.setattr(tickets, "notify_n8n", lambda *a, **k: True)
     monkeypatch.setattr(settings, "requests_require_approval", True)
-    ticket, _classification, _ = tickets.intake(RequestIntake(text="my laptop is broken", session_id="s1", user_id="u1", channel="voice"))
+    ticket, _classification, _ = tickets.intake(
+        RequestIntake(text="my laptop is broken", session_id="s1", user_id="u1", channel="voice")
+    )
     assert created["needs_approval"] is True
     assert created["payload"]["model_needs_approval"] is False
     assert "pending_approval" in created["statuses"]

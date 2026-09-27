@@ -48,7 +48,9 @@ async def synthesize(text: str) -> tuple[int, int, bytes]:
 async def speak(room: rtc.Room, sample_rate: int, channels: int, pcm: bytes) -> None:
     source = rtc.AudioSource(sample_rate, channels)
     track = rtc.LocalAudioTrack.create_audio_track("mic", source)
-    await room.local_participant.publish_track(track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE))
+    await room.local_participant.publish_track(
+        track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
+    )
     samples_per_chunk = sample_rate // 100  # 10 ms
     chunk_bytes = samples_per_chunk * channels * 2
     silence = bytes(chunk_bytes)
@@ -57,7 +59,12 @@ async def speak(room: rtc.Room, sample_rate: int, channels: int, pcm: bytes) -> 
     chunks += [silence] * 200  # 2 s of silence so the VAD sees the end of the turn
     for chunk in chunks:
         await source.capture_frame(
-            rtc.AudioFrame(data=chunk, sample_rate=sample_rate, num_channels=channels, samples_per_channel=samples_per_chunk)
+            rtc.AudioFrame(
+                data=chunk,
+                sample_rate=sample_rate,
+                num_channels=channels,
+                samples_per_channel=samples_per_chunk,
+            )
         )
 
 
@@ -109,7 +116,9 @@ async def main() -> int:
         log("FAIL: no answer received on the data channel within 120 s")
         return 1
     log(f"answer: {reply.get('answer')!r}")
-    log(f"blocked={reply.get('blocked')} citations={[(c.get('n'), c.get('source'), c.get('used')) for c in reply.get('citations', [])]}")
+    log(
+        f"blocked={reply.get('blocked')} citations={[(c.get('n'), c.get('source'), c.get('used')) for c in reply.get('citations', [])]}"
+    )
     await room.disconnect()
     return 0
 

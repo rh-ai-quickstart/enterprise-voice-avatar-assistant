@@ -7,8 +7,12 @@ from pydantic import BaseModel, Field
 class IngestRequest(BaseModel):
     key: str = Field(description="Object key inside the bucket, for example policies/leave-policy.pdf")
     bucket: str | None = Field(default=None, description="Bucket name; defaults to the documents bucket")
-    doc_id: str | None = Field(default=None, description="Stable document id; derived from the bucket and key when omitted")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Free-form metadata stored with every chunk")
+    doc_id: str | None = Field(
+        default=None, description="Stable document id; derived from the bucket and key when omitted"
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Free-form metadata stored with every chunk"
+    )
 
 
 class JobStatus(BaseModel):

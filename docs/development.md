@@ -78,9 +78,9 @@ Every RAG API route is public (the chat and the voice agent), admin (the session
 ## Tests and checks
 
 ```bash
-(cd services/rag-api && uv run ruff check . && uv run pytest -q)
-(cd services/ingestion && uv run ruff check . && uv run pytest -q)
-(cd services/voice-agent && uv run ruff check . && uv run pytest -q)
+(cd services/rag-api && uv run ruff check . && uv run ruff format --check . && uv run pytest -q)
+(cd services/ingestion && uv run ruff check . && uv run ruff format --check . && uv run pytest -q)
+(cd services/voice-agent && uv run ruff check . && uv run ruff format --check . && uv run pytest -q)
 (cd frontend && npm test && npm run build)
 frontend/nginx/test-proxy.sh
 helm lint chart -f chart/values-demo-cluster.yaml

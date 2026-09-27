@@ -128,8 +128,9 @@ def test_stream_replays_after_last_event_id_and_ends_with_the_session(database, 
     first = events.record("document.ingested", "a.pdf indexed")
     second = events.record("document.ingested", "b.pdf indexed", ref_type="document", ref_id="d2")
     monkeypatch.setattr(stream, "KEEPALIVE_SECONDS", 0.2)
-    # A session with one second left, so the stream (and the test client) finishes
-    cookie, _ = auth.sign_session("Dana", now=time.time() - settings.admin_session_hours * 3600 + 1)
+    # A session with two seconds left, so the stream (and the test client) finishes; one second was
+    # occasionally too short on a busy machine
+    cookie, _ = auth.sign_session("Dana", now=time.time() - settings.admin_session_hours * 3600 + 2)
     with TestClient(app, base_url="https://testserver") as client:
         client.cookies.set(auth.COOKIE, cookie)
         response = client.get("/v1/admin/stream", headers={"Last-Event-ID": str(first)})

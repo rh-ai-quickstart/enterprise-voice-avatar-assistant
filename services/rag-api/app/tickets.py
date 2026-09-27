@@ -39,6 +39,9 @@ TRANSITIONS: dict[str, set[str]] = {
     "fulfilled": set(),
     "cancelled": set(),
 }
+# Payload keys the workflows and the RAG API own; the model's classification cannot set them
+RESERVED_PAYLOAD = {"channel", "summary", "slack", "decision", "model_needs_approval"}
+SLACK_PERMALINK = re.compile(r"^https://[A-Za-z0-9-]+\.slack\.com/")
 CATEGORIES = ["access_request", "hardware", "software", "hr", "facilities", "finance", "other"]
 PRIORITIES = ["low", "normal", "high", "urgent"]
 OPEN_STATES = {"intake", "classified", "pending_approval", "approved"}
@@ -375,6 +378,9 @@ def detail(ref: str) -> AdminTicketDetail:
             else "ok"
         )
     slack = ticket.payload.get("slack")
+    slack = dict(slack) if isinstance(slack, dict) else None
+    if slack and not SLACK_PERMALINK.match(str(slack.get("permalink") or "")):
+        slack.pop("permalink", None)  # only a link to Slack is shown as the card's link
     return AdminTicketDetail(
         **ticket.model_dump(),
         sla=TicketSla(
@@ -383,7 +389,7 @@ def detail(ref: str) -> AdminTicketDetail:
             level=level,
         ),
         conversation=conversation,
-        slack=slack if isinstance(slack, dict) else None,
+        slack=slack,
         actions=allowed_actions(ticket),
     )
 
@@ -561,7 +567,13 @@ def classify_request(text: str) -> dict[str, Any]:
         "priority": priority if priority in ("low", "normal", "high", "urgent") else "normal",
         "summary": str(data.get("summary", "")),
         "needs_approval": bool(data.get("needs_approval", True)),
-        "details": data.get("details") if isinstance(data.get("details"), dict) else {},
+        # The model's details never replace what the workflows keep on the ticket (a prompt in the
+        # chat could otherwise plant a Slack card reference or a decision)
+        "details": {
+            k: v
+            for k, v in (data.get("details") if isinstance(data.get("details"), dict) else {}).items()
+            if k not in RESERVED_PAYLOAD
+        },
     }
 
 
@@ -600,9 +612,9 @@ def intake(request: RequestIntake) -> tuple[Ticket, dict[str, Any], bool]:
             requester=request.requester or request.user_id,
             session_id=request.session_id,
             payload={
+                **classification["details"],
                 "channel": request.channel,
                 "summary": classification["summary"],
-                **classification["details"],
             },
             needs_approval=classification["needs_approval"],
         ),

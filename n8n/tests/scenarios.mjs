@@ -206,32 +206,43 @@ const event = (c) => {
 };
 const events = (o) => ({ events: o.calls.filter((c) => c.path === "/v1/internal/events").map(event).sort(), slack: o.slack });
 const created = (bucket, key) => ({ Records: [{ eventName: "s3:ObjectCreated:Put", s3: { bucket: { name: bucket }, object: { key, size: 100 } } }] });
+// The object store's webhook URL carries the internal token (the chart puts it there)
+const OBJECTS = `${N8N}/object-created?token=${TOKEN}`;
 const fed = (count) => (calls) => calls.filter((c) => c.path === "/v1/internal/events").length >= count;
 
 await reset();
 await post(`${N8N}/object-created`, created("documents", "handbook.pdf"));
+await post(`${N8N}/object-created?token=wrong`, created("documents", "handbook.pdf"));
+expect("WF2: object notifications without the token are ignored", (await outcome({ ms: 3000 })).calls.map(line), []);
+
+await reset();
+await post(OBJECTS, created("documents", "handbook.pdf"));
 expect("WF2: an indexed document reaches the feed", events(await outcome({ done: fed(SLACK_ON ? 2 : 1) })), {
   events: ['document.ingested success document:doc-transcript handbook.pdf indexed (12 chunks) {"bucket":"documents","key":"handbook.pdf","job_id":"job-1","chunks":12,"pages":3}'],
   slack: slack("Notify ingestion"),
 });
 
 await reset({ jobFails: true });
-await post(`${N8N}/object-created`, created("documents", "handbook.pdf"));
+await post(OBJECTS, created("documents", "handbook.pdf"));
 expect("WF2: a document that could not be indexed reaches the feed", events(await outcome({ done: fed(SLACK_ON ? 2 : 1) })), {
   events: ['document.ingest_failed error document:doc-transcript handbook.pdf could not be indexed | ConversionError: empty file {"bucket":"documents","key":"handbook.pdf","job_id":"job-1","chunks":null,"pages":null}'],
   slack: slack("Notify ingestion"),
 });
 
 await reset();
-await post(`${N8N}/object-created`, created("transcripts", "transcript-s1.md"));
+await post(OBJECTS, created("transcripts", "transcript-s1.md"));
 expect("WF2: objects outside EVENT_BUCKETS are left alone", (await outcome({ ms: 3000 })).calls.map(line), []);
 
 await reset();
-await post(`${N8N}/object-created`, created("inbox", "invoice-0042.pdf"));
+await post(OBJECTS, created("inbox", "invoice-0042.pdf"));
 const classified = await outcome({ done: (calls) => calls.some((c) => c.path === "/v1/classify"), limit: 20000 });
 expect("WF2 and WF3: an inbox file is classified with the token", classified.calls.filter((c) => c.path === "/v1/classify").map((c) => `${c.method} ${c.path} ${JSON.stringify(c.body)}`), [
   'POST /v1/classify {"bucket":"inbox","key":"invoice-0042.pdf"}',
 ]);
+
+await reset();
+await post(`${N8N}/classify`, { bucket: "documents", key: "handbook.pdf" });
+expect("WF3: classification without the token is ignored", (await outcome({ ms: 3000 })).calls.map(line), []);
 
 // ---------------------------------------------------------------- WF6, WF7: schedules --------
 

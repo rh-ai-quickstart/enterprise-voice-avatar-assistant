@@ -379,7 +379,7 @@ export const EVENT_KINDS: [string, string[]][] = [
     ],
   ],
   ["Knowledge gaps", ["gap.recorded", "gap.resolved", "gap.dismissed", "gap.reopened", "gaps.digest"]],
-  ["Integrations", ["integration.test", "integration.error"]],
+  ["Integrations", ["integration.test", "integration.error", "slack.click_refused"]],
 ];
 
 /** What the audit records. */

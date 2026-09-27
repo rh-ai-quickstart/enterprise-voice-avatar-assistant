@@ -1,6 +1,7 @@
 """Static checks of the n8n workflows the chart ships (chart/files/n8n-workflows)."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -108,15 +109,58 @@ def test_the_webhooks_the_rag_api_calls_exist():
         assert path.removeprefix("/webhook/") in webhooks, path
 
 
-@pytest.mark.parametrize("path", ["request-intake", "archive-transcript", "ticket-decided"])
+@pytest.mark.parametrize("path", ["request-intake", "archive-transcript", "ticket-decided", "classify"])
 def test_the_webhooks_the_rag_api_calls_accept_only_the_internal_token(path):
     wf, hook = _webhooks()[path]
     (check,) = _next_nodes(wf, hook["name"])
-    condition = check["parameters"]["conditions"]["conditions"][0]
+    (condition,) = check["parameters"]["conditions"]["conditions"]
     assert check["type"] == "n8n-nodes-base.if"
-    assert "authorization" in condition["leftValue"] and "$env.INTERNAL_API_TOKEN" in condition["rightValue"]
+    # One condition that is false while the token is empty (an empty header must not match it)
+    assert condition["leftValue"].startswith("={{ Boolean($env.INTERNAL_API_TOKEN) && ")
+    assert "$json.headers.authorization" in condition["leftValue"]
+    assert condition["operator"] == {"type": "boolean", "operation": "true", "singleValue": True}
     # Nothing runs on the false branch
     assert wf["connections"][check["name"]]["main"][1] == []
+
+
+def test_object_notifications_need_the_token_in_the_url():
+    """The object store cannot send headers: its webhook URL carries the token, and WF2 checks it
+    before anything else."""
+    wf, hook = _webhooks()["object-created"]
+    (parse,) = _next_nodes(wf, hook["name"])
+    code = parse["parameters"]["jsCode"]
+    assert "if (!token || String(($input.first().json.query || {}).token || '') !== token) return [];" in code
+    assert code.index("return [];") < code.index("body.Records")
+    classify = next(n for n in wf["nodes"] if n["name"] == "Classify via WF3")
+    headers = {h["name"]: h["value"] for h in classify["parameters"]["headerParameters"]["parameters"]}
+    assert headers["Authorization"] == "=Bearer {{ $env.INTERNAL_API_TOKEN }}"
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.stem)
+def test_slack_text_escapes_what_users_and_the_model_wrote(path):
+    """Titles, questions, names, file names and the model's output are escaped in every Slack
+    message, so <https://evil|text> cannot become a link or <!channel> a mention."""
+    wf = load(path)
+    for node in wf["nodes"]:
+        params = node.get("parameters", {})
+        text = params.get("jsCode", "") + params.get("text", "")
+        for field in (
+            "t.title",
+            ".json.title",
+            "g.question",
+            "t.requester",
+            ".json.requester",
+            "$json.key",
+            "r.summary",
+        ):
+            for use in re.findall(
+                r"\$\{[^}]*" + re.escape(field) + r"[^}]*\}|\{\{[^}]*" + re.escape(field) + r"[^}]*\}\}", text
+            ):
+                if "ticket_ref" in use or "JSON.stringify" in use or "title:" in use:
+                    continue
+                assert "esc(" in use or "&amp;" in use, (
+                    f"{path.name}: {node['name']!r} puts {use!r} in Slack unescaped"
+                )
 
 
 def test_slack_clicks_are_verified_before_anything_else():

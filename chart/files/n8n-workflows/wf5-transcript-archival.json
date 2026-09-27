@@ -30,12 +30,13 @@
           },
           "conditions": [
             {
-              "id": "1ae0fb23-7910-5d1f-a19a-57d7e3edf227",
-              "leftValue": "={{ $json.headers.authorization || '' }}",
-              "rightValue": "={{ $env.INTERNAL_API_TOKEN ? 'Bearer ' + $env.INTERNAL_API_TOKEN : '' }}",
+              "id": "d8479516-86d6-5cd0-8dec-eda0ce3c97d0",
+              "leftValue": "={{ Boolean($env.INTERNAL_API_TOKEN) && ($json.headers.authorization || '') === 'Bearer ' + $env.INTERNAL_API_TOKEN }}",
+              "rightValue": "",
               "operator": {
-                "type": "string",
-                "operation": "equals"
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
               }
             }
           ],
@@ -342,7 +343,7 @@
           "value": "#assistant-ingestion"
         },
         "otherOptions": {},
-        "text": "=:memo: Transcript of session {{ $('Prepare document').first().json.session_id.slice(0, 8) }} archived{{ $('Prepare document').first().json.doc_url ? ' to <' + $('Prepare document').first().json.doc_url + '|Google Docs>' : '' }}{{ ['indexed', 'done'].includes($json.status) ? ' and indexed for later questions.' : '; re-ingestion failed: ' + ($json.error || 'unknown error') }}"
+        "text": "=:memo: Transcript of session {{ String($('Prepare document').first().json.session_id.slice(0, 8) ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }} archived{{ $('Prepare document').first().json.doc_url ? ' to <' + $('Prepare document').first().json.doc_url + '|Google Docs>' : '' }}{{ ['indexed', 'done'].includes($json.status) ? ' and indexed for later questions.' : '; re-ingestion failed: ' + (String($json.error || 'unknown error' ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')) }}"
       },
       "id": "b35c1fcd-6ee0-5963-ab17-643447bd2f36",
       "name": "Notify archival",

@@ -58,7 +58,7 @@ async def lifespan(_: FastAPI):
     )
     if not settings.internal_api_token:
         log.warning(
-            "INTERNAL_API_TOKEN is empty: the write routes are open to anyone who can reach this service"
+            "INTERNAL_API_TOKEN is empty: the write routes answer 503 until it is set (secret assistant-admin)"
         )
     await asyncio.to_thread(db.init_schema)
     buckets = asyncio.create_task(_ensure_buckets())
@@ -90,7 +90,8 @@ async def _ensure_buckets() -> None:
 def require_internal_token(request: Request) -> None:
     token = settings.internal_api_token
     if not token:
-        return
+        # Closed, not open: without a token nothing tells n8n and the other services from anyone else
+        raise HTTPException(status_code=503, detail="INTERNAL_API_TOKEN is not set: the internal routes are closed")
     scheme, _, value = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not hmac.compare_digest(value.strip().encode(), token.encode()):
         raise HTTPException(

@@ -112,7 +112,7 @@ Everything below is optional; the assistant runs without any of it. Keys go into
 | `assistant-qdrant` | `QDRANT_API_KEY` |
 | `assistant-livekit` | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
 | `assistant-models` | `LLM_API_KEY`, `STT_API_KEY`, `TTS_API_KEY`, `EMBEDDINGS_API_KEY`, `GUARDRAILS_API_KEY`, `HF_TOKEN` |
-| `assistant-admin` | `ADMIN_PASSWORD` (the admin portal's shared password), `ADMIN_SESSION_SECRET` (signs the portal's sessions), `INTERNAL_API_TOKEN` (what n8n, the ingestion service and the scripts send to the RAG API, and n8n and the RAG API to the ingestion service) |
+| `assistant-admin` | `ADMIN_PASSWORD` (the admin portal's shared password), `ADMIN_SESSION_SECRET` (signs the portal's sessions), `INTERNAL_API_TOKEN` (what n8n, the ingestion service and the scripts send to the RAG API, and n8n and the RAG API to the ingestion service; the object store's notifications carry it in their URL; without it the internal routes are closed) |
 | `assistant-integrations` | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `TAVUS_API_KEY`, `TAVUS_FACE_ID`, `TAVUS_PAL_ID`, `SIMLI_API_KEY`, `SIMLI_FACE_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_DOCS_FOLDER_ID` |
 
 Read a value, for example the object store's web UI login:

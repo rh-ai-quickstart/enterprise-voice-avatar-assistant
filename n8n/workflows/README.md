@@ -85,12 +85,13 @@ The chart sets them on the n8n pod; `DOWNSTREAM_URL` comes from `n8n.extraEnv`.
 
 ```bash
 N8N=https://$(oc get route n8n -n voice-avatar-assistant -o jsonpath='{.spec.host}')
+TOKEN=$(oc extract secret/assistant-admin -n voice-avatar-assistant --keys=INTERNAL_API_TOKEN --to=-)
 # WF1: text question through n8n
 curl -s -X POST $N8N/webhook/chat -H 'Content-Type: application/json' -d '{"message":"How often must administrator passwords be rotated?"}'
-# WF2: simulate the object store's notification (or upload a file in its web UI)
-curl -s -X POST $N8N/webhook/object-created -H 'Content-Type: application/json' -d '{"Records":[{"eventName":"s3:ObjectCreated:Put","s3":{"bucket":{"name":"documents"},"object":{"key":"password-policy.md"}}}]}'
-# WF3: classify an object from the inbox bucket
-curl -s -X POST $N8N/webhook/classify -H 'Content-Type: application/json' -d '{"bucket":"documents","key":"password-policy.md"}'
+# WF2: simulate the object store's notification, which carries the token in its URL (or upload a file in its web UI)
+curl -s -X POST "$N8N/webhook/object-created?token=$TOKEN" -H 'Content-Type: application/json' -d '{"Records":[{"eventName":"s3:ObjectCreated:Put","s3":{"bucket":{"name":"documents"},"object":{"key":"password-policy.md"}}}]}'
+# WF3: classify an object from the inbox bucket (WF2 calls it with the token)
+curl -s -X POST $N8N/webhook/classify -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"bucket":"documents","key":"password-policy.md"}'
 ```
 
 WF4's request intake and WF5 only act on calls from the RAG API (with the internal token), so
@@ -115,5 +116,17 @@ Executions and their inputs and outputs are visible under *Executions* in n8n.
   timestamp within five minutes. Unsigned, forged or replayed clicks, and every
   click while the secret is empty, are refused before the ticket is touched.
 - **Calls from the RAG API need the internal token.** `/webhook/request-intake`,
-  `/webhook/archive-transcript` and `/webhook/ticket-decided` act only on calls
-  that carry `Authorization: Bearer $INTERNAL_API_TOKEN`.
+  `/webhook/archive-transcript`, `/webhook/ticket-decided` and `/webhook/classify`
+  act only on calls that carry `Authorization: Bearer $INTERNAL_API_TOKEN`. The
+  checks are false while the token is empty, so an empty token closes them rather
+  than opening them.
+- **Object notifications carry the token in their URL.** The object store cannot
+  send headers, so the chart gives it
+  `http://n8n:5678/webhook/object-created?token=<INTERNAL_API_TOKEN>`, and WF2
+  ignores notifications without it: nobody outside can make it re-index or
+  classify objects.
+- **Slack text is escaped.** Titles, questions, names, file names and what the
+  language model wrote go into Slack with `&`, `<` and `>` escaped, so text from
+  the chat cannot become a link or a mention. A refused click is a
+  `slack.click_refused` event (one a minute per reason), which does not mark Slack
+  as failing.

@@ -10,6 +10,15 @@ from app.main import app
 
 ADMIN_PASSWORD = "correct horse battery staple"
 ADMIN_HEADERS = {"X-Admin-Request": "1"}
+INTERNAL_TOKEN = "test-internal-token"
+INTERNAL_HEADERS = {"Authorization": f"Bearer {INTERNAL_TOKEN}"}
+
+
+@pytest.fixture(autouse=True)
+def internal_token(monkeypatch):
+    """The token every deployment has (internal routes are closed without one)."""
+    monkeypatch.setattr(settings, "internal_api_token", INTERNAL_TOKEN)
+    return INTERNAL_TOKEN
 
 
 @pytest.fixture

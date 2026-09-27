@@ -65,6 +65,17 @@ def recent(
     )
 
 
+def seen_recently(kind: str, title: str, seconds: int = 60) -> bool:
+    """Whether the same event was recorded within the last seconds (to keep a flood out of the feed)."""
+    rows = memory.run(
+        """SELECT 1 FROM activity_events WHERE kind = %s AND title = %s
+           AND created_at > now() - make_interval(secs := %s) LIMIT 1""",
+        (kind, title, seconds),
+        fetch=True,
+    )
+    return bool(rows)
+
+
 def latest_id() -> int:
     rows = memory.run("SELECT COALESCE(MAX(id), 0) AS id FROM activity_events", fetch=True)
     return int(rows[0]["id"]) if rows else 0

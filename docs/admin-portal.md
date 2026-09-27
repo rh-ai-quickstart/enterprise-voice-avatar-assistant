@@ -572,6 +572,13 @@ What the build added to the design above, in the order of the phases:
 - **Portal.** With a ticket open beside it, the Approvals and Tickets lists keep only the reference,
   the title with the requester, and the wait or the status. Re-test answers 502, naming the error,
   when the embeddings service or Qdrant does not answer.
+- **Security review** (after phase 5). The classify and object-created webhooks on the public n8n
+  Route now need the internal token (object notifications carry it in their URL); an empty token
+  closes the internal routes and the webhook checks instead of opening them; every Slack message
+  escapes what users, uploads and the model wrote; refused Slack clicks are their own event kind;
+  the model cannot set the ticket fields the workflows own, and only Slack links show as the card's
+  link; conversation ids are limited to safe characters and download names are sanitised; the
+  portal page cannot be framed.
 - **End-to-end tests.** One Node server fakes both the model server and n8n
   (`frontend/e2e/fakes/server.mjs`); it answers like WF4 and WF5 and records every call for the
   assertions. A skipped spec regenerates `docs/images/admin-portal-approvals.png`.

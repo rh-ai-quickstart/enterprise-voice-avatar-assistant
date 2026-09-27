@@ -35,6 +35,7 @@ import logging
 import threading
 import uuid
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,6 +63,7 @@ from . import (
 )
 from .config import settings
 from .schemas import (
+    SESSION_ID,
     ActivityEventIn,
     ArchiveResult,
     ChatRequest,
@@ -101,7 +103,7 @@ async def lifespan(_: FastAPI):
     )
     if not settings.internal_api_token:
         log.warning(
-            "INTERNAL_API_TOKEN is empty: internal routes are open to anyone who can reach this service"
+            "INTERNAL_API_TOKEN is empty: the internal routes answer 503 until it is set (secret assistant-admin)"
         )
     if settings.admin_enabled and not auth.admin_configured():
         log.warning(
@@ -327,6 +329,11 @@ async def internal_event(data: ActivityEventIn):
         and await asyncio.to_thread(tickets.reminded, data.ref_id)
     ):
         return {"id": None}
+    # Anyone can post to Slack's webhook on the public n8n Route: one refusal a minute per reason
+    if data.kind == "slack.click_refused" and await asyncio.to_thread(
+        events.seen_recently, data.kind, data.title
+    ):
+        return {"id": None}
     event_id = await asyncio.to_thread(
         events.record,
         data.kind,
@@ -356,7 +363,7 @@ async def internal_archive_result(archive_id: int, data: ArchiveResult):
 
 @app.get("/v1/voice/token", response_model=VoiceTokenResponse)
 def voice_token(
-    session_id: str | None = None,
+    session_id: Annotated[str | None, Query(pattern=SESSION_ID)] = None,
     identity: str | None = None,
     name: str | None = None,
     face_id: str | None = None,

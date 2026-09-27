@@ -29,6 +29,7 @@ every non-GET route needs the X-Admin-Request: 1 header and writes an audit entr
 
 import asyncio
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -296,6 +297,9 @@ async def conversation_archive(session_id: str, session: Admin, request: Request
 
 
 def _download(filename: str, text: str, media_type: str) -> PlainTextResponse:
+    # Only characters that are safe in the header: a quote or a non-Latin-1 character in a title or
+    # an old conversation id would otherwise rename the file or fail the download
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", filename).strip("-.") or "download.txt"
     return PlainTextResponse(
         text, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )

@@ -296,3 +296,36 @@ def test_wf6_reminds_once_per_wait_and_escalates_at_each_threshold(database, mon
     assert again["priority"] == "normal"
     knowledge_gaps.escalate_ticket(ticket.ticket_ref, "normal")
     assert stale() == {"remind": [], "escalate": []}
+
+
+def test_only_a_slack_permalink_is_shown_as_the_card_link(database, admin_client):
+    ticket = pending_ticket()
+    for link, shown in (
+        ("https://example-corp.slack.com/archives/C1/p1", True),
+        ("https://evil.example/p1", False),
+        ("javascript:alert(1)", False),
+    ):
+        tickets.update(
+            ticket.ticket_ref,
+            TicketUpdate(payload={"slack": {"channel": "C1", "ts": "1.2", "permalink": link}}),
+        )
+        slack = admin_client.get(f"/v1/admin/tickets/{ticket.ticket_ref}").json()["slack"]
+        assert slack["channel"] == "C1" and (slack.get("permalink") == link) is shown
+
+
+def test_refused_slack_clicks_are_kept_apart_and_not_repeated(database, admin_client):
+    from conftest import INTERNAL_HEADERS
+
+    from app import integrations
+
+    click = {
+        "kind": "slack.click_refused",
+        "severity": "warning",
+        "title": "Slack click refused: the Slack signature does not match",
+        "ref_type": "integration",
+        "ref_id": "slack",
+    }
+    first = admin_client.post("/v1/internal/events", json=click, headers=INTERNAL_HEADERS).json()["id"]
+    again = admin_client.post("/v1/internal/events", json=click, headers=INTERNAL_HEADERS).json()["id"]
+    assert first is not None and again is None  # one a minute per reason
+    assert integrations.status("slack")["last_error"] is None  # anyone can post a forged click

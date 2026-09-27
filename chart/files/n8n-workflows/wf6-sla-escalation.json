@@ -145,7 +145,7 @@
           "value": "#assistant-tickets"
         },
         "otherOptions": {},
-        "text": "=:rotating_light: *SLA escalation* — {{ $('Split escalations').item.json.ticket_ref }} ({{ $('Split escalations').item.json.title }}) has been pending approval for {{ $('Split escalations').item.json.pending_minutes }} minutes. Priority escalated from {{ $json.old_priority }} to {{ $json.new_priority }}. Requester: {{ $('Split escalations').item.json.requester }}."
+        "text": "=:rotating_light: *SLA escalation* — {{ $('Split escalations').item.json.ticket_ref }} ({{ String($('Split escalations').item.json.title ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}) has been pending approval for {{ $('Split escalations').item.json.pending_minutes }} minutes. Priority escalated from {{ $json.old_priority }} to {{ $json.new_priority }}. Requester: {{ String($('Split escalations').item.json.requester ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}."
       },
       "id": "a1b2c3d4-1111-5555-aaaa-000000000006",
       "name": "Notify escalation",
@@ -227,7 +227,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.first().json;\nconst remind = items.remind || [];\nif (remind.length === 0) return [];\nconst lines = remind.map(t => `• *${t.ticket_ref}* ${t.title} — ${Math.round(t.pending_minutes)}m pending (${t.priority}, requester: ${t.requester || '-'})`);\nconst text = `:hourglass_flowing_sand: *Approval reminder* — ${remind.length} ticket(s) awaiting approval:\\n${lines.join('\\n')}`;\nreturn [{ json: { text } }];"
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst items = $input.first().json;\nconst remind = items.remind || [];\nif (remind.length === 0) return [];\nconst lines = remind.map(t => `• *${t.ticket_ref}* ${esc(t.title)} — ${Math.round(t.pending_minutes)}m pending (${t.priority}, requester: ${esc(t.requester || '-')})`);\nconst text = `:hourglass_flowing_sand: *Approval reminder* — ${remind.length} ticket(s) awaiting approval:\\n${lines.join('\\n')}`;\nreturn [{ json: { text } }];"
       },
       "id": "a1b2c3d4-1111-5555-aaaa-000000000007",
       "name": "Build reminder message",

@@ -563,8 +563,10 @@ What the build added to the design above, in the order of the phases:
   threshold of 0.85 (`GAP_GROUP_THRESHOLD`) and are named after the spelling asked most often. Each
   new gap is a `gap.recorded` event, so the page and the overview refresh while open and the Activity
   feed shows unanswered questions as they are asked.
-- **Feed events from the workflows.** WF6 runs every 15 minutes, so the RAG API keeps one
-  `ticket.sla_reminder` per wait for approval. Every node that talks to Slack is followed by
+- **Feed events from the workflows.** WF6 runs every 15 minutes. The RAG API returns a ticket for
+  its reminder once per wait for approval (one Slack reminder, one `ticket.sla_reminder`), counts
+  the wait from when the ticket started waiting (an edit does not restart it), and escalates one
+  priority level at each multiple of the escalation threshold. Every node that talks to Slack is followed by
   `Slack failed? (<node>)`, which posts `integration.error`; the Integrations page's state reads those
   events and the last test.
 - **Portal.** With a ticket open beside it, the Approvals and Tickets lists keep only the reference,

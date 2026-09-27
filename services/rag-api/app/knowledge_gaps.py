@@ -38,7 +38,16 @@ def record(session_id: str | None, question: str, top_score: float, hit_count: i
     )
     log.info("knowledge gap recorded: reason=%s top_score=%.4f hits=%d", reason, top_score, hit_count)
     if rows:
-        _embedder.submit(_embed_one, int(rows[0]["id"]), question[:4000])
+        gap_id = int(rows[0]["id"])
+        # In the feed, and what refreshes the Knowledge gaps page and the overview while they are open
+        events.record(
+            "gap.recorded",
+            f"Not answered from the documents: {question[:200]}",
+            ref_type="gap",
+            ref_id=str(gap_id),
+            data={"reason": reason, "top_score": round(top_score, 4), "session_id": session_id},
+        )
+        _embedder.submit(_embed_one, gap_id, question[:4000])
 
 
 def _embed_one(gap_id: int, question: str) -> None:

@@ -47,8 +47,12 @@ def embeddings(monkeypatch):
 def test_recorded_gaps_get_their_embedding(database, embeddings):
     knowledge_gaps.record("s1", "How do I reset my password?", 0.1, 1)
     knowledge_gaps.record("s1", "Is the policy clear?", 0.9, 3)  # answered: no gap
-    rows = memory.run("SELECT question, embedding FROM knowledge_gaps", fetch=True)
+    rows = memory.run("SELECT id, question, embedding FROM knowledge_gaps", fetch=True)
     assert len(rows) == 1 and rows[0]["embedding"] == pytest.approx([1.0, 0.0, 0.0])
+    (event,) = events.recent(kind="gap.recorded")
+    assert event["title"] == "Not answered from the documents: How do I reset my password?"
+    assert event["ref_type"] == "gap" and event["ref_id"] == str(rows[0]["id"])
+    assert event["data"]["reason"] == "low_score" and event["data"]["session_id"] == "s1"
 
 
 def test_grouping_fills_older_gaps_and_the_page_lists_groups(database, embeddings, admin_client):

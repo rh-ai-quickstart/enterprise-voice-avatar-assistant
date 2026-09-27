@@ -47,11 +47,19 @@ jobs = JobManager(max_concurrent=settings.max_concurrent_jobs)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logging.basicConfig(level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    log.info("ingestion service starting; qdrant=%s embeddings=%s buckets=%s",
-             settings.qdrant_url, settings.embeddings_base_url, sorted(settings.ingest_bucket_set))
+    logging.basicConfig(
+        level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    log.info(
+        "ingestion service starting; qdrant=%s embeddings=%s buckets=%s",
+        settings.qdrant_url,
+        settings.embeddings_base_url,
+        sorted(settings.ingest_bucket_set),
+    )
     if not settings.internal_api_token:
-        log.warning("INTERNAL_API_TOKEN is empty: the write routes are open to anyone who can reach this service")
+        log.warning(
+            "INTERNAL_API_TOKEN is empty: the write routes are open to anyone who can reach this service"
+        )
     await asyncio.to_thread(db.init_schema)
     buckets = asyncio.create_task(_ensure_buckets())
     yield
@@ -67,7 +75,11 @@ async def _ensure_buckets() -> None:
     while True:
         try:
             created = await asyncio.to_thread(storage.ensure_buckets, settings.bucket_list)
-            log.info("buckets ready: %s%s", ", ".join(settings.bucket_list), f" (created {', '.join(created)})" if created else "")
+            log.info(
+                "buckets ready: %s%s",
+                ", ".join(settings.bucket_list),
+                f" (created {', '.join(created)})" if created else "",
+            )
             return
         except Exception as exc:  # noqa: BLE001 - the object store is not up yet
             log.info("object store not ready (%s); retrying in %.0fs", type(exc).__name__, delay)
@@ -81,8 +93,11 @@ def require_internal_token(request: Request) -> None:
         return
     scheme, _, value = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not hmac.compare_digest(value.strip().encode(), token.encode()):
-        raise HTTPException(status_code=401, detail="this route needs the internal API token",
-                            headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            status_code=401,
+            detail="this route needs the internal API token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 WRITE = [Depends(require_internal_token)]
@@ -100,7 +115,10 @@ def healthz():
 @app.get("/readyz")
 async def readyz():
     problems: dict[str, str] = {}
-    for name, check in (("qdrant", vectorstore.ping), ("s3", lambda: storage.head_bucket(settings.s3_bucket))):
+    for name, check in (
+        ("qdrant", vectorstore.ping),
+        ("s3", lambda: storage.head_bucket(settings.s3_bucket)),
+    ):
         try:
             await asyncio.to_thread(check)
         except Exception as exc:  # noqa: BLE001
@@ -133,7 +151,9 @@ async def ingest_upload(file: Annotated[UploadFile, File()], bucket: Annotated[s
 async def put_object(file: Annotated[UploadFile, File()], bucket: Annotated[str, Form()]):
     """Store a file as an object; the admin portal's upload. Only the configured buckets."""
     if bucket not in settings.bucket_list:
-        raise HTTPException(status_code=422, detail=f"unknown bucket {bucket}; one of {', '.join(settings.bucket_list)}")
+        raise HTTPException(
+            status_code=422, detail=f"unknown bucket {bucket}; one of {', '.join(settings.bucket_list)}"
+        )
     key = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
     if not key or key.startswith("."):
         raise HTTPException(status_code=422, detail="the file needs a name")
@@ -166,7 +186,9 @@ async def extract(request: ExtractRequest):
     try:
         result = await asyncio.to_thread(extract_text, bucket, request.key, request.max_chars)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"could not extract text: {type(exc).__name__}: {exc}"[:300]) from exc
+        raise HTTPException(
+            status_code=422, detail=f"could not extract text: {type(exc).__name__}: {exc}"[:300]
+        ) from exc
     return ExtractResponse(doc_id=make_doc_id(bucket, request.key), source=request.key, **result)
 
 

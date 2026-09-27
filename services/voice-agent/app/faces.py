@@ -12,6 +12,7 @@ import json
 import logging
 from dataclasses import dataclass
 
+from . import avatars
 from .config import settings
 
 log = logging.getLogger("voice-agent.faces")
@@ -85,6 +86,9 @@ def select(requested: str | None) -> Face | None:
     """The face for this session: the requested one when it is in the catalog (or the catalog is
     empty and the id is trusted as-is), otherwise the first catalog entry, otherwise None so the
     provider settings (TAVUS_FACE_ID) apply."""
+    if not avatars.active():
+        # No avatar, no face: the session speaks with the default voice (models.tts.voice)
+        return None
     faces = catalog()
     requested = _text(requested) or None
     if requested:

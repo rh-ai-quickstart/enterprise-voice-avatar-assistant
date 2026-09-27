@@ -378,7 +378,8 @@ voiceAgent:
   enabled: true
   image: ""
   replicas: 1
-  # none | simli | tavus | hedra (see services/voice-agent/app/avatars.py)
+  # none | simli | tavus | hedra (see services/voice-agent/app/avatars.py). A provider whose key is
+  # missing from the integrations secret counts as none: voice is audio-only and no face is offered.
   avatarProvider: none
   # Extra environment for the worker; explicit entries win over the config map and secrets,
   # so non-secret provider settings such as TAVUS_FACE_ID can be pinned here.

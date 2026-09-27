@@ -40,7 +40,9 @@ def _doc_filter(doc_id: str) -> models.Filter:
 def delete_document(doc_id: str) -> None:
     name = settings.qdrant_collection
     if client().collection_exists(name):
-        client().delete(collection_name=name, points_selector=models.FilterSelector(filter=_doc_filter(doc_id)), wait=True)
+        client().delete(
+            collection_name=name, points_selector=models.FilterSelector(filter=_doc_filter(doc_id)), wait=True
+        )
 
 
 def count_document(doc_id: str) -> int:
@@ -81,5 +83,7 @@ def replace_document(
         for chunk, vector in zip(chunks, vectors, strict=True)
     ]
     for start in range(0, len(points), 64):
-        client().upsert(collection_name=settings.qdrant_collection, points=points[start : start + 64], wait=True)
+        client().upsert(
+            collection_name=settings.qdrant_collection, points=points[start : start + 64], wait=True
+        )
     return len(points)

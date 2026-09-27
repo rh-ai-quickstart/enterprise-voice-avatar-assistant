@@ -167,7 +167,7 @@ are created or refreshed with `scripts/create-secrets.sh`.
 | Slack channels (5c) | none, normally | Lists the channels, creates the five missing ones and joins them (scopes `channels:manage` and `channels:join` from the manifest). An app installed with fewer scopes gets the instruction and a confirmation instead |
 | Slack signing secret (5d) | Basic Information > App Credentials: show and paste the Signing Secret | Checks its form (32 hexadecimal characters). n8n verifies every click on an approval card with it; without it the clicks are refused and requests are approved in the admin portal only |
 | Slack request URL (5e) | For an app created from this manifest: none. For a reused app: set Interactivity & Shortcuts > Request URL to `https://<n8n host>/webhook/slack-interactions` | Asks which case it is; remembers the host it was confirmed for, so a re-run on the same cluster does not ask again |
-| Tavus (5f) | Create an API key | Calls the Tavus API with it; a rejected key is asked again |
+| Tavus (5f) | Create an API key | Calls the Tavus API with it; a rejected key is asked again. `Skip` leaves the avatar off: voice sessions are audio-only with the default voice, and no face is offered |
 | Google key (5g, 5h) | Enable the Drive API, create a service account and a JSON key, paste the file's content (finish with a line containing only `}`; a path to the file also works) | Validates the JSON, then obtains an access token with it; a revoked key or disabled account is asked again |
 | Google folder (5i) | Share a Drive folder with the service account's e-mail as Editor, paste the folder's URL or id | Reads the folder through the Drive API as the service account and checks it can add files; an unshared folder or a wrong id is asked again |
 | Remote model keys (profile `remote` only) | none | `LLM_API_KEY`, `STT_API_KEY`, `EMBEDDINGS_API_KEY` |
@@ -184,7 +184,9 @@ into a manifest.
 Every integration is optional. The step ends by saying which ones step 6 turns on:
 `integrations.slack.enabled` follows the Slack bot token, `integrations.googleDocs.enabled`
 the service account key and the folder together (set `SLACK_ENABLED` or `GOOGLE_DOCS_ENABLED`
-to `true` or `false` in the environment to decide otherwise). Requests are always approved in
+to `true` or `false` in the environment to decide otherwise), and the avatar the Tavus key:
+without it step 6 passes `voiceAgent.avatarProvider=none` (`AVATAR_PROVIDER` in the environment
+picks a provider explicitly). Requests are always approved in
 the admin portal, and in Slack as well when it is on; conversations are archived with or
 without Google Docs, which adds a copy in Drive. The portal's password is generated into the
 secret `assistant-admin` on the first run and kept afterwards, with the session key and the

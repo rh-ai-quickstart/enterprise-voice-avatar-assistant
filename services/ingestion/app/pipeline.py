@@ -45,7 +45,9 @@ def get_converter():
             do_table_structure=True,
             artifacts_path=settings.docling_artifacts_path or None,
         )
-        _converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})
+        _converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
+        )
     return _converter
 
 

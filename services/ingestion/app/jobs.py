@@ -49,7 +49,9 @@ class JobManager:
             job.status = "running"
             db.record_job(job)
             try:
-                result = await asyncio.to_thread(pipeline.ingest_document, job.bucket, job.key, job.doc_id, job.metadata)
+                result = await asyncio.to_thread(
+                    pipeline.ingest_document, job.bucket, job.key, job.doc_id, job.metadata
+                )
                 job.chunks = result.get("chunks")
                 job.pages = result.get("pages")
                 job.status = "done"

@@ -472,7 +472,7 @@ step5() {
   # ---- Tavus ------------------------------------------------------------------------------
   say ""; say "  ${B}Tavus${N} (avatar video). Free plan: 25 conversational minutes a month, one stream."
   while :; do
-    [ -n "${TAVUS_API_KEY:-}" ] && ok "TAVUS_API_KEY already in the file" || need_key TAVUS_API_KEY "5f. On your laptop open https://platform.tavus.io > API Keys > Create, then paste the key" '^[A-Za-z0-9_-]{16,}$' "the key from the Tavus API Keys page" "the avatar video"
+    [ -n "${TAVUS_API_KEY:-}" ] && ok "TAVUS_API_KEY already in the file" || need_key TAVUS_API_KEY "5f. On your laptop open https://platform.tavus.io > API Keys > Create, then paste the key" '^[A-Za-z0-9_-]{16,}$' "the key from the Tavus API Keys page" "the avatar video (voice sessions run audio-only)"
     [ -n "${TAVUS_API_KEY:-}" ] || break
     local code; code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "x-api-key: $TAVUS_API_KEY" https://tavusapi.com/v2/replicas)
     case "$code" in 200) ok "Tavus accepts the key"; break;; 401|403) say "     ${Y}Tavus rejects that key${N} (HTTP $code); paste it again, or type Skip"; put TAVUS_API_KEY ""; unset TAVUS_API_KEY;; *) warn "Tavus not reachable from here (HTTP $code); keeping the key unverified"; break;; esac
@@ -555,14 +555,16 @@ step5() {
     note "creating the secrets in $PROJECT from the file (passwords are generated)"
     NAMESPACE="$PROJECT" SECRETS_FILE="$SECRETS_FILE" "$ROOT/scripts/create-secrets.sh" | sed 's/^/  /' || return 1
   fi
-  local key slack=off docs=off
+  local key slack=off docs=off avatar=off
   in_cluster() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$1}" 2>/dev/null)" ]; }
   for key in SLACK_BOT_TOKEN SLACK_SIGNING_SECRET TAVUS_API_KEY GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_DOCS_FOLDER_ID; do
     if in_cluster "$key"; then ok "$key in the cluster"; else warn "$key empty in the cluster (skipped; that feature stays off)"; fi
   done
   in_cluster SLACK_BOT_TOKEN && slack=on
   in_cluster GOOGLE_SERVICE_ACCOUNT_JSON && in_cluster GOOGLE_DOCS_FOLDER_ID && docs=on
-  ok "step 6 deploys with Slack $slack and Google Docs $docs (integrations.*.enabled follow the keys); requests are approved in the admin portal$([ "$slack" = on ] && echo " and in Slack")"
+  in_cluster TAVUS_API_KEY && avatar=on
+  ok "step 6 deploys with Slack $slack, Google Docs $docs and the Tavus avatar $avatar (they follow the keys); requests are approved in the admin portal$([ "$slack" = on ] && echo " and in Slack")"
+  [ "$avatar" = on ] || note "without a Tavus key, voice sessions are audio-only; add TAVUS_API_KEY to $SECRETS_FILE, then --step 5 and --step 6, to bring the avatar in"
   note "admin portal password (generated, kept on re-runs): oc extract secret/assistant-admin -n $PROJECT --keys=ADMIN_PASSWORD --to=-"
   mark 5
 }

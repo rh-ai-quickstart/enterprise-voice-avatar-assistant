@@ -62,6 +62,7 @@ jobs:
           cache-dependency-glob: services/${{ matrix.service }}/uv.lock
       - run: uv sync --frozen
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: uv run pytest -q
 
   frontend:

@@ -378,7 +378,7 @@ export const EVENT_KINDS: [string, string[]][] = [
       "document.deleted",
     ],
   ],
-  ["Knowledge gaps", ["gap.resolved", "gap.dismissed", "gap.reopened", "gaps.digest"]],
+  ["Knowledge gaps", ["gap.recorded", "gap.resolved", "gap.dismissed", "gap.reopened", "gaps.digest"]],
   ["Integrations", ["integration.test", "integration.error"]],
 ];
 

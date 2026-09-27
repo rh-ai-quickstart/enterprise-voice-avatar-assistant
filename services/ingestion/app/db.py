@@ -71,16 +71,26 @@ def record_job(job: Any) -> None:
                   status = EXCLUDED.status, error = EXCLUDED.error, chunks = EXCLUDED.chunks,
                   pages = EXCLUDED.pages, finished_at = EXCLUDED.finished_at
                 """,
-                (job.job_id, job.doc_id, f"s3://{job.bucket}/{job.key}", job.status, job.error, job.chunks, job.pages,
-                 job.created_at, job.finished_at),
+                (
+                    job.job_id,
+                    job.doc_id,
+                    f"s3://{job.bucket}/{job.key}",
+                    job.status,
+                    job.error,
+                    job.chunks,
+                    job.pages,
+                    job.created_at,
+                    job.finished_at,
+                ),
             )
             conn.commit()
     except Exception as exc:  # noqa: BLE001
         log.warning("could not record job %s: %s", job.job_id, exc)
 
 
-def upsert_document(doc_id: str, source: str, source_uri: str, pages: int | None, chunks: int,
-                    metadata: dict[str, Any]) -> None:
+def upsert_document(
+    doc_id: str, source: str, source_uri: str, pages: int | None, chunks: int, metadata: dict[str, Any]
+) -> None:
     if not enabled():
         return
     try:

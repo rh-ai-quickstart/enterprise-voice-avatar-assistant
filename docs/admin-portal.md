@@ -560,7 +560,9 @@ What the build added to the design above, in the order of the phases:
   admin deletes it; there is no retention policy.
 - **Knowledge gaps.** Each gap stores its question's embedding when recorded; older ones are embedded
   when the page first groups them (one 15-second try, then grouping by wording). Groups use a cosine
-  threshold of 0.85 (`GAP_GROUP_THRESHOLD`) and are named after the spelling asked most often.
+  threshold of 0.85 (`GAP_GROUP_THRESHOLD`) and are named after the spelling asked most often. Each
+  new gap is a `gap.recorded` event, so the page and the overview refresh while open and the Activity
+  feed shows unanswered questions as they are asked.
 - **Feed events from the workflows.** WF6 runs every 15 minutes, so the RAG API keeps one
   `ticket.sla_reminder` per wait for approval. Every node that talks to Slack is followed by
   `Slack failed? (<node>)`, which posts `integration.error`; the Integrations page's state reads those

@@ -1,12 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { ChatPanel } from "./components/ChatPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CitationsPanel } from "./components/CitationsPanel";
 import { Header } from "./components/Header";
 import { StatusStrip } from "./components/StatusStrip";
-import { VoicePanel } from "./components/VoicePanel";
 import * as api from "./lib/api";
 import type { AssistantTurn, ChatMessage, Citation, Info } from "./types";
+
+// LiveKit is most of the page's code: it loads next to the chat instead of before it
+const VoicePanel = lazy(() => import("./components/VoicePanel").then((m) => ({ default: m.VoicePanel })));
+const voiceLoading = (
+  <div className="voice-stage">
+    <div className="avatar-frame avatar-idle" />
+  </div>
+);
 
 const SESSION_KEY = "assistant.session";
 const NAME_KEY = "assistant.user";
@@ -163,7 +170,9 @@ export default function App() {
       </div>
       <main className="layout">
         <section className="avatar-column">
-          <VoicePanel sessionId={sessionId} userName={userName} onAssistantTurn={onAssistantTurn} onActiveChange={setVoiceActive} />
+          <Suspense fallback={voiceLoading}>
+            <VoicePanel sessionId={sessionId} userName={userName} onAssistantTurn={onAssistantTurn} onActiveChange={setVoiceActive} />
+          </Suspense>
         </section>
         <section className="chat-column">
           <ChatPanel messages={messages} busy={busy} userName={userName} onSend={send} onCite={setSelected} onSelectMessage={showCitations} />

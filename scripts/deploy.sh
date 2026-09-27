@@ -19,7 +19,8 @@
 # Secrets for the optional integrations (Slack, Tavus, Google) are read by
 # scripts/create-secrets.sh from the environment; see its header. Slack and Google Docs are
 # turned on (integrations.*.enabled) when their keys are in the integrations secret; a --set in
-# the helm arguments wins.
+# the helm arguments wins. Without TAVUS_API_KEY the avatar is off (voice is audio-only) unless
+# AVATAR_PROVIDER names another provider.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RELEASE="${RELEASE:-assistant}"
@@ -59,11 +60,14 @@ NAMESPACE="$PROJECT" "$ROOT/scripts/create-secrets.sh"
 has_key() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$1}" 2>/dev/null)" ]; }
 SLACK_ON=false; has_key SLACK_BOT_TOKEN && SLACK_ON=true
 DOCS_ON=false; has_key GOOGLE_SERVICE_ACCOUNT_JSON && has_key GOOGLE_DOCS_FOLDER_ID && DOCS_ON=true
-say "Integrations from the keys in assistant-integrations: Slack $SLACK_ON, Google Docs $DOCS_ON"
+AVATAR_ARGS=()
+if [ -z "${AVATAR_PROVIDER:-}" ] && ! has_key TAVUS_API_KEY; then AVATAR_PROVIDER=none; fi
+[ -n "${AVATAR_PROVIDER:-}" ] && AVATAR_ARGS=(--set "voiceAgent.avatarProvider=$AVATAR_PROVIDER")
+say "Integrations from the keys in assistant-integrations: Slack $SLACK_ON, Google Docs $DOCS_ON, avatar ${AVATAR_PROVIDER:-from the values}"
 
 say "Installing the chart"
 helm upgrade --install "$RELEASE" "$ROOT/chart" --namespace "$PROJECT" --set "global.domain=$DOMAIN" \
-  --set "integrations.slack.enabled=$SLACK_ON" --set "integrations.googleDocs.enabled=$DOCS_ON" "${MODEL_ARGS[@]}" "$@"
+  --set "integrations.slack.enabled=$SLACK_ON" --set "integrations.googleDocs.enabled=$DOCS_ON" "${AVATAR_ARGS[@]}" "${MODEL_ARGS[@]}" "$@"
 
 if [ "$WAIT" = "1" ]; then
   say "Waiting for workloads"

@@ -79,15 +79,29 @@ def test_stream_of_a_request_carries_the_ticket(monkeypatch):
     monkeypatch.setattr(memory, "append", lambda *a, **k: None)
     now = datetime.now(UTC)
     ticket = Ticket(
-        id=2, ticket_ref="REQ-000002", title="Repair the laptop",
-        description="my laptop is broken", category="hardware", priority="normal", status="pending_approval",
-        requester="Joe", session_id="s1", payload={}, needs_approval=True, approver=None, decision_note=None,
-        events=[], created_at=now, updated_at=now,
+        id=2,
+        ticket_ref="REQ-000002",
+        title="Repair the laptop",
+        description="my laptop is broken",
+        category="hardware",
+        priority="normal",
+        status="pending_approval",
+        requester="Joe",
+        session_id="s1",
+        payload={},
+        needs_approval=True,
+        approver=None,
+        decision_note=None,
+        events=[],
+        created_at=now,
+        updated_at=now,
     )
     monkeypatch.setattr(tickets, "intake", lambda request: (ticket, {"summary": "laptop"}, True))
     with (
         TestClient(app) as client,
-        client.stream("POST", "/v1/chat/stream", json={"message": "my laptop is broken", "mode": "voice"}) as response,
+        client.stream(
+            "POST", "/v1/chat/stream", json={"message": "my laptop is broken", "mode": "voice"}
+        ) as response,
     ):
         assert response.status_code == 200
         events = [json.loads(line) for line in response.iter_lines() if line]

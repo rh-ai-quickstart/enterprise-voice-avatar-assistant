@@ -11,6 +11,9 @@ log = logging.getLogger("voice-agent.avatar")
 
 PROVIDERS = ("none", "simli", "tavus", "hedra")
 TAVUS_API_URL = "https://tavusapi.com/v2"
+# The key each provider cannot start without; the RAG API checks the same ones before offering faces
+KEYS = {"simli": "simli_api_key", "tavus": "tavus_api_key", "hedra": "hedra_api_key"}
+_warned: set[str] = set()
 
 
 def provider() -> str:
@@ -18,6 +21,18 @@ def provider() -> str:
     if name not in PROVIDERS:
         raise RuntimeError(f"unknown avatar provider {name!r}; expected one of {PROVIDERS}")
     return name
+
+
+def missing_key() -> str | None:
+    """The environment variable the configured provider needs and does not have, if any."""
+    attribute = KEYS.get(provider())
+    return attribute.upper() if attribute and not getattr(settings, attribute) else None
+
+
+def active() -> bool:
+    """Whether sessions get an avatar: a provider is configured and its key is there. Without one
+    (setup step 5 skipped, for example) voice sessions are audio-only with the default voice."""
+    return provider() != "none" and missing_key() is None
 
 
 def _require(value: str | None, name: str) -> str:
@@ -92,6 +107,14 @@ def start_kwargs(avatar: Any) -> dict[str, Any]:
 
 async def start(session: Any, room: Any, face_id: str | None = None) -> Any | None:
     """Build and start the avatar for this room. The avatar publishes the agent's audio and its video."""
+    missing = missing_key()
+    if missing:
+        # Said once as a warning; every session says it plainly
+        (log.warning if missing not in _warned else log.info)(
+            "avatar provider %s is set but %s is empty: publishing audio only", provider(), missing
+        )
+        _warned.add(missing)
+        return None
     avatar = build(face_id)
     if avatar is None:
         log.info("no avatar provider configured; publishing audio only")

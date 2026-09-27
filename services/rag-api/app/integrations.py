@@ -41,7 +41,7 @@ LABELS = {
     "tts": "Text to speech",
     "guardrails": "Guardrails",
 }
-AVATAR_KEYS = {"tavus": "TAVUS_API_KEY", "simli": "SIMLI_API_KEY", "hedra": "HEDRA_API_KEY"}
+AVATAR_KEYS = faces.AVATAR_KEYS
 
 
 def _env(name: str) -> str:

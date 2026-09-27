@@ -15,6 +15,8 @@
 #   TARGET_REVISION=main             branch, tag or commit
 #   DOMAIN=<apps domain>             default: read from the cluster
 #   SLACK_ENABLED, GOOGLE_DOCS_ENABLED   true/false; default: on when the keys are in assistant-integrations
+#   AVATAR_PROVIDER=none|tavus|simli|hedra   default: none without TAVUS_API_KEY (voice is audio-only),
+#                                    otherwise what the values file says
 #   WAIT=1                           0 = register the application and return
 #   RUN_TESTS=0                      1 = run the connectivity test pod at the end
 #   LOG_FILE=~/assistant-deploy-<timestamp>.log
@@ -91,14 +93,17 @@ if has_key SLACK_BOT_TOKEN && ! has_key SLACK_SIGNING_SECRET; then warn "SLACK_S
 # integrations.*.enabled follow the keys unless set explicitly
 if [ -z "${SLACK_ENABLED:-}" ]; then SLACK_ENABLED=false; has_key SLACK_BOT_TOKEN && SLACK_ENABLED=true; fi
 if [ -z "${GOOGLE_DOCS_ENABLED:-}" ]; then GOOGLE_DOCS_ENABLED=false; has_key GOOGLE_SERVICE_ACCOUNT_JSON && has_key GOOGLE_DOCS_FOLDER_ID && GOOGLE_DOCS_ENABLED=true; fi
-ok "integrations: Slack $SLACK_ENABLED, Google Docs $GOOGLE_DOCS_ENABLED; approvals in the admin portal$([ "$SLACK_ENABLED" = true ] && echo " and in Slack")"
+# Without a Tavus key the avatar is off and voice sessions are audio-only; a key leaves it to the values
+if [ -z "${AVATAR_PROVIDER:-}" ] && ! has_key TAVUS_API_KEY; then AVATAR_PROVIDER=none; fi
+AVATAR_PARAM=""; [ -n "${AVATAR_PROVIDER:-}" ] && AVATAR_PARAM=",{\"name\":\"voiceAgent.avatarProvider\",\"value\":\"$AVATAR_PROVIDER\"}"
+ok "integrations: Slack $SLACK_ENABLED, Google Docs $GOOGLE_DOCS_ENABLED, avatar ${AVATAR_PROVIDER:-from $VALUES_FILE}; approvals in the admin portal$([ "$SLACK_ENABLED" = true ] && echo " and in Slack")"
 
 step "Argo CD application"
 run oc apply -f "$ROOT/deploy/argocd/appproject.yaml" >/dev/null
 oc patch appprojects.argoproj.io "$APP" -n openshift-gitops --type merge -p "{\"spec\":{\"sourceRepos\":[\"$REPO_URL\"],\"destinations\":[{\"server\":\"https://kubernetes.default.svc\",\"namespace\":\"$PROJECT\"}]}}" >/dev/null && ok "AppProject allows $REPO_URL -> $PROJECT"
 run oc apply -f "$ROOT/deploy/argocd/application.yaml" >/dev/null
-oc patch applications.argoproj.io "$APP" -n openshift-gitops --type merge -p "{\"spec\":{\"source\":{\"repoURL\":\"$REPO_URL\",\"targetRevision\":\"$TARGET_REVISION\",\"helm\":{\"valueFiles\":[\"values.yaml\",\"$VALUES_FILE\"],\"valuesObject\":$VALUES_OBJECT,\"parameters\":[{\"name\":\"global.domain\",\"value\":\"$DOMAIN\"},{\"name\":\"models.llm.endpoint\",\"value\":\"$LLM_ENDPOINT\"},{\"name\":\"models.llm.servedModelName\",\"value\":\"$LLM_MODEL\"},{\"name\":\"integrations.slack.enabled\",\"value\":\"$SLACK_ENABLED\"},{\"name\":\"integrations.googleDocs.enabled\",\"value\":\"$GOOGLE_DOCS_ENABLED\"}]}},\"destination\":{\"namespace\":\"$PROJECT\"}}}" >/dev/null \
-  && ok "Application $APP: $REPO_URL@$TARGET_REVISION, values $VALUES_FILE, global.domain=$DOMAIN, llm $LLM_MODEL at $LLM_ENDPOINT, Slack $SLACK_ENABLED, Google Docs $GOOGLE_DOCS_ENABLED"
+oc patch applications.argoproj.io "$APP" -n openshift-gitops --type merge -p "{\"spec\":{\"source\":{\"repoURL\":\"$REPO_URL\",\"targetRevision\":\"$TARGET_REVISION\",\"helm\":{\"valueFiles\":[\"values.yaml\",\"$VALUES_FILE\"],\"valuesObject\":$VALUES_OBJECT,\"parameters\":[{\"name\":\"global.domain\",\"value\":\"$DOMAIN\"},{\"name\":\"models.llm.endpoint\",\"value\":\"$LLM_ENDPOINT\"},{\"name\":\"models.llm.servedModelName\",\"value\":\"$LLM_MODEL\"},{\"name\":\"integrations.slack.enabled\",\"value\":\"$SLACK_ENABLED\"},{\"name\":\"integrations.googleDocs.enabled\",\"value\":\"$GOOGLE_DOCS_ENABLED\"}$AVATAR_PARAM]}},\"destination\":{\"namespace\":\"$PROJECT\"}}}" >/dev/null \
+  && ok "Application $APP: $REPO_URL@$TARGET_REVISION, values $VALUES_FILE, global.domain=$DOMAIN, llm $LLM_MODEL at $LLM_ENDPOINT, Slack $SLACK_ENABLED, Google Docs $GOOGLE_DOCS_ENABLED, avatar ${AVATAR_PROVIDER:-from the values}"
 oc annotate applications.argoproj.io "$APP" -n openshift-gitops argocd.argoproj.io/refresh=normal --overwrite >/dev/null
 # Routes are immutable in their host: any route created earlier with a different host (for
 # example by a sync that ran before the domain was set) is removed so Argo CD recreates it

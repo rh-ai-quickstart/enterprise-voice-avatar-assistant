@@ -165,10 +165,11 @@ are created or refreshed with `scripts/create-secrets.sh`.
 | n8n owner (5o) | none | Asks for the owner e-mail (default `admin@example.com`) and a password (Enter generates one; n8n wants 8 characters with a number and a capital). The chart's job creates the account with them. Once the account exists, the cluster's values are copied into `~/secrets.env`; change the password in the n8n UI, then in the file |
 | Slack app (5a, 5b) | Create the app from the manifest the script prints (also saved as `~/slack-app-manifest.json`, with this cluster's n8n host already in it), install it, paste the Bot User OAuth Token | Calls Slack with the token and prints the app and workspace names; a rejected token is asked again |
 | Slack channels (5c) | none, normally | Lists the channels, creates the five missing ones and joins them (scopes `channels:manage` and `channels:join` from the manifest). An app installed with fewer scopes gets the instruction and a confirmation instead |
-| Slack request URL (5d) | For an app created from this manifest: none. For a reused app: set Interactivity & Shortcuts > Request URL to `https://<n8n host>/webhook/slack-interactions` | Asks which case it is; remembers the host it was confirmed for, so a re-run on the same cluster does not ask again |
-| Tavus (5e) | Create an API key | Calls the Tavus API with it; a rejected key is asked again |
-| Google key (5f, 5g) | Enable the Drive API, create a service account and a JSON key, paste the file's content (finish with a line containing only `}`; a path to the file also works) | Validates the JSON, then obtains an access token with it; a revoked key or disabled account is asked again |
-| Google folder (5h) | Share a Drive folder with the service account's e-mail as Editor, paste the folder's URL or id | Reads the folder through the Drive API as the service account and checks it can add files; an unshared folder or a wrong id is asked again |
+| Slack signing secret (5d) | Basic Information > App Credentials: show and paste the Signing Secret | Checks its form (32 hexadecimal characters). n8n verifies every click on an approval card with it; without it the clicks are refused and requests are approved in the admin portal only |
+| Slack request URL (5e) | For an app created from this manifest: none. For a reused app: set Interactivity & Shortcuts > Request URL to `https://<n8n host>/webhook/slack-interactions` | Asks which case it is; remembers the host it was confirmed for, so a re-run on the same cluster does not ask again |
+| Tavus (5f) | Create an API key | Calls the Tavus API with it; a rejected key is asked again |
+| Google key (5g, 5h) | Enable the Drive API, create a service account and a JSON key, paste the file's content (finish with a line containing only `}`; a path to the file also works) | Validates the JSON, then obtains an access token with it; a revoked key or disabled account is asked again |
+| Google folder (5i) | Share a Drive folder with the service account's e-mail as Editor, paste the folder's URL or id | Reads the folder through the Drive API as the service account and checks it can add files; an unshared folder or a wrong id is asked again |
 | Remote model keys (profile `remote` only) | none | `LLM_API_KEY`, `STT_API_KEY`, `EMBEDDINGS_API_KEY` |
 
 There is no Google OAuth client and no redirect URL: the RAG API writes the documents with
@@ -179,6 +180,20 @@ again but are still verified, so a run interrupted here continues where it stopp
 that stopped working is caught on the next run. With `--yes` nothing is asked: keys in the
 file are used, missing ones are reported as skipped. No key is ever typed into `oc` or pasted
 into a manifest.
+
+Every integration is optional. The step ends by saying which ones step 6 turns on:
+`integrations.slack.enabled` follows the Slack bot token, `integrations.googleDocs.enabled`
+the service account key and the folder together (set `SLACK_ENABLED` or `GOOGLE_DOCS_ENABLED`
+to `true` or `false` in the environment to decide otherwise). Requests are always approved in
+the admin portal, and in Slack as well when it is on; conversations are archived with or
+without Google Docs, which adds a copy in Drive. The portal's password is generated into the
+secret `assistant-admin` on the first run and kept afterwards, with the session key and the
+token the services use between themselves (`INTERNAL_API_TOKEN`); the step prints the command
+that reads it.
+
+An existing install that had a Slack token before the portal existed keeps Slack only when the
+flag is on: step 6 sets it from the token, a Helm install needs
+`--set integrations.slack.enabled=true`.
 
 ### 6 Deploy with Argo CD
 
@@ -212,15 +227,24 @@ that prints the password.
 `scripts/load-sample-docs.sh` uploads the fifteen sample files to the object store: policies and
 procedures into `documents`, invoices and contracts into `inbox`. The step waits until at
 least ten documents are indexed (up to fifteen minutes, with a count every minute) and prints
-`scripts/check-index.sh`. The inbox files show no chunks until their classification card is
-approved in Slack (`#assistant-documents`); that is expected.
+`scripts/check-index.sh`. The inbox files are classified, not indexed, so they show no chunks:
+their type, summary and fields are in the admin portal under Documents > Classified, and in
+`#assistant-documents` when Slack is on.
 
 ### 9 Verification
 
 `scripts/demo-preflight.sh` with the same values, overlay and parameters as the deployment:
 models Ready, no pod outside Running or Completed, the Argo CD state, the connectivity test
-pod, and the six n8n webhooks registered. On `PRE-FLIGHT OK` the step prints the frontend
-URL, the n8n URL with its login, and the pointer to [docs/demo-script.md](demo-script.md).
+pod, and the seven n8n webhooks registered. On `PRE-FLIGHT OK` the step prints the frontend
+URL, the n8n URL with its login, the admin portal URL (`/admin` on the frontend host) with the
+command that reads its password, and the pointer to [docs/demo-script.md](demo-script.md):
+
+```bash
+oc extract secret/assistant-admin -n voice-avatar-assistant --keys=ADMIN_PASSWORD --to=-
+```
+
+Everyone signs in to the portal with that password and their own name, which is what the
+requester hears ("approved by Dana") and what the audit log records.
 
 ## Resuming, re-running, starting over
 
@@ -248,6 +272,10 @@ URL, the n8n URL with its login, and the pointer to [docs/demo-script.md](demo-s
 - **A changed key.** Edit `~/secrets.env`, then `scripts/setup.sh --step 5` (rewrites the
   integrations, model-key and n8n secrets, generated passwords are kept) and
   `oc rollout restart deployment/n8n deployment/rag-api deployment/voice-agent -n voice-avatar-assistant`.
+- **The admin portal password.** Put the new one in the secret and restart the RAG API; every
+  portal session ends, since sessions are signed with a key derived from the password:
+  `oc patch secret assistant-admin -n voice-avatar-assistant --type merge -p '{"stringData":{"ADMIN_PASSWORD":"<new password>"}}'`,
+  then `oc rollout restart deployment/rag-api -n voice-avatar-assistant`.
 - **Chart values** (faces, voices, model shares) are commits to `chart/values-demo-cluster.yaml`;
   `scripts/deploy-argocd.sh` accepts `REPO_URL` and `TARGET_REVISION` for a fork or a branch.
 - **Workflows.** A commit that changes `chart/files/n8n-workflows/` restarts n8n at the next

@@ -28,6 +28,7 @@ every non-GET route needs the X-Admin-Request: 1 header and writes an audit entr
 """
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -76,6 +77,7 @@ from .schemas import (
     TicketPage,
 )
 
+log = logging.getLogger("rag.admin")
 router = APIRouter(
     prefix="/v1/admin",
     tags=["admin"],
@@ -404,6 +406,7 @@ async def knowledge_gap_retest(gap_id: int, _: Admin):
     try:
         result = await asyncio.to_thread(knowledge_gaps.retest, gap_id)
     except Exception as exc:  # the embeddings service or Qdrant did not answer
+        log.warning("re-test of knowledge gap %s failed: %s: %s", gap_id, type(exc).__name__, exc)
         raise HTTPException(
             status_code=502,
             detail=f"retrieval failed, the embeddings service or Qdrant did not answer: {type(exc).__name__}",

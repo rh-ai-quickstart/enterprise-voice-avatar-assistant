@@ -1,8 +1,10 @@
 # Admin portal: specification
 
-> **Status: proposed, for review.** Nothing here is built yet. The decisions in the first table were
-> agreed; [Open questions](#open-questions) lists the defaults chosen where no decision was made.
-> Implementation starts after this document is approved, in the [phases](#phases) at the end.
+> **Status: implemented**, in the five [phases](#phases) at the end
+> (rh-ai-quickstart/enterprise-voice-avatar-assistant#6 and #8). The [open questions](#open-questions)
+> were settled as written; [Implementation notes](#implementation-notes) lists what the build added
+> to this design. Using the portal: [SETUP.md](SETUP.md), [demo-script.md](demo-script.md),
+> [troubleshooting.md](troubleshooting.md#admin-portal); working on it: [development.md](development.md#the-admin-portal).
 
 The assistant files tickets, waits for approvals, archives transcripts and reports what it does, but
 every one of those surfaces is Slack or Google Docs. With Slack off, approval cards are never posted
@@ -504,7 +506,7 @@ portal, localisation.
 
 ## Open questions
 
-Defaults chosen where no decision was made. Each can change before implementation starts.
+Defaults chosen where no decision was made; all six were settled as written.
 
 1. **Slack click signatures.** The n8n Route is public and `/webhook/slack-interactions` does not verify
    `X-Slack-Signature`, so anyone can approve a pending ticket by posting a fake Slack payload,
@@ -543,3 +545,29 @@ at the end.
    ingestion changes, upload, jobs), Integrations (tests), Audit; WF2, WF3 and WF6 events.
 5. **End to end and documentation.** The Playwright suite and its CI job, the documentation listed
    above, the screenshot.
+
+## Implementation notes
+
+What the build added to the design above, in the order of the phases:
+
+- **Object store.** The MinIO images left Docker Hub and quay.io during phase 3; the chart now runs
+  VersityGW (POSIX on a volume), whose bucket notifications reach WF2 at `/webhook/object-created`.
+  Portal uploads go through the ingestion service's `POST /v1/objects`, so the same notification
+  drives indexing or classification.
+- **Notices.** One pending notice per ticket and kind (a decision does not hide a message from an
+  admin), and a notice never names a workflow actor ("approved by n8n").
+- **Chat.** New conversation keeps the previous one, so the portal lists every transcript until an
+  admin deletes it; there is no retention policy.
+- **Knowledge gaps.** Each gap stores its question's embedding when recorded; older ones are embedded
+  when the page first groups them (one 15-second try, then grouping by wording). Groups use a cosine
+  threshold of 0.85 (`GAP_GROUP_THRESHOLD`) and are named after the spelling asked most often.
+- **Feed events from the workflows.** WF6 runs every 15 minutes, so the RAG API keeps one
+  `ticket.sla_reminder` per wait for approval. Every node that talks to Slack is followed by
+  `Slack failed? (<node>)`, which posts `integration.error`; the Integrations page's state reads those
+  events and the last test.
+- **Portal.** With a ticket open beside it, the Approvals and Tickets lists keep only the reference,
+  the title with the requester, and the wait or the status. Re-test answers 502, naming the error,
+  when the embeddings service or Qdrant does not answer.
+- **End-to-end tests.** One Node server fakes both the model server and n8n
+  (`frontend/e2e/fakes/server.mjs`); it answers like WF4 and WF5 and records every call for the
+  assertions. A skipped spec regenerates `docs/images/admin-portal-approvals.png`.

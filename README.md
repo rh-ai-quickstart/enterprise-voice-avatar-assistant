@@ -31,13 +31,13 @@ Ground a voice-enabled, avatar-fronted assistant in your company documents with 
 
 ## Overview
 
-Employees lose time hunting through policies and procedures, and service desks spend hours on requests that follow the same intake, approval and fulfillment pattern. This quickstart deploys a virtual assistant that answers questions from your own documents with citations, speaks through a lip-synced avatar, and turns spoken requests into tracked tickets approved in Slack. It is for platform and AI teams that need a sovereign assistant: the models, the data and the workflows all run on Red Hat OpenShift AI in your own cluster. After deploying, you upload documents, ask questions by text or voice, drop in an invoice for field extraction, and file a service request end to end.
+Employees lose time hunting through policies and procedures, and service desks spend hours on requests that follow the same intake, approval and fulfillment pattern. This quickstart deploys a virtual assistant that answers questions from your own documents with citations, speaks through a lip-synced avatar, and turns spoken requests into tracked tickets approved in its admin portal or in Slack. It is for platform and AI teams that need a sovereign assistant: the models, the data and the workflows all run on Red Hat OpenShift AI in your own cluster. After deploying, you upload documents, ask questions by text or voice, drop in an invoice for field extraction, and file a service request end to end, then follow it all in the admin portal.
 
 ## Detailed description
 
 Knowledge in most organizations is scattered across PDFs, Word documents, wikis and ticketing systems. Chat assistants built on public APIs can answer questions, but they send sensitive content off-platform, cannot show where an answer came from, and rarely close the loop on what follows a question, such as approving a request or updating a ticket. Voice and avatar interfaces make assistants approachable for frontline staff, kiosks and accessibility use cases, but real-time speech is hard to run privately.
 
-This quickstart shows how Example Corp, a fictional company, runs an assistant that answers from its own policy and procedure documents with source citations, remembers the conversation across text and voice, and lets people interrupt the avatar mid-sentence. Incoming documents such as invoices and contracts are classified and their fields extracted before being routed to Slack or a downstream system. Service requests made by chat or voice are classified, sent to Slack for approval, fulfilled and tracked, and the assistant tells the requester the outcome. Transcripts are archived to Google Docs and re-indexed, so the assistant can answer questions about earlier conversations. Typical scenarios are IT and HR help desks, procurement intake, and front-desk or kiosk assistants in regulated industries where data must not leave the organization.
+This quickstart shows how Example Corp, a fictional company, runs an assistant that answers from its own policy and procedure documents with source citations, remembers the conversation across text and voice, and lets people interrupt the avatar mid-sentence. Incoming documents such as invoices and contracts are classified and their fields extracted before being routed to Slack or a downstream system. Service requests made by chat or voice are classified, sent for approval in the admin portal or in Slack, fulfilled and tracked, and the assistant tells the requester the outcome and who decided. Transcripts are archived, to Google Docs as well when it is set up, and re-indexed, so the assistant can answer questions about earlier conversations. The admin portal is where the service desk works: approvals and tickets, conversation transcripts, the questions the documents could not answer, the documents themselves, a live activity feed, integration tests and an audit log. Slack and Google Docs are optional. Typical scenarios are IT and HR help desks, procurement intake, and front-desk or kiosk assistants in regulated industries where data must not leave the organization.
 
 After deployment you can:
 
@@ -45,8 +45,9 @@ After deployment you can:
 - Ask questions by text or voice and see the passages each answer is based on
 - Interrupt the avatar mid-sentence and ask a follow-up that needs the earlier context
 - Drop an invoice into the inbox bucket and receive its type and extracted fields in Slack
-- File a request by voice, approve it in Slack, and hear the assistant confirm the outcome
-- Archive a conversation to Google Docs and ask about it later
+- File a request by voice, approve it in the admin portal or in Slack, and hear the assistant confirm the outcome and who approved it
+- Archive a conversation and ask about it later
+- Run the service desk from the admin portal: approvals and tickets with their timeline, conversation transcripts, knowledge gaps grouped by meaning, document uploads and ingestion jobs, a live activity feed, integration tests and the audit log
 - Swap the avatar provider or point the language model at a remote endpoint with one value
 
 ### See it in action
@@ -54,6 +55,10 @@ After deployment you can:
 ![A voice session: the avatar speaking on the left; in the chat, the greeting by name, a typed question and the answer with two citation chips; the Sources panel on the right showing the password policy passage first; the served models in the status bar](docs/images/frontend-cited-answer-sources.png)
 
 The avatar greets the person by name and speaks the answers; the chat shows the same text with its citations, and the Sources panel shows the passages behind them. The status bar lists the models behind the session, served on OpenShift AI. A presenter script with timings and expected answers is in [docs/demo-script.md](docs/demo-script.md).
+
+![The admin portal's Approvals page: three requests waiting, each with its requester and how long it has waited; the request opened beside the list with Approve, Reject, Edit and Message requester, its details, the classification and a link to its Slack card](docs/images/admin-portal-approvals.png)
+
+The admin portal at `/admin` on the same host: here the Approvals page, with a request filed from the chat opened beside the list. Everyone signs in with the shared admin password and their own name, which the requester hears with the decision and the audit log records.
 
 ### Architecture diagrams
 
@@ -66,11 +71,12 @@ The avatar greets the person by name and speaks the answers; the chat shows the 
 flowchart LR
   subgraph Client
     UI[Chat and avatar frontend<br/>React + LiveKit]
+    ADM[Admin portal<br/>React + PatternFly]
   end
   subgraph OpenShift["OpenShift project (one Helm release)"]
     LK[LiveKit server]
     VA[Voice agent]
-    RAG[RAG API<br/>retrieval, memory, guardrails,<br/>classification, tickets]
+    RAG[RAG API<br/>retrieval, memory, guardrails,<br/>classification, tickets, admin API]
     ING[Ingestion service<br/>Docling, chunking, embeddings]
     N8N[n8n workflows]
     S3[(Object store: VersityGW / ODF S3)]
@@ -81,6 +87,7 @@ flowchart LR
     S3 -- bucket event --> N8N
     N8N --> ING
     N8N <--> RAG
+    RAG -- portal uploads --> ING
     RAG --> PG
     RAG --> QD
     ING --> QD
@@ -99,6 +106,7 @@ flowchart LR
   end
   UI -- WebRTC --> LK
   UI -- text --> RAG
+  ADM -- "admin API, live events" --> RAG
   VA -- STT, TTS --> RHOAI
   RAG -- LLM, embeddings, guardrails --> RHOAI
   ING -- embeddings --> RHOAI
@@ -113,19 +121,20 @@ How data moves through the system:
 1. **Ingestion.** Documents land in an S3 bucket (VersityGW, deployed by the chart, or OpenShift Data Foundation) or Google Drive. A bucket notification triggers the n8n ingestion workflow, which calls the ingestion service. Docling parses the file, chunks are embedded with the embeddings model, and vectors with source and page metadata are upserted into Qdrant.
 2. **Text question.** The frontend calls the RAG API. The API checks input guardrails, retrieves the top chunks from Qdrant, loads recent history from PostgreSQL, calls the LLM, checks output guardrails, stores the exchange, and returns an answer with citations.
 3. **Voice question.** The browser connects over WebRTC to the LiveKit server. The voice agent transcribes speech with Whisper, calls the same RAG API, synthesizes the reply with the TTS model, and hands audio to the avatar provider, which publishes lip-synced video back into the room.
-4. **Service requests.** When a chat or voice message is a request rather than a question, the RAG API classifies it, opens a ticket in PostgreSQL, and hands it to the n8n approval workflow. The decision made in Slack is written back to the ticket and pushed into the same conversation as a notice, which the avatar speaks and the chat shows.
-5. **Workflows.** Classification, request intake, Slack approvals, and transcript archival run as n8n workflows that call the RAG API and the Slack and Google Docs integrations.
+4. **Service requests.** When a chat or voice message is a request rather than a question, the RAG API classifies it, opens a ticket in PostgreSQL, and hands it to the n8n approval workflow. The decision, taken in the admin portal or on the Slack card, is written back to the ticket and pushed into the same conversation as a notice, which the avatar speaks and the chat shows.
+5. **Workflows.** Classification, request intake, approvals, and transcript archival run as n8n workflows that call the RAG API and, when they are on, the Slack and Google Docs integrations.
+6. **Admin portal.** The portal is served by the frontend at `/admin` and calls the RAG API's admin routes with a session cookie. Every change, whether made in the portal, in Slack or by a workflow, is recorded as an activity event; PostgreSQL notifies the RAG API, which pushes it to open portals over a server-sent event stream, so the lists update as things happen.
 
 | Component | Role | Runs as | Talks to |
 |---|---|---|---|
-| Frontend | Chat with citations, voice session, avatar video | nginx serving a React app, proxies `/api` to the RAG API | RAG API, LiveKit |
-| RAG API | Retrieval, guardrails, memory, request intake, tickets, notices | FastAPI | LLM, embeddings, guardrails model, Qdrant, PostgreSQL, n8n |
+| Frontend | Chat with citations, voice session, avatar video; the admin portal at `/admin` | nginx serving two React apps (the portal with PatternFly), proxies the public and admin `/api` routes to the RAG API | RAG API, LiveKit |
+| RAG API | Retrieval, guardrails, memory, request intake, tickets, notices; the admin API, activity events and audit | FastAPI | LLM, embeddings, guardrails model, Qdrant, PostgreSQL, n8n, the ingestion service |
 | Ingestion | Docling parsing, chunking, embedding, indexing | FastAPI | object store, embeddings model, Qdrant, PostgreSQL |
 | Voice agent | Turn detection, transcription, spoken answers, avatar hand-off | LiveKit Agents worker | LiveKit, Whisper, RAG API, TTS, avatar provider |
 | LiveKit | WebRTC signaling and media, TURN over TLS | LiveKit server | browsers, voice agent, avatar provider |
-| n8n | Ingestion, classification, approvals, archival, SLA and digest workflows | n8n with the workflows shipped in the chart | RAG API, ingestion, Slack, Google Docs |
+| n8n | Ingestion, classification, approvals, archival, SLA and digest workflows | n8n with the workflows shipped in the chart | RAG API, ingestion, Slack |
 | Models | Llama 3.1 8B or the cluster's Llama 3.2 3B (LLM), Whisper (STT), BGE-M3 (embeddings), Kokoro (TTS); Granite Guardian (guardrails) optional, off in the demo | vLLM on OpenShift AI (GPU); Kokoro on CPU | called over OpenAI-compatible APIs |
-| Datastores | PostgreSQL (conversations, memory, tickets, notices), Qdrant (vectors), VersityGW S3 object store (documents, inbox, transcripts) | Deployments with PVCs | the services above |
+| Datastores | PostgreSQL (conversations, memory, tickets, notices, activity, audit, knowledge gaps), Qdrant (vectors), VersityGW S3 object store (documents, inbox, transcripts) | Deployments with PVCs | the services above |
 
 ## Requirements
 
@@ -205,7 +214,7 @@ Cluster administrators who start from a bare cluster can install the platform pr
 
 ### Third-party accounts and keys
 
-All optional: Tavus (or Simli, Hedra) for avatar video, Slack for notifications and approvals, Google Docs for transcript archival. Where to get each key, where it goes, and the free-tier caveats are in [docs/deployment.md](docs/deployment.md#third-party-accounts-and-keys).
+All optional: Tavus (or Simli, Hedra) for avatar video, Slack for notifications and approvals (without it, requests are approved in the admin portal), Google Docs for a copy of archived transcripts in Drive. Where to get each key, where it goes, and the free-tier caveats are in [docs/deployment.md](docs/deployment.md#third-party-accounts-and-keys).
 
 ## Deploy
 
@@ -268,11 +277,11 @@ it stopped on the next run. The steps:
 2. **Deployment profile**: decided from the GPUs found; too few or too small, and it stops with what is required, what the cluster has, and the options.
 3. **Cluster bootstrap**: missing operators, GPU time-slicing, the deployed model's GPU share lowered to 55% so Whisper (15%) and BGE-M3 (12%) fit next to it, Argo CD, the project.
 4. **TURN certificate**: the cluster's wildcard certificate copied into the project, or one from Let's Encrypt.
-5. **Keys and integrations**: one file, `~/secrets.env`; the n8n owner login, the Slack app, the Tavus key, the Google service account and the Drive folder, each browser action shown one at a time and each value verified against the service.
+5. **Keys and integrations**: one file, `~/secrets.env`; the n8n owner login, the Slack app, the Tavus key, the Google service account and the Drive folder, each browser action shown one at a time and each value verified against the service. Each is optional: Slack and Google Docs are turned on when their keys are there, and requests are approved in the admin portal either way.
 6. **Deploy with Argo CD**: the application with the domain, the model endpoint and the profile; waits for the sync, the models and the pods; runs the connectivity test.
 7. **n8n workflows**: owner account, API key, Slack credential and workflows are created by the chart; this step checks that all seven are active.
 8. **Sample documents**: fifteen files uploaded and indexed.
-9. **Verification**: `scripts/demo-preflight.sh`, then the URLs and the demo script.
+9. **Verification**: `scripts/demo-preflight.sh`, then the URLs (the chat, the admin portal with the command that reads its password, n8n) and the demo script.
 
 Every step checks the cluster before acting, so work done by hand or by an earlier run is
 recognised. The options (`--status`, `--step N`, `--yes`, `--reset`), the files the script
@@ -308,7 +317,13 @@ PROJECT=voice-avatar-assistant scripts/deploy.sh
 
    The script detects the cluster apps domain, creates the secrets (generated passwords plus any API keys exported in your environment), installs the chart with the models served on OpenShift AI, waits for pods and models, and prints the URLs. Add `RUN_TESTS=1` to finish with the connectivity test, or pass Helm arguments such as `-f my-values.yaml`.
 
-3. Open the frontend URL it prints. The n8n workflows are imported and published automatically on first start; if `SLACK_BOT_TOKEN` was in the environment, Slack is wired too. Google Docs needs a one-time sign-in in n8n.
+3. Open the frontend URL it prints. The admin portal is at `/admin` on the same host; sign in with your name and the generated password:
+
+```bash
+oc extract secret/assistant-admin -n ${PROJECT} --keys=ADMIN_PASSWORD --to=-
+```
+
+   The n8n workflows are imported and published automatically on first start. If `SLACK_BOT_TOKEN` was in the environment, Slack is wired and turned on too (`integrations.slack.enabled`); likewise Google Docs with a service account key and a Drive folder.
 
 #### Alternative deployment options
 
@@ -350,6 +365,8 @@ echo https://$(oc get route/object-store -n ${PROJECT} --template='{{.spec.host}
 
 5. Ask a question about the uploaded document in the frontend. The answer should include citations pointing at the file and page.
 
+6. Open the admin portal (`/admin`). The Activity page lists the documents indexed and classified in step 4; the Integrations page tests each integration and the models.
+
 ### Delete
 
 1. Uninstall the Helm release:
@@ -380,10 +397,11 @@ The demo follows one storyline, from deployment to portability. Each step builds
 4. **Ask the same question by voice.** The avatar answers with lip-synced speech. Interrupt it mid-sentence to show barge-in.
 5. **Ask a follow-up question** that only makes sense with context. The assistant uses conversation memory from PostgreSQL to resolve it.
 6. **Drop an invoice or contract** into the bucket. The classification workflow identifies the document type, extracts fields to JSON, and posts the result to Slack.
-7. **Submit a service request by voice.** A ticket is created in PostgreSQL, an approval request appears in Slack, and after approval the avatar confirms fulfillment.
-8. **Show the transcript** saved to Google Docs and re-ingested, then ask a question that the transcript answers.
-9. **Open the OpenShift AI dashboard** to show the served models and their metrics, then the Qdrant and PostgreSQL data behind the demo.
-10. **Swap the avatar provider or the LLM endpoint** with a values change and redeploy, demonstrating portability and data sovereignty.
+7. **Submit a service request by voice.** A ticket is created in PostgreSQL, the request waits in the admin portal's Approvals page (and as a card in Slack when it is on), and after approval the avatar confirms fulfillment and says who approved it.
+8. **Open the admin portal** to follow the same request in the activity feed and its ticket timeline, and see the questions the documents could not answer.
+9. **Archive the transcript**, re-ingested (and saved to Google Docs when it is on), then ask a question that the transcript answers.
+10. **Open the OpenShift AI dashboard** to show the served models and their metrics, then the Qdrant and PostgreSQL data behind the demo.
+11. **Swap the avatar provider or the LLM endpoint** with a values change and redeploy, demonstrating portability and data sovereignty.
 
 A presenter script with timings, exact questions and expected answers is in [docs/demo-script.md](docs/demo-script.md).
 
@@ -405,11 +423,13 @@ A presenter script with timings, exact questions and expected answers is in [doc
 
 **Model endpoints.** Every model is consumed through an OpenAI-compatible API: chat completions for the LLM and guardrails, audio transcriptions for Whisper, audio speech for TTS, and embeddings for the indexing model. Each model has a `deploy` toggle plus `endpoint` and `servedModelName` values; API keys live in the models Secret. Switching from a local InferenceService to a MaaS endpoint, or to a frontier provider as a fallback, is a values change with no code change. In-cluster endpoints that OpenShift AI serves over TLS are trusted through the OpenShift service CA, which every pod already mounts.
 
-**RAG API.** A FastAPI service that owns retrieval, memory, guardrails, classification, and tickets so that text chat, voice, and n8n all share one grounded answer path. Main endpoints: `POST /v1/chat` (grounded answer with citations and memory), `POST /v1/search` (retrieval only), `POST /v1/classify` (document type and field extraction to JSON), `POST /v1/tickets` and `PATCH /v1/tickets/{id}` (service request state), `GET /v1/voice/token` (LiveKit room token for the browser).
+**RAG API.** A FastAPI service that owns retrieval, memory, guardrails, classification, and tickets so that text chat, voice, and n8n all share one grounded answer path. Main endpoints: `POST /v1/chat` (grounded answer with citations and memory), `POST /v1/search` (retrieval only), `POST /v1/classify` (document type and field extraction to JSON), `POST /v1/tickets` and `PATCH /v1/tickets/{id}` (service request state), `GET /v1/voice/token` (LiveKit room token for the browser), and the admin portal's routes under `/v1/admin`. Routes that are neither for the chat and the voice agent nor for the portal need the internal token that n8n, the ingestion service and the scripts send; the frontend's proxy forwards only the first two kinds.
 
 **Ingestion.** Docling converts PDF, DOCX, PPTX, HTML, and images to a structured document. The hybrid chunker produces token-bounded chunks with heading context. Each Qdrant point carries `doc_id`, `source`, `page`, `chunk_index`, and `text`, which is what the citations panel displays. Re-ingesting a document with the same `doc_id` replaces its points.
 
-**Memory and tickets.** PostgreSQL holds `conversations`, `messages` (with citations as JSONB), `user_memory` for long-lived facts, `documents` for classification results, and `tickets` for the request workflow. n8n uses the same database under its own schema.
+**Memory and tickets.** PostgreSQL holds `conversations`, `messages` (with citations as JSONB, and a full-text index for the portal's search), `user_memory` for long-lived facts, `documents` for classification results, `tickets` with their events for the request workflow, `knowledge_gaps` for unanswered questions, `transcript_archives`, `activity_events` and `admin_audit`. n8n uses the same database under its own schema.
+
+**Admin portal.** A React and PatternFly app under `/admin`, a second entry of the frontend build, so the chat never loads it. Sign-in is one shared password with a display name; the session is a signed cookie (8 hours by default) and every change it makes carries a header that other sites cannot send, is written to the audit log, and is recorded as an activity event. The portal decides requests, cancels, edits and messages the requester; searches, exports, archives and deletes conversations; groups unanswered questions by meaning with the embeddings model and re-tests them against the documents; uploads, re-ingests and deletes documents through the ingestion service; and tests each integration. The design is in [docs/admin-portal.md](docs/admin-portal.md).
 
 **Voice.** The voice agent is a LiveKit Agents worker. Silero VAD detects turns and enables interruption, Whisper transcribes, the RAG API produces the answer, and the TTS model synthesizes it. When an avatar provider is configured, the agent hands its audio to the provider, which publishes synchronized video into the room. With no provider configured, the agent publishes audio only.
 
@@ -417,7 +437,7 @@ A presenter script with timings, exact questions and expected answers is in [doc
 
 **Guardrails.** Input and output checks run in the RAG API with a provider switch: `none` (the demo setting), `granite-guardian` (Granite Guardian 3.3 8B served on OpenShift AI), `llama-guard`, or `trustyai` (the TrustyAI Guardrails orchestrator). Blocked requests return a safe message and are logged; answers stream sentence by sentence only with `none`.
 
-**Workflows.** The seven n8n workflows (chat, ingestion, classification, request approval, transcript archival, SLA escalation, knowledge-gap digest) call the RAG API and ingestion service by their in-cluster service names. n8n imports them on first start; the Slack credential is created from the integrations secret, the Google Docs credential is added once in the n8n UI. The **Archive transcript** button in the chat header hands the current conversation to the archival workflow through the RAG API.
+**Workflows.** The seven n8n workflows (chat, ingestion, classification, request approval, transcript archival, SLA escalation, knowledge-gap digest) call the RAG API and ingestion service by their in-cluster service names, with the internal token. n8n imports them on first start and the Slack credential is created from the integrations secret; every Slack node sits behind a check of `integrations.slack.enabled`, so the workflows run the same with Slack off. What only the workflows see (ingestion results, SLA reminders, the digest, Slack failures) is posted to the portal's activity feed. The **Archive transcript** button in the chat header hands the current conversation to the archival workflow through the RAG API. Details: [n8n/workflows/README.md](n8n/workflows/README.md).
 
 **Naming.** Application services use fixed names (`frontend`, `rag-api`, `ingestion`, `voice-agent`, `postgres`, `qdrant`, `object-store`, `n8n`, `livekit`) so that workflows and configuration are stable regardless of the Helm release name. Deploy one release per project.
 

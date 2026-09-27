@@ -7,7 +7,7 @@ Fifteen minutes, mixed audience. Each step has the talking point for decision ma
 - `NS=<project> scripts/demo-preflight.sh -f <your values file>`, run from the repository clone, ends with `PRE-FLIGHT OK`: models Ready, the connectivity test pod green, every n8n webhook registered. It needs `helm` on the PATH and takes about a minute.
 - All InferenceServices show READY True: `oc get isvc -n <project>`.
 - The sample documents are loaded (`scripts/load-sample-docs.sh`) and `#assistant-ingestion` shows their "done" messages.
-- Browser windows ready: **A** the frontend (hard refresh, microphone allowed), **B** n8n Executions, **C** Slack with the five `#assistant-*` channels, **D** the Google Drive transcripts folder, **E** the OpenShift AI dashboard, Models tab. A terminal on the bastion or your laptop for two commands.
+- Browser windows ready: **A** the frontend (hard refresh, microphone allowed), **B** n8n Executions, **C** Slack with the five `#assistant-*` channels, **D** the Google Drive transcripts folder, **E** the OpenShift AI dashboard, Models tab, **F** the admin portal (`<frontend URL>/admin`), signed in with your name (the password: `oc extract secret/assistant-admin -n <project> --keys=ADMIN_PASSWORD --to=-`), on the Activity page. A terminal on the bastion or your laptop for two commands.
 - Avatar minutes: the Tavus free plan has 25 minutes a month and one stream. Rehearse with `voiceAgent.avatarProvider: none`; switch to `tavus` for the real run.
 - Start a **new conversation** in the frontend so memory and notices are clean.
 
@@ -23,10 +23,19 @@ Fifteen minutes, mixed audience. Each step has the talking point for decision ma
 | 6:30 | 5. Follow-up with memory | Say: **And what is the minimum length?** Expected: 14 characters. The question only makes sense with the previous one; conversation memory lives in PostgreSQL, shared by text and voice. |
 | 7:30 | 6. An invoice arrives | Terminal, in the repository clone: `NS=<project> scripts/load-sample-docs.sh invoice-SKY-2026-0817.pdf`. Window B: WF2 hands the inbox file to WF3; window C `#assistant-documents`: classified as **invoice**, with vendor, invoice number, dates and total extracted to JSON. Documents that are not knowledge are routed, not indexed. |
 | 9:00 | 7. A request by voice | Say: **I need a new laptop, mine no longer boots.** Expected: "I've logged your request REQ-… Replace non-functional laptop. It's a hardware request … and needs approval." Window C `#assistant-approvals`: the card with Approve and Reject. Click **Approve**. Within seconds the avatar says: "Good news: your request REQ-… was approved by … and has been fulfilled." The chat shows the same line tagged *update*; `#assistant-tickets` has the fulfilment. Intent detection, a ticket in PostgreSQL, an approval workflow in n8n, and the outcome spoken back in the same session. |
+| 10:45 | 7b. The service desk's view | Window F: the Activity feed shows the request as it happened (filed, waiting for approval, approved in Slack by you, fulfilled). Click the reference: the ticket with its timeline and the conversation it came from. Approvals is empty again; Knowledge gaps lists the questions the documents could not answer, grouped by meaning. One place to run the service desk, with or without Slack. |
 | 11:30 | 8. The transcript | Click **End voice**, then **Archive transcript** in the header (the terminal alternative is `NS=<project> scripts/archive-transcript.sh`). Window D: a new Google Doc "Assistant transcript …"; window C `#assistant-ingestion`: "Transcript … archived to Google Docs and queued for re-ingestion". Type in window A: **Which request did I file today?** Expected: an answer citing `transcript-….md`. The assistant learns from its own conversations. |
 | 13:00 | 9. Under the hood | Window E: the three models with their status and metrics. Optional: the Qdrant dashboard Route with the collection and its vectors. |
 | 14:00 | 10. Portability | Show `chart/values-demo-cluster.yaml`: `voiceAgent.avatarProvider`, `models.llm.endpoint`. One value switches the avatar provider or points the LLM at a Models-as-a-Service endpoint; Argo CD (or `helm upgrade`) rolls it out. Data never has to leave the cluster unless you choose it. |
 | 15:00 | Close | Questions. |
+
+## Without Slack or Google Docs
+
+The same fifteen minutes work with `integrations.slack.enabled` and `integrations.googleDocs.enabled` off; the admin portal (window F) takes the place of windows C and D.
+
+- **Step 2 and step 6.** The results appear in window F: the Activity feed shows "leave-policy.docx indexed (7 chunks)" and the invoice's classification; Documents > Classified shows the invoice's type, summary and extracted fields.
+- **Step 7.** Open **Approvals** in window F before speaking: the request appears within a second and the badge counts it. Click **Approve**. The avatar says "…was approved by <your name> and has been fulfilled." Reject with a reason to show that the reason is spoken too.
+- **Step 8.** **Archive transcript** stores the transcript in the `transcripts` bucket and re-indexes it; there is no Google Doc. Window F, Conversations: the conversation shows the archive with a **Download** link. The follow-up question still cites `transcript-….md`.
 
 ## Expected answers at a glance
 
@@ -44,4 +53,5 @@ Fifteen minutes, mixed audience. Each step has the talking point for decision ma
 
 - The avatar does not join within twenty seconds: click End voice, then Start again (a new room gets a new agent). See `docs/troubleshooting.md`.
 - Approval card without buttons or an outcome that is not spoken: the request must be filed in the *same* session that is live in the browser; the notice goes to the conversation that filed it.
+- A click on the Slack card does nothing: approve in window F instead; the card is updated with the decision all the same. The Integrations page there tests Slack and shows the last error (a missing signing secret is the usual cause).
 - Keep the text path as the fallback for every voice step; the answers and citations are identical.

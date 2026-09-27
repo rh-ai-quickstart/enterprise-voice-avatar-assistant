@@ -84,6 +84,14 @@ jobs:
       - name: public /api proxy (nginx allowlist)
         run: nginx/test-proxy.sh
 
+  workflows:
+    name: n8n workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The chart's workflows in the chart's n8n image against a stub RAG API, Slack off then on
+      - run: n8n/tests/run.sh
+
   e2e:
     name: end-to-end (Playwright)
     runs-on: ubuntu-latest

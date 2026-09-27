@@ -30,6 +30,20 @@ Two rules every workflow follows (`services/rag-api/tests/test_workflows.py` che
   `Slack failed? (<node>)`, which posts an `integration.error` for Slack. The admin portal's
   Activity and Integrations pages show them; a failed post never stops a workflow.
 
+## Tests
+
+`services/rag-api/tests/test_workflows.py` checks the files statically (the rules above, the
+webhook paths, the connections). `n8n/tests/` runs them: the chart's n8n image imports and
+publishes the workflows as the chart does, a stub stands in for the RAG API and the ingestion
+service and records every call, and `scenarios.mjs` plays the RAG API, Slack and the object store
+against the webhooks, twice: with Slack off, and with Slack on but unreachable, where each
+scenario also names the Slack nodes that must report their failure. The schedule triggers of WF6
+and WF7 become webhooks (`run-wf6`, `run-wf7`) for the run. CI runs it; locally, with Docker:
+
+```bash
+n8n/tests/run.sh
+```
+
 ## Import
 
 Create an API key in n8n (Settings, then *n8n API*), then:

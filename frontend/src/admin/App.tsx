@@ -1,19 +1,29 @@
-import { Bullseye, Spinner } from "@patternfly/react-core";
+import { Bullseye, PageSection, Spinner } from "@patternfly/react-core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { ApiError, api } from "./api";
 import { Layout } from "./Layout";
-import { ActivityPage } from "./pages/Activity";
-import { ApprovalsPage } from "./pages/Approvals";
-import { AuditPage } from "./pages/Audit";
-import { ConversationPage } from "./pages/Conversation";
-import { ConversationsPage } from "./pages/Conversations";
-import { DocumentsPage } from "./pages/Documents";
-import { IntegrationsPage } from "./pages/Integrations";
-import { KnowledgeGapsPage } from "./pages/KnowledgeGaps";
 import { Login } from "./pages/Login";
 import { OverviewPage } from "./pages/Overview";
-import { TicketsPage } from "./pages/Tickets";
+
+// Every section but the overview loads when it is first opened, so signing in does not wait for
+// the tables, drawers and upload code of pages that may never be visited
+const ActivityPage = lazy(() => import("./pages/Activity").then((m) => ({ default: m.ActivityPage })));
+const ApprovalsPage = lazy(() => import("./pages/Approvals").then((m) => ({ default: m.ApprovalsPage })));
+const AuditPage = lazy(() => import("./pages/Audit").then((m) => ({ default: m.AuditPage })));
+const ConversationPage = lazy(() => import("./pages/Conversation").then((m) => ({ default: m.ConversationPage })));
+const ConversationsPage = lazy(() => import("./pages/Conversations").then((m) => ({ default: m.ConversationsPage })));
+const DocumentsPage = lazy(() => import("./pages/Documents").then((m) => ({ default: m.DocumentsPage })));
+const IntegrationsPage = lazy(() => import("./pages/Integrations").then((m) => ({ default: m.IntegrationsPage })));
+const KnowledgeGapsPage = lazy(() => import("./pages/KnowledgeGaps").then((m) => ({ default: m.KnowledgeGapsPage })));
+const TicketsPage = lazy(() => import("./pages/Tickets").then((m) => ({ default: m.TicketsPage })));
+
+const loading = (
+  <PageSection>
+    <Spinner aria-label="Loading" />
+  </PageSection>
+);
 
 /** Signed in: the portal. Not signed in (or the session expired): the sign-in page. */
 export function App() {
@@ -56,23 +66,25 @@ export function App() {
   };
   return (
     <Layout me={me.data} onSignOut={signOut}>
-      <Routes>
-        <Route path="/" element={<OverviewPage />} />
-        <Route path="/approvals" element={<ApprovalsPage />} />
-        <Route path="/approvals/:ref" element={<ApprovalsPage />} />
-        <Route path="/tickets" element={<TicketsPage />} />
-        <Route path="/tickets/:ref" element={<TicketsPage />} />
-        <Route path="/conversations" element={<ConversationsPage />} />
-        <Route path="/conversations/:id" element={<ConversationPage />} />
-        <Route path="/gaps" element={<KnowledgeGapsPage />} />
-        <Route path="/documents" element={<Navigate to="/documents/indexed" replace />} />
-        <Route path="/documents/:tab" element={<DocumentsPage />} />
-        <Route path="/activity" element={<ActivityPage />} />
-        <Route path="/integrations" element={<IntegrationsPage />} />
-        <Route path="/audit" element={<AuditPage />} />
-        <Route path="/login" element={<Navigate to="/" replace />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={loading}>
+        <Routes>
+          <Route path="/" element={<OverviewPage />} />
+          <Route path="/approvals" element={<ApprovalsPage />} />
+          <Route path="/approvals/:ref" element={<ApprovalsPage />} />
+          <Route path="/tickets" element={<TicketsPage />} />
+          <Route path="/tickets/:ref" element={<TicketsPage />} />
+          <Route path="/conversations" element={<ConversationsPage />} />
+          <Route path="/conversations/:id" element={<ConversationPage />} />
+          <Route path="/gaps" element={<KnowledgeGapsPage />} />
+          <Route path="/documents" element={<Navigate to="/documents/indexed" replace />} />
+          <Route path="/documents/:tab" element={<DocumentsPage />} />
+          <Route path="/activity" element={<ActivityPage />} />
+          <Route path="/integrations" element={<IntegrationsPage />} />
+          <Route path="/audit" element={<AuditPage />} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </Layout>
   );
 }

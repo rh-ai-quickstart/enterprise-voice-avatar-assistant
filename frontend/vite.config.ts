@@ -24,6 +24,9 @@ function adminFallback(): Plugin {
 export default defineConfig({
   plugins: [react(), adminFallback()],
   build: {
+    // The largest chunk is LiveKit (about 580 kB), which the chat loads next to itself for the voice
+    // panel; everything else is split per page and stays well under the default 500 kB
+    chunkSizeWarningLimit: 650,
     rolldownOptions: {
       input: {
         main: fileURLToPath(new URL("index.html", import.meta.url)),

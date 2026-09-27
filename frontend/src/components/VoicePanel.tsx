@@ -10,9 +10,12 @@ import {
   useRoomContext,
   useVoiceAssistant,
 } from "@livekit/components-react";
-import { ConnectionState } from "livekit-client";
+import { ConnectionState, LogLevel, setLogLevel } from "livekit-client";
 import * as api from "../lib/api";
 import type { AssistantTurn, VoiceFace, VoiceToken } from "../types";
+
+// Open the page with ?debug=1 to get verbose LiveKit client logs (ICE candidates, TURN, reconnects).
+if (new URLSearchParams(window.location.search).has("debug")) setLogLevel(LogLevel.debug);
 
 interface Props {
   sessionId: string;

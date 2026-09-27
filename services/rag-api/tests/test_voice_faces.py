@@ -20,10 +20,12 @@ CATALOG = json.dumps(
 )
 
 
-def _tavus(monkeypatch, catalog=CATALOG, api_key=None):
+def _tavus(monkeypatch, catalog=CATALOG, api_key="k"):
     monkeypatch.setattr(settings, "avatar_provider", "tavus")
     monkeypatch.setattr(settings, "avatar_faces", catalog)
     monkeypatch.setattr(settings, "tavus_api_key", api_key)
+    # Tavus has nothing to add unless a test says otherwise (no network in tests)
+    monkeypatch.setattr(faces, "_tavus_faces", lambda face_ids, key: {})
     monkeypatch.setattr(settings, "tts_voice", "af_heart")
     monkeypatch.setattr(settings, "tts_voice_female", "af_bella")
     monkeypatch.setattr(settings, "tts_voice_male", "am_michael")
@@ -61,6 +63,29 @@ def test_catalog_falls_back_to_the_single_face(monkeypatch):
     assert [f.id for f in faces.catalog()] == ["rsingle"]
     monkeypatch.setattr(settings, "avatar_provider", "none")
     assert faces.catalog() == []
+
+
+def test_without_its_key_tavus_is_off(monkeypatch):
+    """Tavus configured but no key (setup step 5 skipped): audio only, no face offered."""
+    _tavus(monkeypatch, api_key=None)
+    assert faces.configured_provider() == "tavus" and faces.avatar_provider() == "none"
+    assert faces.catalog() == []
+    with TestClient(app) as client:
+        assert client.get("/v1/voice/faces").json() == {"provider": "none", "default": None, "faces": []}
+        voice = client.get("/v1/info").json()["voice"]
+        assert voice["avatar_provider"] == "none" and voice["faces"] == 0
+        plain = client.get("/v1/voice/token", params={"session_id": "abc", "identity": "mo"})
+        assert plain.status_code == 200 and "attributes" not in _claims(plain.json()["token"])
+
+
+def test_other_providers_follow_their_keys(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_provider", "simli")
+    monkeypatch.delenv("SIMLI_API_KEY", raising=False)
+    assert faces.avatar_provider() == "none"
+    monkeypatch.setenv("SIMLI_API_KEY", "s")
+    assert faces.avatar_provider() == "simli" and faces.catalog() == []
+    monkeypatch.setattr(settings, "avatar_provider", "none")
+    assert faces.avatar_provider() == "none"
 
 
 def test_faces_endpoint_and_token_attribute(monkeypatch):

@@ -175,7 +175,7 @@ def info():
         "archival": {"google_docs": gdocs.configured()},
         "voice": {
             "livekit_url": settings.livekit_public_url or settings.livekit_url,
-            "avatar_provider": settings.avatar_provider,
+            "avatar_provider": faces.avatar_provider(),
             "faces": len(faces.catalog()),
         },
     }
@@ -386,7 +386,7 @@ def voice_token(
 async def voice_faces():
     items = await asyncio.to_thread(faces.enriched)
     return VoiceFacesResponse(
-        provider=settings.avatar_provider,
+        provider=faces.avatar_provider(),
         default=faces.default_id(),
         faces=[
             VoiceFace(

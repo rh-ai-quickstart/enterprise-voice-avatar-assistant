@@ -8,7 +8,7 @@ Fifteen minutes, mixed audience. Each step has the talking point for decision ma
 - All InferenceServices show READY True: `oc get isvc -n <project>`.
 - The sample documents are loaded (`scripts/load-sample-docs.sh`) and `#assistant-ingestion` shows their "done" messages.
 - Browser windows ready: **A** the frontend (hard refresh, microphone allowed), **B** n8n Executions, **C** Slack with the five `#assistant-*` channels, **D** the Google Drive transcripts folder, **E** the OpenShift AI dashboard, Models tab, **F** the admin portal (`<frontend URL>/admin`), signed in with your name (the password: `oc extract secret/assistant-admin -n <project> --keys=ADMIN_PASSWORD --to=-`), on the Activity page. A terminal on the bastion or your laptop for two commands.
-- Avatar minutes: the Tavus free plan has 25 minutes a month and one stream. Rehearse with `voiceAgent.avatarProvider: none`; switch to `tavus` for the real run.
+- Avatar minutes: the Tavus free plan has 25 minutes a month and one stream. Rehearse with `voiceAgent.avatarProvider: none`; switch to `tavus` for the real run. Without a Tavus key the whole demo is audio-only: step 4 shows the voice bars instead of a face and has no face picker; the answers, the barge-in and the spoken notices are the same.
 - Start a **new conversation** in the frontend so memory and notices are clean.
 
 ## Steps

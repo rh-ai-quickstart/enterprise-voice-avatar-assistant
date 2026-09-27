@@ -67,3 +67,19 @@ def test_stop_ends_tavus_conversation(monkeypatch):
     asyncio.run(avatars.stop(SimpleNamespace(conversation_id=None)))
     asyncio.run(avatars.stop(None))
     assert ended == [("c123", "k")]
+
+
+def test_a_missing_key_means_audio_only(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "avatar_provider", "tavus")
+    monkeypatch.setattr(settings, "tavus_api_key", None)
+    monkeypatch.setattr(avatars, "_warned", set())
+    assert avatars.missing_key() == "TAVUS_API_KEY" and not avatars.active()
+    with caplog.at_level("INFO", logger="voice-agent.avatar"):
+        assert asyncio.run(avatars.start(None, None)) is None
+        assert asyncio.run(avatars.start(None, None)) is None
+    levels = [r.levelname for r in caplog.records if "TAVUS_API_KEY is empty" in r.getMessage()]
+    assert levels == ["WARNING", "INFO"]  # a warning once, then a plain line per session
+    monkeypatch.setattr(settings, "tavus_api_key", "k")
+    assert avatars.missing_key() is None and avatars.active()
+    monkeypatch.setattr(settings, "avatar_provider", "none")
+    assert avatars.missing_key() is None and not avatars.active()

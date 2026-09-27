@@ -14,6 +14,8 @@ CATALOG = json.dumps(
 
 
 def _voices(monkeypatch, catalog=CATALOG):
+    monkeypatch.setattr(settings, "avatar_provider", "tavus")
+    monkeypatch.setattr(settings, "tavus_api_key", "k")
     monkeypatch.setattr(settings, "avatar_faces", catalog)
     monkeypatch.setattr(settings, "tts_voice", "af_heart")
     monkeypatch.setattr(settings, "tts_voice_female", "af_bella")
@@ -37,6 +39,15 @@ def test_select_prefers_the_requested_catalog_face(monkeypatch):
     _voices(monkeypatch, catalog="[]")
     assert faces.select(None) is None  # provider settings (TAVUS_FACE_ID) apply
     assert faces.select("rany").id == "rany"  # no catalog: the browser's id is trusted
+
+
+def test_without_an_avatar_there_is_no_face(monkeypatch):
+    _voices(monkeypatch)
+    monkeypatch.setattr(settings, "tavus_api_key", None)  # setup step 5 skipped
+    assert faces.select("r9d3aaaa1111") is None and faces.select(None) is None
+    assert faces.voice_for(faces.select(None)) == "af_heart"  # the default voice
+    monkeypatch.setattr(settings, "avatar_provider", "none")
+    assert faces.select("r9d3aaaa1111") is None
 
 
 def test_catalog_is_capped_at_four_faces(monkeypatch):

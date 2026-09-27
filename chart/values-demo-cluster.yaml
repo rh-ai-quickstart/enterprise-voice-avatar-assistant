@@ -15,6 +15,7 @@ voiceAgent:
   enabled: true
   # Tavus renders the avatar from the agent audio. TAVUS_API_KEY (and optionally
   # TAVUS_FACE_ID) come from the assistant-integrations secret (scripts/create-secrets.sh).
+  # Without the key, setup step 6 and deploy.sh pass avatarProvider=none: voice is audio-only.
   avatarProvider: tavus
   # Faces offered in the UI (Tavus stock faces; scripts/list-tavus-faces.sh lists them).
   # The voice follows the declared gender through models.tts.voices; the first entry is the default.

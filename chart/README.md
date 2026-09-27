@@ -313,7 +313,7 @@ Application services built from this repository.
 | `voiceAgent.enabled` | `true` | Deploy this component. |
 | `voiceAgent.image` | `""` | Container image (full reference). |
 | `voiceAgent.replicas` | `1` | Number of pods. |
-| `voiceAgent.avatarProvider` | `none` | none \| simli \| tavus \| hedra (see services/voice-agent/app/avatars.py) |
+| `voiceAgent.avatarProvider` | `none` | none \| simli \| tavus \| hedra (see services/voice-agent/app/avatars.py). A provider whose key is missing from the integrations secret counts as none: voice is audio-only and no face is offered. |
 | `voiceAgent.extraEnv` | `{}` | Extra environment for the worker; explicit entries win over the config map and secrets, so non-secret provider settings such as TAVUS_FACE_ID can be pinned here. |
 | `voiceAgent.faces` | `[]` | Up to four faces the person can choose in the UI before a voice session (Tavus). Each entry has id (the Tavus face id), name (shown in the UI; taken from Tavus when empty) and gender (female \| male, which selects the voice from models.tts.voices) or voice (pins a TTS voice). The first entry is the default; an empty list means the single face in TAVUS_FACE_ID. scripts/list-tavus-faces.sh prints the stock faces with their ids. |
 | `voiceAgent.resources.requests.cpu` | `500m` | CPU request. |

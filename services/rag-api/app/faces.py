@@ -82,9 +82,27 @@ def parse(raw: str) -> list[Face]:
     return faces
 
 
+# The key each avatar provider cannot start without; the voice agent checks the same ones
+AVATAR_KEYS = {"tavus": "TAVUS_API_KEY", "simli": "SIMLI_API_KEY", "hedra": "HEDRA_API_KEY"}
+
+
+def configured_provider() -> str:
+    return (settings.avatar_provider or "none").strip().lower()
+
+
+def avatar_provider() -> str:
+    """The avatar in effect: the configured provider, or none when its key is missing. Voice
+    sessions are then audio-only, and no face is offered."""
+    provider = configured_provider()
+    if provider == "tavus":
+        return provider if settings.tavus_api_key else "none"
+    key = AVATAR_KEYS.get(provider)
+    return provider if not key or os.environ.get(key, "").strip() else "none"
+
+
 def catalog() -> list[Face]:
     """Declared faces (Tavus only). Without a list, the single configured face is offered by id."""
-    if (settings.avatar_provider or "none").lower() != "tavus":
+    if avatar_provider() != "tavus":
         return []
     faces = parse(settings.avatar_faces)
     if not faces and settings.tavus_face_id:

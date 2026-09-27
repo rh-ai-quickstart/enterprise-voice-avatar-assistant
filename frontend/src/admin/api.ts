@@ -1,13 +1,25 @@
 import type {
-  ActivityEvent,
+  ActivityPage,
+  AuditPage,
   ConversationDetail,
   ConversationPage,
   DeleteResult,
+  DocumentDetail,
+  DocumentPage,
+  Gap,
+  GapGroups,
+  GapStatus,
+  IngestionJob,
+  Integration,
+  IntegrationName,
+  IntegrationTest,
   Me,
   Overview,
+  Retest,
   TicketActionResult,
   TicketDetail,
   TicketPage,
+  Uploaded,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
@@ -22,7 +34,10 @@ export class ApiError extends Error {
 }
 
 /** A call to /v1/admin: the session cookie goes along, and every change carries X-Admin-Request. */
-export async function call<T>(path: string, options: { method?: string; json?: unknown } = {}): Promise<T> {
+export async function call<T>(
+  path: string,
+  options: { method?: string; json?: unknown; form?: FormData } = {},
+): Promise<T> {
   const method = options.method ?? "GET";
   const headers: Record<string, string> = {};
   if (options.json !== undefined) headers["Content-Type"] = "application/json";
@@ -31,7 +46,8 @@ export async function call<T>(path: string, options: { method?: string; json?: u
     method,
     headers,
     credentials: "same-origin",
-    body: options.json !== undefined ? JSON.stringify(options.json) : undefined,
+    // A multipart body sets its own Content-Type with the boundary
+    body: options.form ?? (options.json !== undefined ? JSON.stringify(options.json) : undefined),
   });
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
@@ -54,7 +70,21 @@ export type TicketFilters = Partial<
   Record<"status" | "category" | "priority" | "requester" | "channel" | "q" | "from" | "to" | "order", string>
 > & { page?: number; limit?: number };
 
-function query(params: Record<string, string | number | undefined>): string {
+export type ActivityFilters = Partial<Record<"kind" | "severity" | "from" | "to", string>> & {
+  before_id?: number;
+  limit?: number;
+};
+
+export type AuditFilters = Partial<Record<"actor" | "action" | "from" | "to", string>> & {
+  before_id?: number;
+  limit?: number;
+};
+
+export type GapFilters = { status?: GapStatus | "all"; from?: string; to?: string };
+
+export type DocumentFilters = { kind?: "all" | "indexed" | "classified"; q?: string; bucket?: string; page?: number; limit?: number };
+
+function query(params: Record<string, string | number | boolean | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== "") search.set(key, String(value));
@@ -94,6 +124,26 @@ export const api = {
   exportUrl: (id: string, format: "md" | "txt") => `${API_BASE}/v1/admin/conversations/${ref(id)}/export?format=${format}`,
   archiveUrl: (id: string, archiveId: number) =>
     `${API_BASE}/v1/admin/conversations/${ref(id)}/archives/${archiveId}/download`,
-  activity: (params: { kind?: string; severity?: string; limit?: number }) =>
-    call<{ items: ActivityEvent[]; next_before_id: number | null }>(`/activity${query(params)}`),
+  activity: (filters: ActivityFilters) => call<ActivityPage>(`/activity${query(filters)}`),
+  audit: (filters: AuditFilters) => call<AuditPage>(`/audit${query(filters)}`),
+  gaps: (filters: GapFilters) => call<GapGroups>(`/knowledge-gaps${query({ ...filters, group: true })}`),
+  gapList: (filters: GapFilters) => call<{ items: Gap[]; total: number }>(`/knowledge-gaps${query({ ...filters, group: false })}`),
+  resolveGaps: (ids: number[], status: GapStatus, note?: string) =>
+    call<{ changed: number }>("/knowledge-gaps/resolve", { method: "POST", json: { ids, status, note: note || null } }),
+  retest: (id: number) => call<Retest>(`/knowledge-gaps/${id}/retest`, { method: "POST" }),
+  documents: (filters: DocumentFilters) => call<DocumentPage>(`/documents${query(filters)}`),
+  document: (id: string) => call<DocumentDetail>(`/documents/${ref(id)}`),
+  upload: (bucket: "documents" | "inbox", file: File) => {
+    const form = new FormData();
+    form.set("bucket", bucket);
+    form.set("file", file, file.name);
+    return call<Uploaded>("/documents/upload", { method: "POST", form });
+  },
+  reingest: (id: string) =>
+    call<{ job_id: string; doc_id: string; status: string }>(`/documents/${ref(id)}/reingest`, { method: "POST" }),
+  deleteDocument: (id: string) =>
+    call<{ doc_id: string; source: string; object: string | null }>(`/documents/${ref(id)}`, { method: "DELETE" }),
+  jobs: () => call<{ items: IngestionJob[] }>("/ingestion/jobs"),
+  integrations: () => call<{ items: Integration[] }>("/integrations"),
+  testIntegration: (name: IntegrationName) => call<IntegrationTest>(`/integrations/${name}/test`, { method: "POST" }),
 };

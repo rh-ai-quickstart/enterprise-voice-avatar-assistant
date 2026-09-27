@@ -1,6 +1,6 @@
 import { Label } from "@patternfly/react-core";
 import { duration, words } from "../format";
-import type { Sla, TicketStatus } from "../types";
+import type { IntegrationState, Sla, TicketStatus } from "../types";
 
 type Color = "blue" | "green" | "orange" | "red" | "grey" | "purple" | "teal" | "yellow" | "orangered";
 
@@ -45,6 +45,16 @@ export function SeverityLabel({ severity }: { severity: string }) {
   return (
     <Label color={SEVERITY_COLORS[severity] ?? "grey"} isCompact>
       {severity}
+    </Label>
+  );
+}
+
+const STATE_COLORS: Record<IntegrationState, Color> = { on: "green", off: "grey", misconfigured: "orange", failing: "red" };
+
+export function IntegrationStateLabel({ state }: { state: IntegrationState }) {
+  return (
+    <Label color={STATE_COLORS[state] ?? "grey"} isCompact>
+      {state}
     </Label>
   );
 }

@@ -112,8 +112,9 @@ class Settings(BaseSettings):
     sla_reminder_minutes: int = 60
     sla_escalation_minutes: int = 240
 
-    # Knowledge gap detection
+    # Knowledge gap detection; gaps whose questions are this similar (cosine) are grouped
     gap_score_threshold: float = 0.45
+    gap_group_threshold: float = 0.85
 
     cors_origins: str = "*"
     log_level: str = "INFO"

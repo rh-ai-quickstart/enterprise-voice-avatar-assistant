@@ -230,3 +230,29 @@ def test_overview_counts(database, admin_client):
     assert overview["tickets_last_7_days"] == {"pending_approval": 1, "approved": 1}
     assert overview["recent_activity"][0]["kind"] == "ticket.approved"
     assert overview["sla"] == {"reminder_minutes": 60, "escalation_minutes": 240}
+
+
+def test_one_sla_reminder_per_ticket(database, admin_client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "internal_api_token", "tok")
+    first, second = pending_ticket(), pending_ticket("Access to the finance share")
+
+    def remind(ticket):
+        return admin_client.post(
+            "/v1/internal/events",
+            json={
+                "kind": "ticket.sla_reminder",
+                "title": f"{ticket.ticket_ref} waits for approval",
+                "severity": "warning",
+                "ref_type": "ticket",
+                "ref_id": ticket.ticket_ref,
+            },
+            headers={"Authorization": "Bearer tok"},
+        ).json()["id"]
+
+    assert remind(first) is not None
+    # WF6 runs again 15 minutes later: the same wait is not reminded twice
+    assert remind(first) is None
+    assert remind(second) is not None
+    assert len(events.recent(kind="ticket.sla_reminder")) == 2

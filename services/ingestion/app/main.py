@@ -5,6 +5,8 @@ Endpoints
   GET  /readyz                  readiness (Qdrant and the documents bucket reachable)
   POST /v1/ingest               ingest one object from a bucket (202, returns a job)
   POST /v1/ingest/upload        upload a file; it is stored in the bucket and ingested (202)
+  POST /v1/objects              upload a file to a bucket without starting a job: the object store's
+                                notification then drives ingestion or classification (n8n WF2)
   POST /v1/events/s3            S3 bucket notification (created -> ingest, removed -> delete); the chart
                                 routes notifications through n8n (WF2) instead
   GET  /v1/jobs, /v1/jobs/{id}  job status
@@ -125,6 +127,19 @@ async def ingest_upload(file: Annotated[UploadFile, File()], bucket: Annotated[s
     doc_id = make_doc_id(bucket, key)
     job = await jobs.submit(bucket, key, doc_id, {})
     return IngestAccepted(job_id=job.job_id, doc_id=doc_id, status=job.status)
+
+
+@app.post("/v1/objects", status_code=201, dependencies=WRITE)
+async def put_object(file: Annotated[UploadFile, File()], bucket: Annotated[str, Form()]):
+    """Store a file as an object; the admin portal's upload. Only the configured buckets."""
+    if bucket not in settings.bucket_list:
+        raise HTTPException(status_code=422, detail=f"unknown bucket {bucket}; one of {', '.join(settings.bucket_list)}")
+    key = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not key or key.startswith("."):
+        raise HTTPException(status_code=422, detail="the file needs a name")
+    data = await file.read()
+    await asyncio.to_thread(storage.put_bytes, bucket, key, data, file.content_type)
+    return {"bucket": bucket, "key": key, "doc_id": make_doc_id(bucket, key), "size": len(data)}
 
 
 @app.post("/v1/events/s3", response_model=EventResponse, dependencies=WRITE)

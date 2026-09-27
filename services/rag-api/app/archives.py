@@ -58,10 +58,14 @@ def _hand_to_workflow(session_id: str, title: str, doc_url: str | None, archive_
             response = http.post(url, json=body, headers=auth.internal_headers())
         if response.status_code >= 400:
             log.warning("n8n archive webhook returned %s", response.status_code)
+            events.integration_error(
+                "n8n", f"Archival of {session_id[:8]}: n8n answered {response.status_code}"
+            )
             return False
         return True
     except httpx.HTTPError as exc:
         log.warning("n8n archive webhook unreachable: %s", exc)
+        events.integration_error("n8n", f"Archival of {session_id[:8]}: n8n unreachable", str(exc)[:500])
         return False
 
 

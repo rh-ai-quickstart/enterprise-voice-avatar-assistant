@@ -3,9 +3,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes } from "react-router";
 import { ApiError, api } from "./api";
 import { Layout } from "./Layout";
+import { ActivityPage } from "./pages/Activity";
 import { ApprovalsPage } from "./pages/Approvals";
+import { AuditPage } from "./pages/Audit";
 import { ConversationPage } from "./pages/Conversation";
 import { ConversationsPage } from "./pages/Conversations";
+import { DocumentsPage } from "./pages/Documents";
+import { IntegrationsPage } from "./pages/Integrations";
+import { KnowledgeGapsPage } from "./pages/KnowledgeGaps";
 import { Login } from "./pages/Login";
 import { OverviewPage } from "./pages/Overview";
 import { TicketsPage } from "./pages/Tickets";
@@ -44,8 +49,10 @@ export function App() {
   }
   const signOut = async () => {
     await api.logout().catch(() => undefined);
-    client.clear();
+    // The sign-in first, so the portal gives way to the sign-in page (clearing the whole cache
+    // would detach the query above from it); then everything else that belonged to the session
     client.setQueryData(["me"], null);
+    client.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
   };
   return (
     <Layout me={me.data} onSignOut={signOut}>
@@ -57,6 +64,12 @@ export function App() {
         <Route path="/tickets/:ref" element={<TicketsPage />} />
         <Route path="/conversations" element={<ConversationsPage />} />
         <Route path="/conversations/:id" element={<ConversationPage />} />
+        <Route path="/gaps" element={<KnowledgeGapsPage />} />
+        <Route path="/documents" element={<Navigate to="/documents/indexed" replace />} />
+        <Route path="/documents/:tab" element={<DocumentsPage />} />
+        <Route path="/activity" element={<ActivityPage />} />
+        <Route path="/integrations" element={<IntegrationsPage />} />
+        <Route path="/audit" element={<AuditPage />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

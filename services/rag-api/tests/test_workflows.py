@@ -127,3 +127,64 @@ def test_slack_clicks_are_verified_before_anything_else():
     assert "SLACK_SIGNING_SECRET" in code and "createHmac('sha256'" in code and "timingSafeEqual" in code
     (valid,) = _next_nodes(wf, verify["name"])
     assert valid["type"] == "n8n-nodes-base.if" and "signature_ok" in str(valid["parameters"])
+
+
+def _event_posts(wf: dict) -> list[dict]:
+    return [
+        n
+        for n in wf["nodes"]
+        if n["type"] == "n8n-nodes-base.httpRequest"
+        and n["parameters"].get("url", "").endswith("/v1/internal/events")
+    ]
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.stem)
+def test_every_slack_failure_reaches_the_activity_feed(path):
+    """A node that talks to Slack continues on failure, and its output goes through
+    'Slack failed? (<node>)' to an integration.error event for Slack."""
+    wf = load(path)
+    for node in filter(talks_to_slack, wf["nodes"]):
+        assert node.get("continueOnFail") is True, f"{path.name}: {node['name']!r} stops the workflow"
+        checks = [n for n in _next_nodes(wf, node["name"]) if n["name"] == f"Slack failed? ({node['name']})"]
+        assert checks, f"{path.name}: {node['name']!r} failures are not reported"
+        condition = checks[0]["parameters"]["conditions"]["conditions"][0]
+        assert "$json.error" in condition["leftValue"] and "$json.ok === false" in condition["leftValue"]
+        (report,) = _next_nodes(wf, checks[0]["name"])
+        body = report["parameters"]["jsonBody"]
+        assert report in _event_posts(wf)
+        assert "kind: 'integration.error'" in body and "ref_type: 'integration'" in body
+        assert "ref_id: 'slack'" in body
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.stem)
+def test_events_the_workflows_post_are_valid(path):
+    """Kinds and reference types the RAG API accepts; a failed post never stops the workflow."""
+    import re
+    import typing
+
+    from app.schemas import ActivityEventIn
+
+    pattern = re.compile(ActivityEventIn.model_fields["kind"].metadata[1].pattern)
+    ref_types = typing.get_args(typing.get_args(ActivityEventIn.model_fields["ref_type"].annotation)[0])
+    for node in _event_posts(load(path)):
+        body = node["parameters"]["jsonBody"]
+        assert node.get("continueOnFail") is True, node["name"]
+        assert body.startswith("={{ JSON.stringify({") and body.endswith("}) }}"), node["name"]
+        kinds = re.findall(r"'([a-z_]+\.[a-z_.]+)'", body.split("title:")[0])
+        assert kinds and all(pattern.match(k) for k in kinds), (node["name"], kinds)
+        (ref_type,) = re.findall(r"ref_type: '([a-z]+)'", body)
+        assert ref_type in ref_types, (node["name"], ref_type)
+
+
+@pytest.mark.parametrize(
+    "stem, kinds",
+    [
+        ("wf2-document-ingestion", {"document.ingested", "document.ingest_failed"}),
+        ("wf6-sla-escalation", {"ticket.sla_reminder"}),
+        ("wf7-knowledge-gap-digest", {"gaps.digest"}),
+    ],
+)
+def test_workflow_results_are_in_the_feed(stem, kinds):
+    (path,) = [p for p in WORKFLOWS if p.stem == stem]
+    posted = " ".join(n["parameters"]["jsonBody"] for n in _event_posts(load(path)))
+    assert all(f"'{k}'" in posted for k in kinds)

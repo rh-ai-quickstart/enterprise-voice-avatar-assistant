@@ -45,6 +45,13 @@ def record(
     return int(rows[0]["id"])
 
 
+def integration_error(name: str, title: str, detail: str | None = None) -> int | None:
+    """A failed call to an integration, shown on the Integrations page and in the feed."""
+    return record(
+        "integration.error", title, severity="error", detail=detail, ref_type="integration", ref_id=name
+    )
+
+
 def recent(
     kind: str | None = None,
     severity: str | None = None,

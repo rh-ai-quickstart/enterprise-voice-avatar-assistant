@@ -37,6 +37,12 @@ spec:
             # ADMIN_PASSWORD, ADMIN_SESSION_SECRET, INTERNAL_API_TOKEN
             - secretRef:
                 name: {{ .Values.secrets.admin }}
+            {{- if and .Values.n8n.enabled .Values.n8n.setup.enabled }}
+            # N8N_API_KEY, written by the n8n-setup job: the Integrations page tests the workflows with it
+            - secretRef:
+                name: {{ .Values.n8n.setup.apiKeySecret }}
+                optional: true
+            {{- end }}
           env:
             - name: S3_ACCESS_KEY
               valueFrom:

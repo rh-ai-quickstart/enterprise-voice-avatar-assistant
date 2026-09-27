@@ -88,3 +88,26 @@ def test_missing_buckets_are_created(monkeypatch):
     assert storage.ensure_buckets(["documents", "inbox", "transcripts"]) == ["inbox", "transcripts"]
     assert storage.ensure_buckets(["documents", "inbox", "transcripts"]) == []
     assert created == ["inbox", "transcripts"]
+
+
+def test_put_object_stores_the_file_without_a_job(monkeypatch):
+    from app import main, storage
+
+    stored = []
+    monkeypatch.setattr(storage, "put_bytes", lambda b, k, d, t: stored.append((b, k, d, t)))
+    monkeypatch.setattr(main.jobs, "submit", lambda *a: (_ for _ in ()).throw(AssertionError("no job")))
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/v1/objects",
+            files={"file": ("../../etc/leave policy.pdf", b"%PDF-1.4", "application/pdf")},
+            data={"bucket": "inbox"},
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["key"] == "leave policy.pdf" and body["bucket"] == "inbox" and body["size"] == 8
+        assert body["doc_id"] == make_doc_id("inbox", "leave policy.pdf")
+        assert stored == [("inbox", "leave policy.pdf", b"%PDF-1.4", "application/pdf")]
+        bad = client.post("/v1/objects", files={"file": ("x.pdf", b"x")}, data={"bucket": "secrets"})
+        assert bad.status_code == 422
+        hidden = client.post("/v1/objects", files={"file": (".env", b"x")}, data={"bucket": "inbox"})
+        assert hidden.status_code == 422

@@ -7,7 +7,6 @@ import {
   Content,
   Flex,
   Gallery,
-  Label,
   List,
   ListItem,
   PageSection,
@@ -17,8 +16,9 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { api } from "../api";
-import { SeverityLabel, SlaBadge } from "../components/Labels";
-import { when, words } from "../format";
+import { ActivityItem } from "../components/ActivityItem";
+import { IntegrationStateLabel, SlaBadge } from "../components/Labels";
+import { words } from "../format";
 import { STATUSES } from "../types";
 
 export function OverviewPage() {
@@ -89,21 +89,43 @@ export function OverviewPage() {
           </CardBody>
         </Card>
         <Card isCompact>
+          <CardTitle>Open knowledge gaps this week</CardTitle>
+          <CardBody>
+            <div className="admin-tile__number">{o.knowledge_gaps.open_week}</div>
+            {o.knowledge_gaps.top_groups.length > 0 && (
+              <List isPlain>
+                {o.knowledge_gaps.top_groups.map((g) => (
+                  <ListItem key={g.question}>
+                    {g.question} <span className="admin-timeline__when">{g.count}×</span>
+                  </ListItem>
+                ))}
+              </List>
+            )}
+          </CardBody>
+          <CardFooter>
+            <Link to="/gaps">Open knowledge gaps</Link>
+          </CardFooter>
+        </Card>
+        <Card isCompact>
           <CardTitle>Integrations</CardTitle>
           <CardBody>
             <List isPlain>
-              <ListItem>
-                Slack <Label isCompact color={o.integrations.slack ? "green" : "grey"}>{o.integrations.slack ? "on" : "off"}</Label>
-              </ListItem>
-              <ListItem>
-                Google Docs{" "}
-                <Label isCompact color={o.integrations.google_docs ? "green" : "grey"}>
-                  {o.integrations.google_docs ? "on" : "off"}
-                </Label>
-              </ListItem>
+              {o.integrations.map((i) => (
+                <ListItem key={i.name}>
+                  <Flex justifyContent={{ default: "justifyContentSpaceBetween" }}>
+                    <span>{i.label}</span>
+                    <IntegrationStateLabel state={i.state} />
+                  </Flex>
+                </ListItem>
+              ))}
             </List>
-            {!o.integrations.slack && <Content component="small">Requests are approved here.</Content>}
+            {o.integrations.some((i) => i.name === "slack" && i.state === "off") && (
+              <Content component="small">Slack is off: requests are approved here.</Content>
+            )}
           </CardBody>
+          <CardFooter>
+            <Link to="/integrations">Open integrations</Link>
+          </CardFooter>
         </Card>
       </Gallery>
       <Card isCompact style={{ marginTop: "var(--pf-t--global--spacer--md)" }}>
@@ -115,16 +137,15 @@ export function OverviewPage() {
             <List isPlain isBordered>
               {o.recent_activity.map((e) => (
                 <ListItem key={e.id}>
-                  <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }}>
-                    <SeverityLabel severity={e.severity} />
-                    <span className="admin-timeline__when">{when(e.created_at)}</span>
-                    {e.ref_type === "ticket" && e.ref_id ? <Link to={`/tickets/${e.ref_id}`}>{e.title}</Link> : <span>{e.title}</span>}
-                  </Flex>
+                  <ActivityItem event={e} />
                 </ListItem>
               ))}
             </List>
           )}
         </CardBody>
+        <CardFooter>
+          <Link to="/activity">All activity</Link>
+        </CardFooter>
       </Card>
     </PageSection>
   );

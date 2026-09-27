@@ -80,6 +80,30 @@ Symptoms first, then the cause, the command that confirms it, and the fix. Every
 
 **A confirmation such as "place the request" opened a second ticket.** The intent detector now sees the assistant's previous message; a reply that only confirms a request that was just logged is treated as a follow-up. Older images classify the latest message alone.
 
+## Admin portal
+
+**Sign-in says "Wrong password."** Everyone uses the one password in the secret `assistant-admin`: `oc extract secret/assistant-admin -n <project> --keys=ADMIN_PASSWORD --to=-`. After changing it in the secret, restart the RAG API (`oc rollout restart deployment/rag-api`); until then the old one is still in force. Five wrong passwords from one address within a minute are refused for the rest of that minute ("Too many sign-in attempts"); every attempt is in the Audit page.
+
+**Sign-in says "The admin portal is not configured".** `ADMIN_PASSWORD` is empty in the secret `assistant-admin`. `REFRESH=assistant-admin NAMESPACE=<project> scripts/create-secrets.sh` rewrites that secret, keeping the values it has and generating the missing ones; then restart the RAG API.
+
+**Signed in, but every page answers 401 and the sign-in page comes back.** The session cookie is marked Secure, so the portal must be opened over `https://`, as the Route serves it. A port-forward to the frontend over plain http cannot keep the session; for local development see [development.md](development.md#the-admin-portal).
+
+**`/admin` answers "The admin portal is turned off (admin.enabled=false)".** The chart value is off; requests then need Slack for their approvals (`helm template` refuses the combination where neither is on).
+
+**The header says "Refreshing every 30 s" instead of "Live".** The event stream (`/api/v1/admin/stream`, server-sent events) did not connect, so the portal polls. The frontend's nginx does not buffer it and the Route allows an hour per connection; a proxy between the browser and the cluster that buffers responses breaks it. In the browser's developer tools, the stream request should stay open with an `event: activity` line per change; `oc logs deploy/rag-api | grep -i stream` shows whether the RAG API's listener is running. Nothing is lost while polling.
+
+**n8n executions fail with 401 from the RAG API or the ingestion service.** The workflows send `INTERNAL_API_TOKEN` from `assistant-admin`, and the services check it. After the secret changed, restart all three so they read the same value: `oc rollout restart deployment/n8n deployment/rag-api deployment/ingestion -n <project>`. Compare without printing it: `oc exec deploy/n8n -- printenv INTERNAL_API_TOKEN | sha256sum` and the same for `deploy/rag-api`.
+
+**A click on a Slack approval card does nothing; the Activity page says "Slack click refused".** n8n checks every click against `SLACK_SIGNING_SECRET`: "the Slack signature does not match" means the secret in `assistant-integrations` is not this app's (Basic Information > App Credentials), "carries no Slack signature" that the request did not come from Slack. Fix the secret and restart n8n; meanwhile approve in the portal, which updates the card too.
+
+**The overview shows "Approved, not fulfilled after 5 minutes".** The decision reached the ticket but the fulfilment workflow did not run, usually because n8n was down when the decision was taken; the Activity page has an `integration.error` for n8n at that time. Once the request is fulfilled by hand, open the ticket and use **Mark fulfilled**.
+
+**The Integrations page shows Slack failing.** Its last error comes from the workflow node that failed ("Slack: Post reminder failed: channel_not_found" means the app is not in that channel). **Test** lists the five channels and whether the app is a member of each.
+
+**Knowledge gaps are not grouped by meaning, or the page is slow to open.** Older questions are embedded when the page is first opened; with the embeddings model unreachable they are grouped by wording only, after a 15-second try. Re-test needs the embeddings model and Qdrant; when one does not answer it says so with the error's type, and `oc logs deploy/rag-api` has the rest.
+
+**An upload in Documents is refused with 413.** Files are limited to 25 MiB, the frontend proxy's limit. Larger files go through the object store's web UI or `scripts/load-sample-docs.sh <path>`.
+
 ## Avatar
 
 **The face never appears, audio only, log says the avatar provider failed to start.** The agent falls back to audio after `avatar_start_timeout_seconds`. Check `oc logs deploy/voice-agent | grep -i avatar`. Common causes: `TAVUS_API_KEY` or `TAVUS_FACE_ID` missing from the integrations secret (or `voiceAgent.extraEnv`), the provider cannot reach the public LiveKit URL (`LIVEKIT_PUBLIC_URL` must be the `wss://` Route), or the plan's single stream is still held by a previous conversation. List and end stale conversations with the Tavus API: `GET https://tavusapi.com/v2/conversations?status=active`, then `POST …/conversations/<id>/end`, using `x-api-key`.

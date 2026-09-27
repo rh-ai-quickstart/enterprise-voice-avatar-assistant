@@ -12,6 +12,13 @@ POST /conversations/{id}/archive      the chat's archive path, attributed to the
 GET  /conversations/{id}/export       the transcript as Markdown or plain text
 GET  /conversations/{id}/archives/{archive_id}/download   the transcript as it was archived
 DELETE /conversations/{id}            messages, notices, archive records and the archived copy
+GET  /knowledge-gaps                  open (or resolved, dismissed) gaps, grouped by meaning or listed
+POST /knowledge-gaps/resolve          resolve, dismiss or reopen gaps; /knowledge-gaps/{id}/retest retrieves again
+GET  /documents, /documents/{doc_id}  indexed and classified documents; one with its ingestion jobs
+POST /documents/upload                multipart file and bucket (documents or inbox)
+POST /documents/{doc_id}/reingest, DELETE /documents/{doc_id}   through the ingestion service
+GET  /ingestion/jobs                  recent ingestion jobs
+GET  /integrations                    each integration's state; POST /integrations/{name}/test runs a live test
 GET  /activity                        the activity feed, newest first
 GET  /audit                           the audit log, newest first
 GET  /stream                          server-sent events for live updates (stream.py)
@@ -21,13 +28,37 @@ every non-GET route needs the X-Admin-Request: 1 header and writes an audit entr
 """
 
 import asyncio
-from datetime import UTC, datetime
+import logging
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
-from . import archives, audit, auth, conversations, events, gdocs, stream, tickets
+from . import (
+    archives,
+    audit,
+    auth,
+    conversations,
+    documents,
+    events,
+    integrations,
+    knowledge_gaps,
+    stream,
+    tickets,
+)
 from .config import settings
 from .schemas import (
     ActivityPage,
@@ -37,6 +68,7 @@ from .schemas import (
     AuditPage,
     ConversationDetail,
     ConversationPage,
+    GapResolve,
     TicketActionResult,
     TicketDecision,
     TicketEdit,
@@ -45,6 +77,7 @@ from .schemas import (
     TicketPage,
 )
 
+log = logging.getLogger("rag.admin")
 router = APIRouter(
     prefix="/v1/admin",
     tags=["admin"],
@@ -116,11 +149,22 @@ async def overview(_: Admin):
     counts = await asyncio.to_thread(tickets.dashboard)
     recent = await asyncio.to_thread(events.recent, limit=10)
     today = await asyncio.to_thread(conversations.today)
+    # Grouped with the embeddings already stored: the overview never waits for the embeddings service
+    week = await asyncio.to_thread(
+        knowledge_gaps.grouped, "open", datetime.now(UTC) - timedelta(days=7), None, False
+    )
     return {
         **counts,
         "conversations_today": today,
+        "knowledge_gaps": {
+            "open_week": sum(g["count"] for g in week),
+            "top_groups": [{"question": g["question"], "count": g["count"]} for g in week[:3]],
+        },
         "recent_activity": recent,
-        "integrations": {"slack": settings.slack_enabled, "google_docs": gdocs.configured()},
+        "integrations": [
+            {"name": i["name"], "label": i["label"], "state": i["state"]}
+            for i in await asyncio.to_thread(integrations.status_all)
+        ],
     }
 
 
@@ -310,6 +354,165 @@ async def conversation_delete(session_id: str, session: Admin, request: Request)
         session_id,
         {"messages": result["messages"], "archives": result["archives"]},
         result,
+    )
+    return result
+
+
+# ---------------------------------------------------------------- knowledge gaps -------------
+
+
+@router.get("/knowledge-gaps")
+async def knowledge_gaps_list(
+    _: Admin,
+    status: Annotated[str, Query(pattern="^(open|resolved|dismissed|all)$")] = "open",
+    since: Annotated[datetime | None, Query(alias="from")] = None,
+    until: Annotated[datetime | None, Query(alias="to")] = None,
+    group: bool = True,
+):
+    """Gaps in a window (the last 7 days by default), grouped by meaning unless group=false."""
+    since = since or datetime.now(UTC) - timedelta(days=7)
+    wanted = None if status == "all" else status
+    if not group:
+        items = await asyncio.to_thread(knowledge_gaps.gaps, wanted, since, until)
+        return {"items": items, "total": len(items)}
+    groups = await asyncio.to_thread(knowledge_gaps.grouped, wanted, since, until)
+    return {
+        "groups": groups,
+        "total": sum(g["count"] for g in groups),
+        "threshold": settings.gap_group_threshold,
+        "from": since,
+    }
+
+
+@router.post("/knowledge-gaps/resolve")
+async def knowledge_gaps_resolve(data: GapResolve, session: Admin, request: Request):
+    changed = await asyncio.to_thread(knowledge_gaps.resolve, data.ids, data.status, session.name, data.note)
+    action = {"resolved": "gap.resolve", "dismissed": "gap.dismiss", "open": "gap.reopen"}[data.status]
+    await asyncio.to_thread(
+        audit.record,
+        session.name,
+        action,
+        request,
+        "gap",
+        ",".join(map(str, data.ids[:20])),
+        None,
+        {"ids": data.ids, "note": data.note, "changed": changed},
+    )
+    return {"changed": changed}
+
+
+@router.post("/knowledge-gaps/{gap_id}/retest")
+async def knowledge_gap_retest(gap_id: int, _: Admin):
+    try:
+        result = await asyncio.to_thread(knowledge_gaps.retest, gap_id)
+    except Exception as exc:  # the embeddings service or Qdrant did not answer
+        log.warning("re-test of knowledge gap %s failed: %s: %s", gap_id, type(exc).__name__, exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"retrieval failed, the embeddings service or Qdrant did not answer: {type(exc).__name__}",
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="knowledge gap not found")
+    return result
+
+
+# ---------------------------------------------------------------- documents ------------------
+
+UPLOAD_LIMIT = 25 * 1024 * 1024  # the frontend proxy's client_max_body_size
+
+
+@router.get("/documents")
+async def documents_list(
+    _: Admin,
+    kind: Annotated[str, Query(pattern="^(all|indexed|classified)$")] = "all",
+    q: str | None = None,
+    bucket: str | None = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Limit = 50,
+):
+    items, total = await asyncio.to_thread(documents.search, kind, q, bucket, page, limit)
+    return {"items": items, "total": total, "page": page, "limit": limit}
+
+
+@router.get("/documents/{doc_id}")
+async def document_detail(doc_id: str, _: Admin):
+    return await asyncio.to_thread(documents.detail, doc_id)
+
+
+@router.post("/documents/upload", status_code=201)
+async def document_upload(
+    session: Admin,
+    request: Request,
+    file: Annotated[UploadFile, File()],
+    bucket: Annotated[str, Form(pattern="^(documents|inbox)$")],
+):
+    data = await file.read(UPLOAD_LIMIT + 1)
+    if len(data) > UPLOAD_LIMIT:
+        raise HTTPException(status_code=413, detail="files up to 25 MiB")
+    result = await asyncio.to_thread(
+        documents.upload, bucket, file.filename or "upload", data, file.content_type, session.name
+    )
+    await asyncio.to_thread(
+        audit.record, session.name, "document.upload", request, "document", result["doc_id"], None, result
+    )
+    return result
+
+
+@router.post("/documents/{doc_id}/reingest")
+async def document_reingest(doc_id: str, session: Admin, request: Request):
+    result = await asyncio.to_thread(documents.reingest, doc_id, session.name)
+    await asyncio.to_thread(
+        audit.record, session.name, "document.reingest", request, "document", doc_id, None, result
+    )
+    return result
+
+
+@router.delete("/documents/{doc_id}")
+async def document_delete(doc_id: str, session: Admin, request: Request):
+    before = await asyncio.to_thread(documents.detail, doc_id)
+    result = await asyncio.to_thread(documents.delete, doc_id, session.name)
+    await asyncio.to_thread(
+        audit.record,
+        session.name,
+        "document.delete",
+        request,
+        "document",
+        doc_id,
+        {"source_uri": before["source_uri"], "chunks": before["chunks"]},
+        result,
+    )
+    return result
+
+
+@router.get("/ingestion/jobs")
+async def ingestion_jobs(_: Admin, limit: Limit = 50):
+    return {"items": await asyncio.to_thread(documents.jobs, None, limit)}
+
+
+# ---------------------------------------------------------------- integrations ---------------
+
+
+@router.get("/integrations")
+async def integrations_list(_: Admin):
+    return {"items": await asyncio.to_thread(integrations.status_all)}
+
+
+@router.post("/integrations/{name}/test")
+async def integration_test(
+    name: Annotated[str, Path(pattern="^(" + "|".join(integrations.LABELS) + ")$")],
+    session: Admin,
+    request: Request,
+):
+    result = await asyncio.to_thread(integrations.test, name, session.name)
+    await asyncio.to_thread(
+        audit.record,
+        session.name,
+        "integration.test",
+        request,
+        "integration",
+        name,
+        None,
+        {"ok": result["ok"], "checks": result["checks"]},
     )
     return result
 

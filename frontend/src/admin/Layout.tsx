@@ -38,6 +38,15 @@ export function invalidateFor(client: QueryClient, message: StreamMessage) {
     client.invalidateQueries({ queryKey: ["conversations"] });
     if (message.ref_id) client.invalidateQueries({ queryKey: ["conversation", message.ref_id] });
   }
+  if (message.ref_type === "gap" || message.kind.startsWith("gap")) client.invalidateQueries({ queryKey: ["gaps"] });
+  if (message.ref_type === "document") {
+    client.invalidateQueries({ queryKey: ["documents"] });
+    client.invalidateQueries({ queryKey: ["jobs"] });
+    if (message.ref_id) client.invalidateQueries({ queryKey: ["document", message.ref_id] });
+  }
+  if (message.ref_type === "integration") client.invalidateQueries({ queryKey: ["integrations"] });
+  // Admin actions record an event next to their audit entry
+  client.invalidateQueries({ queryKey: ["audit"] });
 }
 
 // PatternFly's NavItem renders its own anchor with href; these render the router's Link instead.
@@ -51,6 +60,11 @@ const SECTIONS = [
   { to: "/approvals", label: "Approvals", component: linkTo("/approvals") },
   { to: "/tickets", label: "Tickets", component: linkTo("/tickets") },
   { to: "/conversations", label: "Conversations", component: linkTo("/conversations") },
+  { to: "/gaps", label: "Knowledge gaps", component: linkTo("/gaps") },
+  { to: "/documents", label: "Documents", component: linkTo("/documents") },
+  { to: "/activity", label: "Activity", component: linkTo("/activity") },
+  { to: "/integrations", label: "Integrations", component: linkTo("/integrations") },
+  { to: "/audit", label: "Audit", component: linkTo("/audit") },
 ];
 
 const STREAM_LABELS: Record<StreamState, { text: string; color: "green" | "grey" | "orange"; title: string }> = {
@@ -72,10 +86,16 @@ export function Layout({ me, onSignOut, children }: { me: Me; onSignOut: () => v
     () => client.invalidateQueries({ queryKey: ["me"] }),
   );
   useEffect(() => {
-    client.setDefaultOptions({ queries: { refetchInterval: stream === "polling" ? 30_000 : false } });
+    // setDefaultOptions replaces them all: keep main.tsx's staleTime and retry
+    const defaults = client.getDefaultOptions();
+    client.setDefaultOptions({
+      ...defaults,
+      queries: { ...defaults.queries, refetchInterval: stream === "polling" ? 30_000 : false },
+    });
   }, [client, stream]);
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const pending = overview.data?.pending.count ?? 0;
+  const failing = overview.data?.integrations.filter((i) => i.state === "failing" || i.state === "misconfigured").length ?? 0;
   const status = STREAM_LABELS[stream];
   const active = (to: string) => (to === "/" ? location.pathname === "/" : location.pathname.startsWith(to));
 
@@ -116,6 +136,14 @@ export function Layout({ me, onSignOut, children }: { me: Me; onSignOut: () => v
                   <>
                     {" "}
                     <Badge isRead={false}>{pending}</Badge>
+                  </>
+                )}
+                {s.to === "/integrations" && failing > 0 && (
+                  <>
+                    {" "}
+                    <Badge isRead={false} title="failing or misconfigured">
+                      {failing}
+                    </Badge>
                   </>
                 )}
               </NavItem>

@@ -9,7 +9,8 @@ How to work on the services locally against a deployed cluster, run the tests, r
 | `services/rag-api` | retrieval, memory, guardrails, classification, tickets, notices | Python 3.12, FastAPI, uv |
 | `services/ingestion` | Docling parsing, chunking, embeddings, Qdrant | Python 3.12, FastAPI, uv |
 | `services/voice-agent` | LiveKit Agents worker: Whisper, RAG API, Kokoro, avatar providers | Python 3.12, uv |
-| `frontend` | React chat UI with citations, voice and avatar | Vite, React, TypeScript, nginx |
+| `frontend` | React chat UI with citations, voice and avatar; the admin portal in `src/admin` (a second entry, `admin/index.html`) | Vite, React, TypeScript, PatternFly (portal only), nginx |
+| `frontend/e2e` | end-to-end tests: the images, PostgreSQL, Qdrant, and fakes for the models and n8n | Playwright, Docker Compose |
 | `chart` | Helm chart; `files/n8n-workflows` holds the workflows n8n imports | Helm 3 |
 | `scripts` | deploy, secrets, tests, sample documents, n8n helpers | bash, Python |
 
@@ -57,7 +58,22 @@ Frontend, proxied to a local or port-forwarded RAG API:
 cd frontend && npm install && VITE_API_PROXY=http://localhost:8080 npm run dev
 ```
 
+The chat is at http://localhost:3000 and the admin portal at http://localhost:3000/admin/; see [The admin portal](#the-admin-portal) for the variables it needs.
+
 Voice agent: it needs a LiveKit server it can register with and one the browser can reach, so develop it against the cluster's LiveKit with `LIVEKIT_URL` set to the public `wss://` Route and the key pair from `assistant-livekit`, or run `livekit-server --dev` locally with the frontend pointed at it. `uv run python agent.py dev` runs the worker in the foreground; `scripts/e2e_room_test.py` in the service joins a room, speaks a question through TTS, and waits for the answer.
+
+## The admin portal
+
+The portal is a second Vite entry (`frontend/admin/index.html`, code in `frontend/src/admin`) served under `/admin/` by the same nginx, so the chat bundle never loads PatternFly. It calls the RAG API's `/v1/admin/*` routes (`services/rag-api/app/admin.py`) with a session cookie, and listens to `/v1/admin/stream` (server-sent events, fed by PostgreSQL `LISTEN admin_events`) to refetch what changed. The RAG API needs three more variables locally, and a plain-http cookie:
+
+```bash
+export ADMIN_PASSWORD=dev-password ADMIN_SESSION_SECRET=dev-session-secret INTERNAL_API_TOKEN=dev-token
+export ADMIN_COOKIE_SECURE=false   # the cluster serves https; locally the cookie must work over http
+```
+
+Sign in at http://localhost:3000/admin/ with any name and that password. Decisions call n8n (`N8N_URL`); without one, the portal records them and the Activity page shows n8n as unreachable.
+
+Every RAG API route is public (the chat and the voice agent), admin (the session cookie) or internal (`Authorization: Bearer $INTERNAL_API_TOKEN`, for n8n, the ingestion service and the scripts). `tests/test_auth.py` enumerates the routes and fails for one that is not classified. The public `/api` proxy forwards only the public and admin routes (`frontend/nginx/api-allowlist.conf`): a new public route goes into both, and `frontend/nginx/test-proxy.sh` checks the allowlist in the nginx image.
 
 ## Tests and checks
 
@@ -65,11 +81,31 @@ Voice agent: it needs a LiveKit server it can register with and one the browser 
 (cd services/rag-api && uv run ruff check . && uv run pytest -q)
 (cd services/ingestion && uv run ruff check . && uv run pytest -q)
 (cd services/voice-agent && uv run ruff check . && uv run pytest -q)
-(cd frontend && npm run build)
+(cd frontend && npm test && npm run build)
+frontend/nginx/test-proxy.sh
 helm lint chart -f chart/values-demo-cluster.yaml
 ```
 
-CI runs the same on every push and pull request (`.github/workflows/ci.yaml`). Against a running deployment, `NS=<project> scripts/demo-preflight.sh -f <values file>` checks models, the test pod and the n8n webhooks; `scripts/check-index.sh` lists what is indexed; `scripts/n8n-executions.sh` shows workflow runs with node errors.
+The RAG API's database tests (schema, full-text search, the event stream, the admin routes) run when `TEST_DATABASE_URL` points to an empty PostgreSQL; each test gets its own schema:
+
+```bash
+podman run -d --name pg-test -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+(cd services/rag-api && TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres uv run pytest -q)
+```
+
+`services/rag-api/tests/test_workflows.py` checks the workflow files statically: Slack reached only through a Slack guard, the internal token on every call to the RAG API and the ingestion service, the webhooks the RAG API calls, Slack failures reported to the activity feed.
+
+The end-to-end tests run the frontend and RAG API images built from your checkout with PostgreSQL, Qdrant, and fakes for the model server and n8n (`frontend/e2e/fakes/server.mjs`, which answers like WF4 and WF5 and records what it receives):
+
+```bash
+docker compose -f frontend/e2e/compose.yaml up -d --build --wait
+(cd frontend && npx playwright install chromium && npx playwright test)
+docker compose -f frontend/e2e/compose.yaml down -v
+```
+
+They sign in and out, file a request in the chat and approve it in the portal (with Slack off and on), archive a conversation with Google Docs off and download it, and check that the public proxy refuses the internal routes. `E2E_SCREENSHOT=1 npx playwright test screenshot` on a fresh stack regenerates `docs/images/admin-portal-approvals.png`.
+
+CI runs all of this on every push and pull request (`.github/workflows/ci.yaml`). Against a running deployment, `NS=<project> scripts/demo-preflight.sh -f <values file>` checks models, the test pod and the n8n webhooks; `scripts/check-index.sh` lists what is indexed; `scripts/n8n-executions.sh` shows workflow runs with node errors.
 
 ## Images
 
@@ -87,7 +123,7 @@ Sources are Markdown in `data/sample-docs/src/`. Edit or add a file, register it
 
 ## Workflows
 
-The n8n workflows live in `chart/files/n8n-workflows/`, one JSON file each with a fixed `id`. Edit them in the n8n editor, export the workflow JSON, keep the `id` and the `credentials` references on the Slack nodes, and save the file back. Update a running instance with `N8N_URL=... N8N_API_KEY=... scripts/import-workflows.sh` (keeps credentials attached in the editor) or let a fresh install import them at first start (`n8n.workflows` values). Every workflow reads the service URLs from `$env.RAG_API_URL` and `$env.INGESTION_URL`.
+The n8n workflows live in `chart/files/n8n-workflows/`, one JSON file each with a fixed `id`. Edit them in the n8n editor, export the workflow JSON, keep the `id` and the `credentials` references on the Slack nodes, and save the file back. Update a running instance with `N8N_URL=... N8N_API_KEY=... scripts/import-workflows.sh` (keeps credentials attached in the editor) or let a fresh install import them at first start (`n8n.workflows` values). Every workflow reads the service URLs from `$env.RAG_API_URL` and `$env.INGESTION_URL`, sends `$env.INTERNAL_API_TOKEN` with every call to them, and reaches Slack only through a `Slack on? (<node>)` guard on `$env.SLACK_ENABLED`; [n8n/workflows/README.md](../n8n/workflows/README.md) has the conventions and `test_workflows.py` checks them.
 
 ## Database schema
 

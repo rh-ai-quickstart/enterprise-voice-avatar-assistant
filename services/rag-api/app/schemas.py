@@ -291,6 +291,13 @@ class ArchiveResult(BaseModel):
     error: str | None = Field(default=None, max_length=2000)
 
 
+class GapResolve(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=2000)
+    # open reopens resolved or dismissed gaps
+    status: Literal["resolved", "dismissed", "open"]
+    note: str | None = Field(default=None, max_length=1000)
+
+
 class RequestIntake(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     session_id: str | None = None

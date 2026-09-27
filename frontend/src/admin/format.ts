@@ -20,3 +20,25 @@ export function when(iso: string | null | undefined): string {
 export function words(value: string | null | undefined): string {
   return value ? value.replace(/_/g, " ") : "-";
 }
+
+/** A date input's day (YYYY-MM-DD, local time) as the start of that day for the API. */
+export function dayStart(day: string): string {
+  return new Date(`${day}T00:00:00`).toISOString();
+}
+
+/** The start of the next day, so a "to" date includes the whole day. */
+export function dayAfter(day: string): string {
+  const next = new Date(`${day}T00:00:00`);
+  next.setDate(next.getDate() + 1);
+  return next.toISOString();
+}
+
+export function percent(value: number | null | undefined): string {
+  return value === null || value === undefined ? "-" : `${Math.round(value * 100)}%`;
+}
+
+export function bytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MiB`;
+}

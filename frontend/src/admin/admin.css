@@ -59,3 +59,34 @@
   white-space: pre-wrap;
   margin-top: var(--pf-t--global--spacer--xs);
 }
+
+.admin-pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.admin-diff {
+  font-family: var(--pf-t--global--font--family--mono);
+  font-size: var(--pf-t--global--font--size--sm);
+  overflow-wrap: anywhere;
+}
+
+.admin-diff del {
+  color: var(--pf-t--global--text--color--status--danger--default, #b1380b);
+}
+
+.admin-diff ins {
+  color: var(--pf-t--global--text--color--status--success--default, #3d7317);
+  text-decoration: none;
+}
+
+.admin-check {
+  display: flex;
+  gap: var(--pf-t--global--spacer--sm);
+  align-items: baseline;
+}
+
+/* Action buttons stay on one line (PatternFly lets inline link buttons wrap) */
+.admin-nowrap .pf-v6-c-button.pf-m-link.pf-m-inline {
+  white-space: nowrap;
+}

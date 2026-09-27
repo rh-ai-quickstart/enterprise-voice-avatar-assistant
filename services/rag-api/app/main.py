@@ -47,6 +47,7 @@ from . import (
     classify,
     clients,
     conversations,
+    documents,
     events,
     faces,
     gdocs,
@@ -131,7 +132,10 @@ INTERNAL = [Depends(auth.require_internal_token)]
 
 @app.exception_handler(tickets.TicketError)
 @app.exception_handler(conversations.ConversationError)
-async def domain_error(_, exc: tickets.TicketError | conversations.ConversationError):
+@app.exception_handler(documents.DocumentError)
+async def domain_error(
+    _, exc: tickets.TicketError | conversations.ConversationError | documents.DocumentError
+):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
@@ -317,6 +321,12 @@ async def knowledge_gap_digest(hours: int = Query(default=24, ge=1, le=720)):
 @app.post("/v1/internal/events", status_code=201, dependencies=INTERNAL)
 async def internal_event(data: ActivityEventIn):
     """An event the workflows saw (ingestion results, SLA reminders, Slack failures, the digest)."""
+    if (
+        data.kind == "ticket.sla_reminder"
+        and data.ref_id
+        and await asyncio.to_thread(tickets.reminded, data.ref_id)
+    ):
+        return {"id": None}
     event_id = await asyncio.to_thread(
         events.record,
         data.kind,

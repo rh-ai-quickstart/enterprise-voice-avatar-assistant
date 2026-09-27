@@ -1,0 +1,87 @@
+# The end-to-end stack: the frontend and RAG API images built from this checkout, PostgreSQL,
+# Qdrant, and fakes for the model server and n8n (fakes/server.mjs). The portal is at
+# http://localhost:3180/admin (password e2e-admin-password), the fake n8n's record at
+# http://localhost:15678/_calls.
+#
+#   docker compose -f frontend/e2e/compose.yaml up -d --build --wait
+#   cd frontend && npx playwright test
+#   docker compose -f frontend/e2e/compose.yaml down -v
+name: assistant-e2e
+
+x-internal-token: &token e2e-internal-token
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: assistant
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      retries: 30
+
+  qdrant:
+    # Empty: with no collection, retrieval finds nothing and every question is a knowledge gap
+    image: docker.io/qdrant/qdrant:v1.19.1
+
+  fakes:
+    image: docker.io/library/node:22-alpine
+    command: ["node", "/fakes/server.mjs"]
+    volumes:
+      - ./fakes:/fakes:ro
+    environment:
+      RAG_API_URL: http://rag-api:8080
+      INTERNAL_API_TOKEN: *token
+    networks:
+      default:
+        aliases: [models, n8n]
+    ports:
+      - "15678:5678"
+
+  rag-api:
+    build:
+      context: ../../services/rag-api
+      dockerfile: Containerfile
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/assistant
+      QDRANT_URL: http://qdrant:6333
+      LLM_BASE_URL: http://models:8000/v1
+      LLM_MODEL: e2e-llm
+      EMBEDDINGS_BASE_URL: http://models:8000/v1
+      EMBEDDINGS_MODEL: e2e-embeddings
+      N8N_URL: http://n8n:5678
+      INTERNAL_API_TOKEN: *token
+      ADMIN_PASSWORD: e2e-admin-password
+      ADMIN_SESSION_SECRET: e2e-session-secret
+      # Plain http on localhost
+      ADMIN_COOKIE_SECURE: "false"
+      SLACK_ENABLED: "false"
+      GOOGLE_DOCS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      fakes:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"]
+      interval: 2s
+      retries: 60
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: Containerfile
+    environment:
+      RAG_API_UPSTREAM: rag-api:8080
+    depends_on:
+      rag-api:
+        condition: service_healthy
+    ports:
+      - "3180:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/admin/"]
+      interval: 2s
+      retries: 30

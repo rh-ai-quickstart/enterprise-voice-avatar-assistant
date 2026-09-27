@@ -62,7 +62,9 @@ def test_without_a_token_the_write_routes_are_closed(monkeypatch):
     with TestClient(app) as client:
         # Not open to anyone: nothing could tell the RAG API and n8n from other callers
         assert client.post("/v1/events/s3", json=event).status_code == 503
-        assert client.post("/v1/events/s3", json=event, headers={"Authorization": "Bearer "}).status_code == 503
+        assert (
+            client.post("/v1/events/s3", json=event, headers={"Authorization": "Bearer "}).status_code == 503
+        )
 
 
 def test_delete_can_purge_the_object(monkeypatch):

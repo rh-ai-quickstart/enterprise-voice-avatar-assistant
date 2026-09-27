@@ -13,6 +13,12 @@ from . import db, pipeline
 log = logging.getLogger("ingestion.jobs")
 
 MAX_KEPT = 500
+# Jobs waiting for a worker; beyond this, submissions are refused rather than queued without limit
+MAX_WAITING = 200
+
+
+class QueueFull(Exception):
+    pass
 
 
 @dataclass
@@ -36,6 +42,9 @@ class JobManager:
         self._semaphore = asyncio.Semaphore(max(1, max_concurrent))
 
     async def submit(self, bucket: str, key: str, doc_id: str, metadata: dict[str, Any]) -> Job:
+        waiting = sum(1 for j in self._jobs.values() if j.status == "queued")
+        if waiting >= MAX_WAITING:
+            raise QueueFull(f"{waiting} ingestion jobs are waiting; try again shortly")
         job = Job(job_id=uuid.uuid4().hex[:12], doc_id=doc_id, bucket=bucket, key=key, metadata=metadata)
         self._jobs[job.job_id] = job
         while len(self._jobs) > MAX_KEPT:

@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse
 from . import db, storage, vectorstore
 from .config import settings
 from .events import CREATED, REMOVED, parse_s3_event
-from .jobs import Job, JobManager
+from .jobs import Job, JobManager, QueueFull
 from .pipeline import extract_text, make_doc_id
 from .schemas import (
     DocumentInfo,
@@ -91,7 +91,9 @@ def require_internal_token(request: Request) -> None:
     token = settings.internal_api_token
     if not token:
         # Closed, not open: without a token nothing tells n8n and the other services from anyone else
-        raise HTTPException(status_code=503, detail="INTERNAL_API_TOKEN is not set: the internal routes are closed")
+        raise HTTPException(
+            status_code=503, detail="INTERNAL_API_TOKEN is not set: the internal routes are closed"
+        )
     scheme, _, value = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not hmac.compare_digest(value.strip().encode(), token.encode()):
         raise HTTPException(
@@ -106,6 +108,11 @@ WRITE = [Depends(require_internal_token)]
 
 def _status(job: Job) -> JobStatus:
     return JobStatus(**job.__dict__)
+
+
+@app.exception_handler(QueueFull)
+async def queue_full(_: Request, exc: QueueFull):
+    return JSONResponse(status_code=429, content={"detail": str(exc)}, headers={"Retry-After": "30"})
 
 
 @app.get("/healthz")

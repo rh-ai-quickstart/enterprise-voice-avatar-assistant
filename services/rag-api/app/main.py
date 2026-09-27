@@ -321,6 +321,12 @@ async def knowledge_gap_digest(hours: int = Query(default=24, ge=1, le=720)):
 @app.post("/v1/internal/events", status_code=201, dependencies=INTERNAL)
 async def internal_event(data: ActivityEventIn):
     """An event the workflows saw (ingestion results, SLA reminders, Slack failures, the digest)."""
+    if (
+        data.kind == "ticket.sla_reminder"
+        and data.ref_id
+        and await asyncio.to_thread(tickets.reminded, data.ref_id)
+    ):
+        return {"id": None}
     event_id = await asyncio.to_thread(
         events.record,
         data.kind,

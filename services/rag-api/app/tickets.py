@@ -478,6 +478,21 @@ def notify_decision(ticket: Ticket, decision: str, actor: str, note: str | None)
         return False
 
 
+def reminded(ref: str) -> bool:
+    """Whether this wait for approval already has its SLA reminder in the feed (WF6 runs every 15
+    minutes and reminds until the escalation threshold)."""
+    rows = memory.run(
+        f"""SELECT 1 FROM tickets t JOIN activity_events a
+                ON a.kind = 'ticket.sla_reminder' AND a.ref_type = 'ticket' AND a.ref_id = t.ticket_ref
+            WHERE t.ticket_ref = %s
+              AND a.created_at >= COALESCE(({_PENDING_SINCE.removesuffix(" AS pending_since")}), t.created_at)
+            LIMIT 1""",
+        (ref,),
+        fetch=True,
+    )
+    return bool(rows)
+
+
 def dashboard() -> dict[str, Any]:
     """Ticket counts for the portal's overview."""
     pending = memory.run(

@@ -8,7 +8,7 @@ Gaps without an embedding (the embeddings service was down) are grouped by their
 """
 
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -51,13 +51,16 @@ def _embed_one(gap_id: int, question: str) -> None:
 
 
 def _fill_embeddings(rows: list[dict[str, Any]]) -> None:
-    """Embed the questions of older gaps that have none yet, in batches; failures are left empty."""
+    """Embed the questions of older gaps that have none yet, in batches; failures are left empty.
+    The portal waits on this, so a slow embeddings service gets one short try, not the chat's retries."""
     missing = [r for r in rows if not r.get("embedding")]
     for start in range(0, len(missing), EMBED_BATCH):
         batch = missing[start : start + EMBED_BATCH]
         try:
-            response = clients.embeddings().embeddings.create(
-                model=settings.embeddings_model, input=[r["question"] for r in batch]
+            response = (
+                clients.embeddings()
+                .with_options(timeout=15.0, max_retries=0)
+                .embeddings.create(model=settings.embeddings_model, input=[r["question"] for r in batch])
             )
         except Exception as exc:  # noqa: BLE001
             log.info("cannot embed %d older gaps: %s", len(batch), exc)
@@ -124,9 +127,11 @@ def group(rows: list[dict[str, Any]], threshold: float | None = None) -> list[di
         members = [leader] + [w for w in similar.get(leader, []) if w != leader and w not in assigned]
         assigned.update(members)
         items = sorted((r for w in members for r in by_wording[w]), key=lambda r: r["id"], reverse=True)
+        # The spelling asked most often (the newest on a tie: rows come newest first)
+        spellings = Counter(r["question"] for r in by_wording[leader])
         groups.append(
             {
-                "question": by_wording[leader][0]["question"],
+                "question": spellings.most_common(1)[0][0],
                 "count": len(items),
                 "wordings": len(members),
                 "best_score": max(float(r["top_score"]) for r in items),

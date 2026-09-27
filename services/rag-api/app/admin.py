@@ -401,7 +401,13 @@ async def knowledge_gaps_resolve(data: GapResolve, session: Admin, request: Requ
 
 @router.post("/knowledge-gaps/{gap_id}/retest")
 async def knowledge_gap_retest(gap_id: int, _: Admin):
-    result = await asyncio.to_thread(knowledge_gaps.retest, gap_id)
+    try:
+        result = await asyncio.to_thread(knowledge_gaps.retest, gap_id)
+    except Exception as exc:  # the embeddings service or Qdrant did not answer
+        raise HTTPException(
+            status_code=502,
+            detail=f"retrieval failed, the embeddings service or Qdrant did not answer: {type(exc).__name__}",
+        ) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="knowledge gap not found")
     return result

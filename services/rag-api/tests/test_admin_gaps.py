@@ -29,6 +29,9 @@ def embeddings(monkeypatch):
             fn(*args)
 
     class Client:
+        def with_options(self, **_):
+            return self
+
         class embeddings:
             @staticmethod
             def create(model, input):
@@ -145,6 +148,13 @@ def test_retest_retrieves_without_the_model(database, admin_client, monkeypatch)
     )
     assert result["hits"][0]["source"] == "password-policy.md"
     assert admin_client.post("/v1/admin/knowledge-gaps/999/retest", headers=ADMIN_HEADERS).status_code == 404
+
+    def unreachable(query, top_k=None, min_score=None):
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr(knowledge_gaps.retrieval, "search", unreachable)
+    failed = admin_client.post(f"/v1/admin/knowledge-gaps/{gap_id}/retest", headers=ADMIN_HEADERS)
+    assert failed.status_code == 502 and "Qdrant did not answer" in failed.json()["detail"]
 
 
 def test_overview_counts_open_gaps_without_embedding_calls(database, embeddings, admin_client):

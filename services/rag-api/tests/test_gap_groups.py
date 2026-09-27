@@ -58,3 +58,14 @@ def test_threshold_keeps_unrelated_questions_apart():
 
 def test_no_gaps_no_groups():
     assert knowledge_gaps.group([]) == []
+
+
+def test_a_group_is_named_after_its_most_asked_spelling():
+    # Newest first, as the database returns them
+    rows = [
+        gap(3, "how do i reset my vpn token", minutes=5),
+        gap(2, "How do I reset my VPN token?", minutes=10),
+        gap(1, "How do I reset my VPN token?", minutes=20),
+    ]
+    (group,) = knowledge_gaps.group(rows)
+    assert group["question"] == "How do I reset my VPN token?" and group["count"] == 3

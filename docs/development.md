@@ -93,7 +93,7 @@ podman run -d --name pg-test -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres
 (cd services/rag-api && TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres uv run pytest -q)
 ```
 
-`services/rag-api/tests/test_workflows.py` checks the workflow files statically: Slack reached only through a Slack guard, the internal token on every call to the RAG API and the ingestion service, the webhooks the RAG API calls, Slack failures reported to the activity feed.
+`services/rag-api/tests/test_workflows.py` checks the workflow files statically: Slack reached only through a Slack guard, the internal token on every call to the RAG API and the ingestion service, the webhooks the RAG API calls, Slack failures reported to the activity feed. `n8n/tests/run.sh` runs them in n8n against a stub RAG API, with Slack off and on (see [n8n/workflows/README.md](../n8n/workflows/README.md#tests)); it needs Docker.
 
 The end-to-end tests run the frontend and RAG API images built from your checkout with PostgreSQL, Qdrant, and fakes for the model server and n8n (`frontend/e2e/fakes/server.mjs`, which answers like WF4 and WF5 and records what it receives):
 

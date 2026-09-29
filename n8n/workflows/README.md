@@ -12,7 +12,7 @@ cluster-specific values.
 | `wf3-classification-extraction.json` | `POST /webhook/classify` | calls the RAG API classifier, posts the type, summary and extracted fields to `#assistant-documents`, and forwards the JSON to `DOWNSTREAM_URL` when set |
 | `wf4-request-intake-approval.json` | `POST /webhook/request-intake` (from the RAG API), `POST /webhook/slack-interactions` (Slack buttons) and `POST /webhook/ticket-decided` (decisions in the admin portal, from the RAG API with the internal token) | posts an approval card with Approve and Reject buttons to `#assistant-approvals` and stores where it was posted on the ticket (`payload.slack`); a click, once its Slack signature is verified, is recorded on the ticket; a click or a portal decision then fulfils approved requests (mock), notifies `#assistant-tickets`, and updates the card with the outcome (`chat.update`). A click on a ticket that was decided meanwhile changes nothing: the clicker gets an ephemeral reply ("already approved in the portal by Dana") and the card shows the real outcome |
 | `wf5-transcript-archival.json` | `POST /webhook/archive-transcript` with `{session_id, title, doc_url, archive_id}` (from the RAG API, with the internal token) | fetches the session transcript, re-ingests it into the `transcripts` bucket as `transcript-<session>.md`, waits for the job, and reports the result to the RAG API (`PATCH /v1/internal/archives/{archive_id}`: indexed or failed); the Google Doc, when that integration is on, is created by the RAG API before |
-| `wf6-sla-escalation.json` | Schedule (every 15 min) | asks the RAG API for tickets stuck in `pending_approval`: past the reminder threshold (default 60 minutes) it records a `ticket.sla_reminder` event (one per ticket, the RAG API keeps the first) and reminds `#assistant-approvals`; past the escalation threshold (default 240) it raises the priority through the RAG API, which records `ticket.escalated`, and posts to `#assistant-tickets`. The thresholds are RAG API settings (`SLA_REMINDER_MINUTES`, `SLA_ESCALATION_MINUTES`) |
+| `wf6-sla-escalation.json` | Schedule (every 15 min) | asks the RAG API for tickets stuck in `pending_approval`, counting from when each started waiting: once past the reminder threshold (default 60 minutes) a ticket is reminded once, in `#assistant-approvals` and as a `ticket.sla_reminder` event; each time another escalation threshold passes (240 minutes by default, then 480, ...) its priority goes up one level through the RAG API, which records `ticket.escalated`, and `#assistant-tickets` is told. The thresholds are RAG API settings (`SLA_REMINDER_MINUTES`, `SLA_ESCALATION_MINUTES`) |
 | `wf7-knowledge-gap-digest.json` | Schedule (weekdays 9 AM) | fetches the open knowledge gaps of the last 24 hours grouped by meaning (resolved and dismissed ones are left out), records a `gaps.digest` event, and posts the digest to `#assistant-knowledge-gaps` so content owners know what to add |
 
 The workflow JSON files live in `chart/files/n8n-workflows/` so the Helm chart can ship them: an init container on the n8n Deployment imports and publishes them on first start (values `n8n.workflows.*`), and creates the Slack credential from `SLACK_BOT_TOKEN` in the integrations secret when it is set. Without a token it imports a placeholder credential of the same type, so the workflows are published and ingestion, approvals and archival run with Slack off.
@@ -29,6 +29,20 @@ Two rules every workflow follows (`services/rag-api/tests/test_workflows.py` che
   clicks), and every node that talks to Slack continues on failure into
   `Slack failed? (<node>)`, which posts an `integration.error` for Slack. The admin portal's
   Activity and Integrations pages show them; a failed post never stops a workflow.
+
+## Tests
+
+`services/rag-api/tests/test_workflows.py` checks the files statically (the rules above, the
+webhook paths, the connections). `n8n/tests/` runs them: the chart's n8n image imports and
+publishes the workflows as the chart does, a stub stands in for the RAG API and the ingestion
+service and records every call, and `scenarios.mjs` plays the RAG API, Slack and the object store
+against the webhooks, twice: with Slack off, and with Slack on but unreachable, where each
+scenario also names the Slack nodes that must report their failure. The schedule triggers of WF6
+and WF7 become webhooks (`run-wf6`, `run-wf7`) for the run. CI runs it; locally, with Docker:
+
+```bash
+n8n/tests/run.sh
+```
 
 ## Import
 
@@ -71,12 +85,13 @@ The chart sets them on the n8n pod; `DOWNSTREAM_URL` comes from `n8n.extraEnv`.
 
 ```bash
 N8N=https://$(oc get route n8n -n voice-avatar-assistant -o jsonpath='{.spec.host}')
+TOKEN=$(oc extract secret/assistant-admin -n voice-avatar-assistant --keys=INTERNAL_API_TOKEN --to=-)
 # WF1: text question through n8n
 curl -s -X POST $N8N/webhook/chat -H 'Content-Type: application/json' -d '{"message":"How often must administrator passwords be rotated?"}'
-# WF2: simulate the object store's notification (or upload a file in its web UI)
-curl -s -X POST $N8N/webhook/object-created -H 'Content-Type: application/json' -d '{"Records":[{"eventName":"s3:ObjectCreated:Put","s3":{"bucket":{"name":"documents"},"object":{"key":"password-policy.md"}}}]}'
-# WF3: classify an object from the inbox bucket
-curl -s -X POST $N8N/webhook/classify -H 'Content-Type: application/json' -d '{"bucket":"documents","key":"password-policy.md"}'
+# WF2: simulate the object store's notification, which carries the token in its URL (or upload a file in its web UI)
+curl -s -X POST "$N8N/webhook/object-created?token=$TOKEN" -H 'Content-Type: application/json' -d '{"Records":[{"eventName":"s3:ObjectCreated:Put","s3":{"bucket":{"name":"documents"},"object":{"key":"password-policy.md"}}}]}'
+# WF3: classify an object from the inbox bucket (WF2 calls it with the token)
+curl -s -X POST $N8N/webhook/classify -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"bucket":"documents","key":"password-policy.md"}'
 ```
 
 WF4's request intake and WF5 only act on calls from the RAG API (with the internal token), so
@@ -101,5 +116,17 @@ Executions and their inputs and outputs are visible under *Executions* in n8n.
   timestamp within five minutes. Unsigned, forged or replayed clicks, and every
   click while the secret is empty, are refused before the ticket is touched.
 - **Calls from the RAG API need the internal token.** `/webhook/request-intake`,
-  `/webhook/archive-transcript` and `/webhook/ticket-decided` act only on calls
-  that carry `Authorization: Bearer $INTERNAL_API_TOKEN`.
+  `/webhook/archive-transcript`, `/webhook/ticket-decided` and `/webhook/classify`
+  act only on calls that carry `Authorization: Bearer $INTERNAL_API_TOKEN`. The
+  checks are false while the token is empty, so an empty token closes them rather
+  than opening them.
+- **Object notifications carry the token in their URL.** The object store cannot
+  send headers, so the chart gives it
+  `http://n8n:5678/webhook/object-created?token=<INTERNAL_API_TOKEN>`, and WF2
+  ignores notifications without it: nobody outside can make it re-index or
+  classify objects.
+- **Slack text is escaped.** Titles, questions, names, file names and what the
+  language model wrote go into Slack with `&`, `<` and `>` escaped, so text from
+  the chat cannot become a link or a mention. A refused click is a
+  `slack.click_refused` event (one a minute per reason), which does not mark Slack
+  as failing.

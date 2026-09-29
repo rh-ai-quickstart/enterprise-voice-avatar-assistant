@@ -1,0 +1,72 @@
+# The workflow tests: the chart's workflows in n8n (the chart's image), a stub for the RAG API and
+# the ingestion service (stub.mjs), and the scenarios (scenarios.mjs). No internet: Slack's
+# address points nowhere, so with SLACK_ENABLED=true every Slack call fails and must be reported.
+#
+#   n8n/tests/run.sh            both modes, Slack off then on
+name: assistant-n8n-tests
+
+x-n8n: &n8n
+  image: ${N8N_IMAGE:-ghcr.io/n8n-io/n8n:2.37.11}
+  volumes:
+    - n8n-data:/home/node/.n8n
+    - ../../chart/files/n8n-workflows:/workflows:ro
+    - ./import.sh:/tests/import.sh:ro
+  environment:
+    N8N_ENCRYPTION_KEY: workflow-tests
+    N8N_RUNNERS_ENABLED: "true"
+    N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+    N8N_DIAGNOSTICS_ENABLED: "false"
+    N8N_TEMPLATES_ENABLED: "false"
+    N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+    N8N_SECURE_COOKIE: "false"
+    NODE_FUNCTION_ALLOW_BUILTIN: crypto
+    RAG_API_URL: http://stub:8080
+    INGESTION_URL: http://stub:8080
+    INTERNAL_API_TOKEN: workflow-tests-token
+    SLACK_ENABLED: ${SLACK_ENABLED:-false}
+    SLACK_SIGNING_SECRET: workflow-tests-signing-secret
+    EVENT_BUCKETS: documents,inbox
+  extra_hosts:
+    - slack.com:127.0.0.1
+    - api.n8n.io:127.0.0.1
+    - telemetry.n8n.io:127.0.0.1
+    - license.n8n.io:127.0.0.1
+    - ph.n8n.io:127.0.0.1
+    - enterprise.n8n.io:127.0.0.1
+
+services:
+  stub:
+    image: docker.io/library/node:22-alpine
+    command: ["node", "/tests/stub.mjs"]
+    volumes:
+      - ./stub.mjs:/tests/stub.mjs:ro
+
+  import:
+    <<: *n8n
+    entrypoint: ["sh", "/tests/import.sh"]
+
+  n8n:
+    <<: *n8n
+    depends_on:
+      import:
+        condition: service_completed_successfully
+      stub:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz >/dev/null"]
+      interval: 2s
+      retries: 60
+
+  scenarios:
+    image: docker.io/library/node:22-alpine
+    profiles: [scenarios]
+    command: ["node", "/tests/scenarios.mjs"]
+    volumes:
+      - ./scenarios.mjs:/tests/scenarios.mjs:ro
+    environment:
+      TOKEN: workflow-tests-token
+      SIGNING_SECRET: workflow-tests-signing-secret
+      SLACK_ON: ${SLACK_ENABLED:-false}
+
+volumes:
+  n8n-data:

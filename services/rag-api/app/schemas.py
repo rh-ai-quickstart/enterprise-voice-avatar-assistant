@@ -15,10 +15,16 @@ class Citation(BaseModel):
     score: float
 
 
+# Conversation ids: letters, digits, - and _ (they end up in room names and download file names)
+SESSION_ID = r"^[A-Za-z0-9_-]{1,64}$"
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     session_id: str | None = Field(
-        default=None, description="Conversation id; a new one is created when omitted"
+        default=None,
+        pattern=SESSION_ID,
+        description="Conversation id; a new one is created when omitted",
     )
     user_id: str | None = None
     # Display name of the person, used to address them; user_id stays the memory key

@@ -80,6 +80,10 @@ for p in /admin/ /admin/tickets/REQ-000001 "/admin/approvals?x=1"; do
   expect 200 GET "$p"
   grep -q "admin portal" "$WORK/body" || { echo "  FAIL  $p should serve the portal's page"; failed=1; }
 done
+headers=$(curl -sI "http://localhost:$PORT/admin/tickets/REQ-000001")
+for h in "Content-Security-Policy: frame-ancestors 'none'" "X-Frame-Options: DENY" "X-Content-Type-Options: nosniff"; do
+  printf '%s' "$headers" | grep -qi "^$h" && echo "  ok    $h" || { echo "  FAIL  the portal page lacks $h"; failed=1; }
+done
 expect 301 GET /admin
 location=$(curl -s -o /dev/null -w '%{redirect_url}' "http://localhost:$PORT/admin")
 case "$location" in */admin/) ;; *) echo "  FAIL  /admin redirects to $location"; failed=1;; esac

@@ -73,11 +73,14 @@ def test_public_routes_need_no_token(token):
         assert client.get("/v1/sessions/abc/notifications").status_code == 200
 
 
-def test_empty_token_disables_the_check(monkeypatch):
+def test_without_a_token_the_internal_routes_are_closed(monkeypatch):
     monkeypatch.setattr(settings, "internal_api_token", "")
     assert auth.internal_headers() == {}
     with TestClient(app) as client:
-        assert client.get("/v1/tickets/stale").status_code == 200
+        # Closed, not open: an empty header would otherwise match the empty token
+        assert client.get("/v1/tickets/stale").status_code == 503
+        assert client.get("/v1/tickets/stale", headers={"Authorization": "Bearer "}).status_code == 503
+        assert client.get("/v1/info").status_code == 200  # public routes are unaffected
 
 
 def test_internal_headers_carry_the_token(token):

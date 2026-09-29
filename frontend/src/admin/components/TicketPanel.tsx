@@ -25,6 +25,16 @@ import { SlaBadge, StatusLabel } from "./Labels";
 import { TicketActions } from "./TicketActions";
 
 // Payload keys shown elsewhere in the panel, or bookkeeping
+/** Only a link to Slack is shown as the card's link (the RAG API filters it too). */
+function isSlackLink(url: string | undefined): url is string {
+  try {
+    const parsed = new URL(url ?? "");
+    return parsed.protocol === "https:" && parsed.hostname.endsWith(".slack.com");
+  } catch {
+    return false;
+  }
+}
+
 const HIDDEN_PAYLOAD = new Set(["channel", "summary", "slack", "decision", "model_needs_approval"]);
 
 /** The ticket drawer: fields, classification, events, conversation, Slack card, actions. */
@@ -59,7 +69,7 @@ function Details({ ticket }: { ticket: TicketDetail }) {
       <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }}>
         <StatusLabel status={ticket.status} />
         <SlaBadge minutes={ticket.pending_minutes} sla={ticket.sla} />
-        {ticket.slack?.permalink && (
+        {isSlackLink(ticket.slack?.permalink) && (
           <a href={ticket.slack.permalink} target="_blank" rel="noreferrer">
             Slack card <ExternalLinkAltIcon />
           </a>

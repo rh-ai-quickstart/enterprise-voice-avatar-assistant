@@ -3,7 +3,7 @@
 import pytest
 from conftest import ADMIN_HEADERS
 
-from app import events, knowledge_gaps, notifications, tickets
+from app import events, knowledge_gaps, memory, notifications, tickets
 from app.schemas import TicketCreate, TicketUpdate
 
 
@@ -256,3 +256,76 @@ def test_one_sla_reminder_per_ticket(database, admin_client, monkeypatch):
     assert remind(first) is None
     assert remind(second) is not None
     assert len(events.recent(kind="ticket.sla_reminder")) == 2
+
+
+def _waiting_since(ticket, minutes):
+    """As if the ticket entered pending_approval `minutes` ago."""
+    memory.run(
+        "UPDATE ticket_events SET created_at = now() - make_interval(mins := %s) "
+        "WHERE ticket_id = %s AND to_status = 'pending_approval'",
+        (minutes, ticket.id),
+    )
+
+
+def test_wf6_reminds_once_per_wait_and_escalates_at_each_threshold(database, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "sla_reminder_minutes", 60)
+    monkeypatch.setattr(settings, "sla_escalation_minutes", 240)
+    ticket = pending_ticket()
+    tickets.update(ticket.ticket_ref, TicketUpdate(priority="low", actor="Dana"))
+    stale = knowledge_gaps.stale_tickets
+    assert stale() == {"remind": [], "escalate": []}
+
+    _waiting_since(ticket, 70)
+    (due,) = stale()["remind"]
+    assert due["ticket_ref"] == ticket.ticket_ref and round(float(due["pending_minutes"])) == 70
+    # WF6 records the reminder; its next runs (every 15 minutes) do not remind again
+    events.record("ticket.sla_reminder", "reminded", ref_type="ticket", ref_id=ticket.ticket_ref)
+    assert stale() == {"remind": [], "escalate": []}
+    # An admin's edit changes updated_at, not the wait
+    tickets.update(ticket.ticket_ref, TicketUpdate(category="hardware", actor="Dana"))
+    assert stale() == {"remind": [], "escalate": []}
+
+    _waiting_since(ticket, 250)
+    assert [t["ticket_ref"] for t in stale()["escalate"]] == [ticket.ticket_ref]
+    knowledge_gaps.escalate_ticket(ticket.ticket_ref, "low")
+    assert stale()["escalate"] == []  # the next level waits for the next threshold
+    _waiting_since(ticket, 490)
+    (again,) = stale()["escalate"]
+    assert again["priority"] == "normal"
+    knowledge_gaps.escalate_ticket(ticket.ticket_ref, "normal")
+    assert stale() == {"remind": [], "escalate": []}
+
+
+def test_only_a_slack_permalink_is_shown_as_the_card_link(database, admin_client):
+    ticket = pending_ticket()
+    for link, shown in (
+        ("https://example-corp.slack.com/archives/C1/p1", True),
+        ("https://evil.example/p1", False),
+        ("javascript:alert(1)", False),
+    ):
+        tickets.update(
+            ticket.ticket_ref,
+            TicketUpdate(payload={"slack": {"channel": "C1", "ts": "1.2", "permalink": link}}),
+        )
+        slack = admin_client.get(f"/v1/admin/tickets/{ticket.ticket_ref}").json()["slack"]
+        assert slack["channel"] == "C1" and (slack.get("permalink") == link) is shown
+
+
+def test_refused_slack_clicks_are_kept_apart_and_not_repeated(database, admin_client):
+    from conftest import INTERNAL_HEADERS
+
+    from app import integrations
+
+    click = {
+        "kind": "slack.click_refused",
+        "severity": "warning",
+        "title": "Slack click refused: the Slack signature does not match",
+        "ref_type": "integration",
+        "ref_id": "slack",
+    }
+    first = admin_client.post("/v1/internal/events", json=click, headers=INTERNAL_HEADERS).json()["id"]
+    again = admin_client.post("/v1/internal/events", json=click, headers=INTERNAL_HEADERS).json()["id"]
+    assert first is not None and again is None  # one a minute per reason
+    assert integrations.status("slack")["last_error"] is None  # anyone can post a forged click

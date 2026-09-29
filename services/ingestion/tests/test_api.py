@@ -1,3 +1,4 @@
+from conftest import INTERNAL_HEADERS
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -17,7 +18,7 @@ def test_doc_id_is_stable():
 
 
 def test_events_for_other_buckets_are_ignored():
-    with TestClient(app) as client:
+    with TestClient(app, headers=INTERNAL_HEADERS) as client:
         response = client.post(
             "/v1/events/s3",
             json={"EventName": "s3:ObjectCreated:Put", "Key": "inbox/invoice.pdf"},
@@ -55,6 +56,17 @@ def test_write_routes_refuse_a_missing_or_wrong_token(monkeypatch):
         assert client.get("/v1/jobs").status_code == 200
 
 
+def test_without_a_token_the_write_routes_are_closed(monkeypatch):
+    monkeypatch.setattr(settings, "internal_api_token", "")
+    event = {"EventName": "s3:ObjectCreated:Put", "Key": "inbox/invoice.pdf"}
+    with TestClient(app) as client:
+        # Not open to anyone: nothing could tell the RAG API and n8n from other callers
+        assert client.post("/v1/events/s3", json=event).status_code == 503
+        assert (
+            client.post("/v1/events/s3", json=event, headers={"Authorization": "Bearer "}).status_code == 503
+        )
+
+
 def test_delete_can_purge_the_object(monkeypatch):
     from app import db, main, storage, vectorstore
 
@@ -65,7 +77,7 @@ def test_delete_can_purge_the_object(monkeypatch):
         db, "source_uri", lambda d: "s3://transcripts/transcript-abc.md" if d == "d1" else None
     )
     monkeypatch.setattr(storage, "delete_object", lambda b, k: removed.append((b, k)))
-    with TestClient(main.app) as client:
+    with TestClient(main.app, headers=INTERNAL_HEADERS) as client:
         kept = client.delete("/v1/documents/d1").json()
         assert kept == {"deleted": "d1", "object": None} and removed == []
         purged = client.delete("/v1/documents/d1", params={"purge_object": "true"}).json()
@@ -104,7 +116,7 @@ def test_put_object_stores_the_file_without_a_job(monkeypatch):
     stored = []
     monkeypatch.setattr(storage, "put_bytes", lambda b, k, d, t: stored.append((b, k, d, t)))
     monkeypatch.setattr(main.jobs, "submit", lambda *a: (_ for _ in ()).throw(AssertionError("no job")))
-    with TestClient(main.app) as client:
+    with TestClient(main.app, headers=INTERNAL_HEADERS) as client:
         response = client.post(
             "/v1/objects",
             files={"file": ("../../etc/leave policy.pdf", b"%PDF-1.4", "application/pdf")},

@@ -21,6 +21,40 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "418edd43-7cca-5e76-b9e8-ccf824bf2177",
+              "leftValue": "={{ Boolean($env.INTERNAL_API_TOKEN) && ($json.headers.authorization || '') === 'Bearer ' + $env.INTERNAL_API_TOKEN }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b5b27816-a008-580a-88d8-036d0ad507d5",
+      "name": "From the RAG API? (Classify webhook)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        200,
+        0
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{ $env.RAG_API_URL }}/v1/classify",
         "sendHeaders": true,
@@ -53,7 +87,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json;\nconst key = $('Classify webhook').first().json.body.key;\nconst fields = JSON.stringify(r.fields || {}, null, 2);\nconst text = `:page_facing_up: *${key}* classified as *${r.doc_type}* (confidence ${Math.round((r.confidence || 0) * 100)}%)\\n${r.summary || ''}\\n\\`\\`\\`${fields.slice(0, 2500)}\\`\\`\\``;\nreturn [{ json: { key, doc_type: r.doc_type, confidence: r.confidence, summary: r.summary, fields: r.fields, doc_id: r.doc_id, text } }];"
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst r = $input.first().json;\nconst key = $('Classify webhook').first().json.body.key;\nconst fields = JSON.stringify(r.fields || {}, null, 2);\nconst text = `:page_facing_up: *${esc(key)}* classified as *${esc(r.doc_type)}* (confidence ${Math.round((r.confidence || 0) * 100)}%)\\n${esc(r.summary)}\\n\\`\\`\\`${esc(fields.slice(0, 2500))}\\`\\`\\``;\nreturn [{ json: { key, doc_type: r.doc_type, confidence: r.confidence, summary: r.summary, fields: r.fields, doc_id: r.doc_id, text } }];"
       },
       "id": "fc6d24d4-711d-545b-b303-1a8cdd25c5fb",
       "name": "Format result",
@@ -246,7 +280,7 @@
       "main": [
         [
           {
-            "node": "Classify document",
+            "node": "From the RAG API? (Classify webhook)",
             "type": "main",
             "index": 0
           }
@@ -329,6 +363,18 @@
             "index": 0
           }
         ]
+      ]
+    },
+    "From the RAG API? (Classify webhook)": {
+      "main": [
+        [
+          {
+            "node": "Classify document",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
       ]
     }
   },

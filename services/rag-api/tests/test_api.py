@@ -1,3 +1,4 @@
+from conftest import INTERNAL_HEADERS
 from fastapi.testclient import TestClient
 
 from app import guardrails, memory, rag, retrieval
@@ -82,18 +83,40 @@ def test_voice_token_is_issued():
 
 
 def test_tickets_need_a_database():
-    with TestClient(app) as client:
+    with TestClient(app, headers=INTERNAL_HEADERS) as client:
         assert client.post("/v1/tickets", json={"title": "Laptop"}).status_code == 503
 
 
 def test_stale_tickets_without_database():
-    with TestClient(app) as client:
+    with TestClient(app, headers=INTERNAL_HEADERS) as client:
         body = client.get("/v1/tickets/stale").json()
         assert body == {"remind": [], "escalate": []}
 
 
 def test_knowledge_gap_digest_without_database():
-    with TestClient(app) as client:
+    with TestClient(app, headers=INTERNAL_HEADERS) as client:
         body = client.get("/v1/knowledge-gaps/digest", params={"hours": 24}).json()
         assert body["total_gaps"] == 0
         assert body["top_questions"] == []
+
+
+def test_session_ids_are_limited_to_safe_characters():
+    with TestClient(app) as client:
+        bad = client.post("/v1/chat", json={"message": "hi", "session_id": 'x"; filename="evil.exe'})
+        assert bad.status_code == 422
+        assert client.post("/v1/chat", json={"message": "hi", "session_id": "é" * 3}).status_code == 422
+        assert client.get("/v1/voice/token", params={"session_id": "a/b"}).status_code == 422
+
+
+def test_download_names_are_safe_in_the_header():
+    from app.admin import _download
+
+    for name, safe in (
+        ('conversation-x"; filename="evil.exe.md', "conversation-x-filename-evil.exe.md"),
+        ("Assistant-transcript-café.txt", "Assistant-transcript-caf-.txt"),
+        ('"..', "download.txt"),
+    ):
+        assert (
+            _download(name, "t", "text/plain").headers["content-disposition"]
+            == f'attachment; filename="{safe}"'
+        )

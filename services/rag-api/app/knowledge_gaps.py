@@ -220,36 +220,43 @@ def stale_tickets(
     reminder_minutes: int | None = None,
     escalation_minutes: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
+    """Tickets waiting for approval that WF6 should act on (it runs every 15 minutes).
+
+    The wait counts from when the ticket last entered pending_approval, as the portal shows it, so
+    an admin's edit or message does not restart it. remind: past the reminder threshold and not
+    reminded yet during this wait (one Slack reminder and one feed event). escalate: one priority
+    level each time another escalation threshold passes (at 4 h, 8 h, ... by default), until urgent.
+    """
     rm = reminder_minutes or settings.sla_reminder_minutes
     em = escalation_minutes or settings.sla_escalation_minutes
-    remind_rows = memory.run(
-        """SELECT id, ticket_ref, title, category, priority, requester, status,
-                  created_at, updated_at,
-                  EXTRACT(EPOCH FROM (now() - updated_at)) / 60 AS pending_minutes
-           FROM tickets
-           WHERE status = 'pending_approval'
-             AND updated_at < now() - make_interval(mins := %s)
-             AND updated_at >= now() - make_interval(mins := %s)
-           ORDER BY updated_at""",
-        (rm, em),
+    rows = memory.run(
+        """WITH pending AS (
+             SELECT t.id, t.ticket_ref, t.title, t.category, t.priority, t.requester, t.status,
+                    t.created_at, t.updated_at,
+                    COALESCE((SELECT max(e.created_at) FROM ticket_events e
+                              WHERE e.ticket_id = t.id AND e.to_status = 'pending_approval'),
+                             t.created_at) AS pending_since
+             FROM tickets t WHERE t.status = 'pending_approval'
+           )
+           SELECT p.*, EXTRACT(EPOCH FROM (now() - p.pending_since)) / 60 AS pending_minutes,
+                  (SELECT count(*) FROM activity_events a
+                   WHERE a.ref_type = 'ticket' AND a.ref_id = p.ticket_ref
+                     AND a.kind = 'ticket.sla_reminder' AND a.created_at >= p.pending_since) AS reminders,
+                  (SELECT count(*) FROM activity_events a
+                   WHERE a.ref_type = 'ticket' AND a.ref_id = p.ticket_ref
+                     AND a.kind = 'ticket.escalated' AND a.created_at >= p.pending_since) AS escalations
+           FROM pending p ORDER BY p.pending_since""",
         fetch=True,
     )
-    escalate_rows = memory.run(
-        """SELECT id, ticket_ref, title, category, priority, requester, status,
-                  created_at, updated_at,
-                  EXTRACT(EPOCH FROM (now() - updated_at)) / 60 AS pending_minutes
-           FROM tickets
-           WHERE status = 'pending_approval'
-             AND priority != 'urgent'
-             AND updated_at < now() - make_interval(mins := %s)
-           ORDER BY updated_at""",
-        (em,),
-        fetch=True,
-    )
-    return {
-        "remind": [dict(r) for r in remind_rows or []],
-        "escalate": [dict(r) for r in escalate_rows or []],
-    }
+    remind, escalate = [], []
+    for row in rows or []:
+        ticket = dict(row)
+        minutes = float(ticket["pending_minutes"])
+        if rm <= minutes < em and not ticket["reminders"]:
+            remind.append(ticket)
+        if ticket["priority"] != "urgent" and minutes >= em * (int(ticket["escalations"]) + 1):
+            escalate.append(ticket)
+    return {"remind": remind, "escalate": escalate}
 
 
 _PRIORITY_ESCALATION = {"low": "normal", "normal": "high", "high": "urgent"}

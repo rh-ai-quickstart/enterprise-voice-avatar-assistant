@@ -100,9 +100,16 @@ spec:
                   name: {{ .Values.secrets.objectStore }}
                   key: S3_SECRET_KEY
             {{- if .Values.n8n.enabled }}
-            # Every new object is announced to the n8n ingestion workflow (WF2)
+            # Every new object is announced to the n8n ingestion workflow (WF2). The n8n Route is
+            # public, so the URL carries the internal token, which WF2 checks; Kubernetes puts the
+            # value in when the container starts, so it is not in the manifest.
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.admin }}
+                  key: INTERNAL_API_TOKEN
             - name: VGW_EVENT_WEBHOOK_URL
-              value: http://n8n:5678/webhook/object-created
+              value: http://n8n:5678/webhook/object-created?token=$(INTERNAL_API_TOKEN)
             - name: VGW_EVENT_FILTER
               value: /etc/versitygw/filter.json
             {{- end }}

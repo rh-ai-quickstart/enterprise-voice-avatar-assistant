@@ -132,10 +132,15 @@ ensure_login() {
 }
 
 # ---------------------------------------------------------------- discovery -----------------
+# doc_counts: "<indexed> <classified>" from the ingestion service: documents with chunks, and inbox
+# files that were only classified (they have none); nothing when the service cannot be asked
+doc_counts() {
+  oc exec deploy/rag-api -n "$PROJECT" -- .venv/bin/python -c 'import urllib.request,json; d=json.load(urllib.request.urlopen("http://ingestion:8080/v1/documents", timeout=10)); n=sum(1 for x in d if (x.get("chunks") or 0) > 0); print(n, len(d) - n)' 2>/dev/null
+}
 discover() {
   API=""; USER_NAME=""; OCP_VERSION=""; DOMAIN="${DOMAIN:-}"; NODE_COUNT=0; INSTANCE=""; GPUS="${GPUS:-0}"; GPU_PRODUCT=""; GPU_MEMORY=""; GPU_REPLICAS=""; GPU_ALLOC=0
   RHOAI_VERSION=""; DSC=""; KSERVE=""; OP_NFD=no; OP_GPU=no; OP_CM=no; OP_GITOPS=no; LLM_NS="${LLM_NS:-}"; LLM_READY=""; LLM_SHARE=""
-  PROJECT_EXISTS=no; ARGO_READY=no; TURN_SECRET=no; SECRETS_IN_CLUSTER=no; APP_STATE=""; ISVC_TOTAL=0; ISVC_READY=0; PODS_NOT_READY=1; FRONTEND_URL=""; N8N_URL=""; DOCS_INDEXED=""
+  PROJECT_EXISTS=no; ARGO_READY=no; TURN_SECRET=no; SECRETS_IN_CLUSTER=no; APP_STATE=""; ISVC_TOTAL=0; ISVC_READY=0; PODS_NOT_READY=1; FRONTEND_URL=""; N8N_URL=""; DOCS_INDEXED=""; DOCS_CLASSIFIED=""
   LOGGED_IN=0; command -v oc >/dev/null && oc whoami >/dev/null 2>&1 && LOGGED_IN=1
   [ "$LOGGED_IN" = 1 ] || return
   progress() { [ "${QUIET_DISCOVERY:-0}" = 1 ] || printf '  %s..%s %s\n' "$D" "$N" "$1"; }
@@ -184,9 +189,9 @@ discover() {
   PODS_NOT_READY=$(oc get pods -n "$PROJECT" --no-headers 2>/dev/null | grep -v -E 'Running|Completed' | wc -l | tr -d ' ')
   FRONTEND_URL=$(oc get route frontend -n "$PROJECT" -o jsonpath='https://{.spec.host}' 2>/dev/null)
   N8N_URL=$(oc get route n8n -n "$PROJECT" -o jsonpath='https://{.spec.host}' 2>/dev/null)
-  DOCS_INDEXED=""
+  DOCS_INDEXED=""; DOCS_CLASSIFIED=""
   if [ "$PODS_NOT_READY" = 0 ] && [ -n "$FRONTEND_URL" ]; then
-    DOCS_INDEXED=$(oc exec deploy/rag-api -n "$PROJECT" -- .venv/bin/python -c 'import urllib.request,json; print(len(json.load(urllib.request.urlopen("http://ingestion:8080/v1/documents", timeout=10))))' 2>/dev/null || echo "")
+    read -r DOCS_INDEXED DOCS_CLASSIFIED < <(doc_counts)
   fi
 }
 
@@ -221,7 +226,7 @@ step_state() {  # prints done|todo|attention and a detail
   5) if [ "$SECRETS_IN_CLUSTER" = yes ] && [ -n "${STEP_5_DONE:-}" ]; then echo "done|$SECRETS_FILE and the cluster secrets"; elif [ "$SECRETS_IN_CLUSTER" = yes ]; then echo "todo|cluster secrets exist; run to review the keys"; elif [ -f "$SECRETS_FILE" ]; then echo "todo|$SECRETS_FILE exists, not yet applied"; else echo "todo|no $SECRETS_FILE yet"; fi ;;
   6) if [ "$APP_STATE" = "Synced/Healthy" ] && [ "${PODS_NOT_READY:-1}" = 0 ]; then echo "done|application Synced/Healthy, ${ISVC_READY:-0}/${ISVC_TOTAL:-0} models Ready"; elif [ -n "$APP_STATE" ]; then echo "attention|application $APP_STATE, ${PODS_NOT_READY} pod(s) not ready"; else echo "todo|not deployed"; fi ;;
   7) if [ -n "${STEP_7_DONE:-}" ]; then echo "done|owner account, API key, workflows active"; elif [ -n "$N8N_URL" ]; then echo "todo|$N8N_URL"; else echo "todo|after the deployment"; fi ;;
-  8) if [ -n "$DOCS_INDEXED" ] && [ "$DOCS_INDEXED" -ge 10 ]; then echo "done|$DOCS_INDEXED documents indexed"; elif [ -n "$DOCS_INDEXED" ]; then echo "todo|$DOCS_INDEXED documents indexed"; else echo "todo|after the deployment"; fi ;;
+  8) if [ -n "$DOCS_INDEXED" ] && [ "$DOCS_INDEXED" -ge 10 ]; then echo "done|$DOCS_INDEXED documents indexed, ${DOCS_CLASSIFIED:-0} inbox files classified"; elif [ -n "$DOCS_INDEXED" ]; then echo "todo|$DOCS_INDEXED documents indexed, ${DOCS_CLASSIFIED:-0} inbox files classified"; else echo "todo|after the deployment"; fi ;;
   9) if [ -n "${STEP_9_DONE:-}" ]; then echo "done|preflight passed $STEP_9_DONE"; else echo "todo|preflight not run"; fi ;;
   esac
 }
@@ -421,13 +426,14 @@ step5() {
   say ""; say "  ${B}Slack${N} (approval cards and notifications; n8n's Slack credential is created from the token by the chart)"
   local manifest="$HOME/slack-app-manifest.json"
   sed "s/N8N_HOST/$n8n_host/" "$ROOT/n8n/slack-app-manifest.json" > "$manifest"
+  local slack_skipped=0
   if [ -n "${SLACK_BOT_TOKEN:-}" ]; then ok "SLACK_BOT_TOKEN already in the file"; else
     say "  5a. On your laptop open https://api.slack.com/apps > Create New App > From a manifest > choose the workspace,"
     say "      paste the manifest below (also saved as $manifest) and create the app:"
     sed 's/^/        /' "$manifest"
-    pause "" || skipped SLACK_BOT_TOKEN "Slack"
+    pause "" || { skipped SLACK_BOT_TOKEN "Slack"; slack_skipped=1; }
   fi
-  while :; do
+  while [ "$slack_skipped" = 0 ]; do
     [ -n "${SLACK_BOT_TOKEN:-}" ] || { need_key SLACK_BOT_TOKEN "5b. Install App > Install to Workspace, then paste the Bot User OAuth Token" '^xoxb-' "it starts with xoxb-" "Slack (approval cards, notifications)"; }
     [ -n "${SLACK_BOT_TOKEN:-}" ] || break
     r=$(slack_api auth.test)
@@ -616,13 +622,14 @@ step8() {
   say "  \$ NS=$PROJECT scripts/load-sample-docs.sh"
   NS="$PROJECT" "$ROOT/scripts/load-sample-docs.sh" | sed 's/^/  /' || { bad "upload failed"; return 1; }
   say "  waiting for ingestion (Slack #assistant-ingestion reports each document)"
-  local waited=0 n=0
+  # indexed = with chunks: the inbox files are classified, not indexed, and do not count
+  local waited=0 n=0 c=0
   while [ "$waited" -lt 900 ]; do
-    n=$(oc exec deploy/rag-api -n "$PROJECT" -- .venv/bin/python -c 'import urllib.request,json; print(len(json.load(urllib.request.urlopen("http://ingestion:8080/v1/documents", timeout=10))))' 2>/dev/null || echo 0)
-    [ "$n" -ge 10 ] && break; sleep 20; waited=$((waited + 20)); [ $((waited % 60)) -eq 0 ] && note "$n documents indexed after ${waited}s"
+    read -r n c < <(doc_counts); n=${n:-0}; c=${c:-0}
+    [ "$n" -ge 10 ] && break; sleep 20; waited=$((waited + 20)); [ $((waited % 60)) -eq 0 ] && note "$n documents indexed, $c inbox files classified after ${waited}s"
   done
   [ "$n" -ge 10 ] || { bad "only $n documents indexed after 15 min; oc logs deploy/ingestion -n $PROJECT --tail=50; scripts/n8n-executions.sh"; return 1; }
-  ok "$n documents indexed"; NS="$PROJECT" "$ROOT/scripts/check-index.sh" | sed 's/^/  /'; mark 8
+  ok "$n documents indexed, $c inbox files classified"; NS="$PROJECT" "$ROOT/scripts/check-index.sh" | sed 's/^/  /'; mark 8
 }
 step9() {
   say "${B}Step 9: verification${N}"

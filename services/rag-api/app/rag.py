@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from . import clients, guardrails, intent, knowledge_gaps, memory, retrieval, tickets
-from .config import VOICE_STYLE, settings
+from .config import NO_ACTIONS, VOICE_STYLE, settings
 from .retrieval import Hit
 from .schemas import ChatRequest, ChatResponse, Citation, GuardrailInfo, RequestIntake, Ticket
 
@@ -45,7 +45,7 @@ def build_messages(
     user_memory: dict[str, str] | None = None,
     user_name: str | None = None,
 ) -> list[dict[str, str]]:
-    system = settings.system_prompt.format(assistant_name=settings.assistant_name)
+    system = settings.system_prompt.format(assistant_name=settings.assistant_name) + NO_ACTIONS
     if mode == "voice":
         system += VOICE_STYLE
     name = first_name(user_name)
@@ -165,6 +165,7 @@ def _prepare(request: ChatRequest) -> ChatResponse | Prepared:
         )
         kind = intent_future.result()
         hits = hits_future.result()
+    log.info("session=%s intent=%s", session_id, kind)
     if kind == "request":
         return file_request(request, session_id, info)
 

@@ -10,6 +10,13 @@ Rules:
 - Be precise and concise. Do not invent policies, numbers, dates, or names.
 - If the user asks for something unrelated to the company documents, briefly say what you can help with instead."""
 
+# Added to every answer, whatever system prompt is configured: only the ticket path files requests
+# (rag.file_request), so an answer must never claim it did. Small models otherwise copy the "I've
+# logged your request" lines they see in the conversation history.
+NO_ACTIONS = """
+
+You cannot carry out actions. This answer does not log, file, order, book or approve anything, so never say or suggest that you have logged, filed, submitted, ordered or created a request, ticket or order, or that you will. Earlier messages in this conversation that logged a request were written by the ticket system, not by you. If the user asks for something to be done, say what the documents say about it and tell them to ask for it in one sentence, for example "Please log a request for a new laptop", so that it is logged as a request."""
+
 VOICE_STYLE = """
 This answer will be spoken aloud by a voice assistant. Use two or three short sentences, plain words, no markdown, no lists, no URLs. Keep the citation numbers in square brackets."""
 

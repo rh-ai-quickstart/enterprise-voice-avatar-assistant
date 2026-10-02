@@ -46,6 +46,16 @@ def test_messages_name_the_person_when_known():
     assert rag.first_name("  Joe Bloggs ") == "Joe" and rag.first_name("   ") is None
 
 
+def test_every_answer_forbids_claiming_actions(monkeypatch):
+    from app.config import NO_ACTIONS, settings
+
+    for mode in ("text", "voice"):
+        assert NO_ACTIONS.strip() in rag.build_messages("Order me a laptop", hits(), [], mode)[0]["content"]
+    # a deployment that replaces the system prompt keeps the rule
+    monkeypatch.setattr(settings, "system_prompt", "You are {assistant_name}.")
+    assert NO_ACTIONS.strip() in rag.build_messages("Order me a laptop", hits(), [], "text")[0]["content"]
+
+
 def test_citation_markers_are_extracted_within_range():
     assert rag.cited_numbers("Every 90 days [2]. Also [1][7].", max_n=2) == {1, 2}
 

@@ -59,14 +59,14 @@ def test_intent_detection_words(monkeypatch):
     assert intent.detect("anything") == "question"
 
 
-def test_intent_detection_sees_the_previous_turn(monkeypatch):
-    seen = {}
+def capturing_llm(seen: dict, answer: str = "QUESTION"):
+    """A fake LLM client that keeps the user message the classifier sent."""
 
     def llm():
         class Completions:
             def create(self, **kwargs):
                 seen["content"] = kwargs["messages"][1]["content"]
-                return fake_llm("QUESTION")().chat.completions.create(**kwargs)
+                return fake_llm(answer)().chat.completions.create(**kwargs)
 
         class Chat:
             completions = Completions()
@@ -76,12 +76,26 @@ def test_intent_detection_sees_the_previous_turn(monkeypatch):
 
         return Client()
 
-    monkeypatch.setattr(intent.clients, "llm", llm)
+    return llm
+
+
+def test_intent_detection_sees_the_previous_turn(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(intent.clients, "llm", capturing_llm(seen))
     assert (
         intent.detect("place the request", "I've logged your request REQ-000002: Repair the laptop.")
         == "question"
     )
     assert "REQ-000002" in seen["content"] and "place the request" in seen["content"]
+
+
+def test_intent_detection_leaves_out_a_previous_turn_that_filed_nothing(monkeypatch):
+    # an answer that only claimed to have logged something must not turn a new request into a follow-up
+    seen = {}
+    monkeypatch.setattr(intent.clients, "llm", capturing_llm(seen, "REQUEST"))
+    previous = "I've logged a new request for you in the IT service portal. No approval is needed."
+    assert intent.detect("I want to order a new laptop.", previous) == "request"
+    assert seen["content"] == "I want to order a new laptop."
 
 
 def test_intake_requires_approval_by_default(monkeypatch):

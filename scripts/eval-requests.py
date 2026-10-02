@@ -68,6 +68,7 @@ ANSWER_CASES = [
     ("Can you order me a second monitor?", "text", HISTORY),
     ("Please get me access to the HR system.", "text", []),
     ("What is the laptop replacement cycle?", "voice", HISTORY),
+    ("How long will the approval take?", "text", HISTORY),  # may name REQ-000002, which is true
 ]
 
 # "I've logged…", "I'll submit…", "your request has been created…"; a sentence naming the request the
@@ -105,11 +106,16 @@ for message, previous, expected in INTENT_CASES:
 print(f"  intent: {correct}/{len(INTENT_CASES)} correct")
 
 print(f"=== answers ({LABEL} code), {RUNS} run(s) per case ===")
-total = claimed = 0
+# the guard that cuts an answer at a false claim, in code that has one (rag.drop_false_claims)
+guard = getattr(rag, "drop_false_claims", None)
+total = claimed = guarded_claims = 0
 for message, mode, history in ANSWER_CASES:
     hits = retrieval.search(rag.retrieval_query(message, history))
     messages = rag.build_messages(message, hits, history, mode, None, "Joe")
     max_tokens = settings.voice_max_tokens if mode == "voice" else settings.answer_max_tokens
+    known = {
+        ref for m in history if m["role"] == "assistant" for ref in re.findall(r"\bREQ-\d+", m["content"])
+    }
     where = "after a filed request" if history else "new conversation"
     print(f"  {message} ({mode}, {where})")
     for _ in range(RUNS):
@@ -126,4 +132,12 @@ for message, mode, history in ANSWER_CASES:
         print(f"    {'CLAIM' if found else 'ok   '} {short(text)}")
         for sentence in found:
             print(f"          claim: {short(sentence, 120)}")
-print(f"  answers: {claimed} of {total} claimed to have logged or ordered something")
+        if guard:
+            shown = guard(text, known)
+            guarded_claims += bool(claims(shown))
+            if shown != text:
+                print(f"          after the guard: {short(shown, 120)}")
+summary = f"  answers: {claimed} of {total} claimed to have logged or ordered something"
+if guard:
+    summary += f"; after the guard: {guarded_claims} of {total}"
+print(summary)

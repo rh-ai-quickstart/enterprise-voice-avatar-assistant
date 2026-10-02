@@ -27,6 +27,14 @@ SYSTEM = (
 )
 # A request the ticket system filed; only such a message is shown to the classifier as the previous turn
 TICKET_REF_RE = re.compile(r"\bREQ-\d+")
+# "Please log a request for …" and the like, which answers tell people to say: filed without asking the
+# model (Llama 3.2 3B took it for a question). "How do I log a request?" does not match.
+EXPLICIT_REQUEST_RE = re.compile(
+    r"^\s*(?:(?:hi|hello|hey|ok|okay|yes|so|please|kindly|could you|can you|would you|will you)[\s,]+)*"
+    r"(?:log|file|open|raise|submit|create|place)\s+(?:a|an)\s+(?:new\s+)?(?:service\s+|support\s+)?"
+    r"(?:request|ticket)\b",
+    re.IGNORECASE,
+)
 
 
 def detect(message: str, previous_assistant: str | None = None) -> str:
@@ -36,6 +44,8 @@ def detect(message: str, previous_assistant: str | None = None) -> str:
     out, so an answer that only talked about a request cannot make a new one look like a follow-up."""
     if not settings.request_intent_detection:
         return "question"
+    if EXPLICIT_REQUEST_RE.match(message):
+        return "request"
     content = message[:2000]
     if previous_assistant and TICKET_REF_RE.search(previous_assistant):
         content = f"Assistant's previous message: {previous_assistant[:600]}\n\nEmployee's latest message: {content}"

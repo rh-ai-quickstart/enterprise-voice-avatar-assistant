@@ -11,7 +11,7 @@ from app.retrieval import Hit
 PIECES = ["Administrator passwords ", "are rotated every 90 days", " [1]."]
 
 
-def _question(monkeypatch):
+def _question(monkeypatch, pieces=PIECES):
     monkeypatch.setattr(
         retrieval,
         "search",
@@ -31,7 +31,7 @@ def _question(monkeypatch):
                     assert kwargs.get("stream") is True and kwargs["max_tokens"] == 120
                     return iter(
                         SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=p))])
-                        for p in PIECES
+                        for p in pieces
                     )
 
     monkeypatch.setattr(rag.clients, "llm", lambda: FakeLLM())
@@ -51,6 +51,26 @@ def test_stream_yields_deltas_then_the_final_reply(monkeypatch):
     final = events[-1]
     assert final["type"] == "final" and final["answer"] == "".join(PIECES).strip()
     assert final["citations"][0]["used"] is True and final["blocked"] is False
+
+
+def test_stream_stops_at_a_claimed_action_before_it_is_spoken(monkeypatch):
+    pieces = [
+        "Laptops are replaced every ",
+        "36 months [1]. Joe, I've log",
+        "ged your request REQ-000003: Monitor. ",
+        "It needs approval.",
+    ]
+    _question(monkeypatch, pieces)
+    with (
+        TestClient(app) as client,
+        client.stream(
+            "POST", "/v1/chat/stream", json={"message": "Order me a monitor", "mode": "voice"}
+        ) as response,
+    ):
+        events = [json.loads(line) for line in response.iter_lines() if line]
+    deltas = [e["text"] for e in events if e["type"] == "delta"]
+    assert deltas == ["Laptops are replaced every 36 months [1]. ", rag.NO_CLAIM]
+    assert events[-1]["answer"] == "Laptops are replaced every 36 months [1]. " + rag.NO_CLAIM
 
 
 def test_stream_of_a_blocked_message_is_only_the_final(monkeypatch):

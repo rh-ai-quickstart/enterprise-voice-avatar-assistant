@@ -98,6 +98,18 @@ def test_intent_detection_leaves_out_a_previous_turn_that_filed_nothing(monkeypa
     assert seen["content"] == "I want to order a new laptop."
 
 
+def test_an_explicit_request_is_filed_without_the_model(monkeypatch):
+    # the phrase answers tell people to say; Llama 3.2 3B took it for a question
+    def unused():
+        raise AssertionError("the model must not be asked")
+
+    monkeypatch.setattr(intent.clients, "llm", unused)
+    for message in ("Please log a request for a new laptop.", "Could you open a ticket for my broken mouse?"):
+        assert intent.detect(message) == "request", message
+    monkeypatch.setattr(intent.clients, "llm", fake_llm("QUESTION"))
+    assert intent.detect("How do I log a request?") == "question"
+
+
 def test_intake_requires_approval_by_default(monkeypatch):
     from app.config import settings
 

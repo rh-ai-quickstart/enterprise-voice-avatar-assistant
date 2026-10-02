@@ -228,8 +228,9 @@ that prints the password.
 
 `scripts/load-sample-docs.sh` uploads the fifteen sample files to the object store: policies and
 procedures into `documents`, invoices and contracts into `inbox`. The step waits until at
-least ten documents are indexed (up to fifteen minutes, with a count every minute) and prints
-`scripts/check-index.sh`. The inbox files are classified, not indexed, so they show no chunks:
+least ten documents are indexed, that is have chunks (up to fifteen minutes, with a count every
+minute), and prints `scripts/check-index.sh`. The inbox files are classified, not indexed, so
+they show no chunks and are counted apart:
 their type, summary and fields are in the admin portal under Documents > Classified, and in
 `#assistant-documents` when Slack is on.
 

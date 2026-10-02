@@ -8,12 +8,28 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from . import clients, guardrails, intent, knowledge_gaps, memory, retrieval, tickets
-from .config import VOICE_STYLE, settings
+from .config import NO_ACTIONS, VOICE_STYLE, settings
 from .retrieval import Hit
 from .schemas import ChatRequest, ChatResponse, Citation, GuardrailInfo, RequestIntake, Ticket
 
 log = logging.getLogger("rag.chat")
 MARKER_RE = re.compile(r"\[(\d{1,2})\]")
+# Where a sentence ends in generated text (the voice agent splits the same way)
+SENTENCE_END_RE = re.compile(r"[.!?][*_`)\]]*\s+")
+# The answer itself saying it logged, filed or ordered something, or will ("I've logged…", "I'll go
+# ahead and order…", "let me log…"). Only the ticket path files requests; NO_ACTIONS forbids this,
+# but a small model still copies the ticket path's confirmations from the history now and then.
+CLAIM_RE = re.compile(
+    r"\b(?:I(?:'ve|'ll|'m| have| will| am)|let me)\s+(?:just\s+|now\s+|already\s+|also\s+)?"
+    r"(?:(?:go|gone|going) ahead and\s+|going to\s+)?"
+    r"(?:log|logged|logging|file|filed|filing|submit|submitted|submitting|create|created|creating|place|placed|"
+    r"placing|order|ordered|ordering|raise|raised|raising|open|opened|opening|book|booked|booking)\b",
+    re.IGNORECASE,
+)
+NO_CLAIM = (
+    "I haven't logged a request for that. "
+    'If you want one, say "Please log a request for" followed by what you need.'
+)
 
 
 def build_context(hits: list[Hit]) -> str:
@@ -45,7 +61,7 @@ def build_messages(
     user_memory: dict[str, str] | None = None,
     user_name: str | None = None,
 ) -> list[dict[str, str]]:
-    system = settings.system_prompt.format(assistant_name=settings.assistant_name)
+    system = settings.system_prompt.format(assistant_name=settings.assistant_name) + NO_ACTIONS
     if mode == "voice":
         system += VOICE_STYLE
     name = first_name(user_name)
@@ -73,6 +89,38 @@ def retrieval_query(message: str, history: list[dict[str, str]]) -> str:
         if previous:
             return f"{previous[-1]} {message}"
     return message
+
+
+def sentences(text: str) -> list[str]:
+    """The text cut after each sentence end, whitespace kept, so the pieces join back into the text."""
+    pieces, start = [], 0
+    for match in SENTENCE_END_RE.finditer(text):
+        pieces.append(text[start : match.end()])
+        start = match.end()
+    if start < len(text):
+        pieces.append(text[start:])
+    return pieces
+
+
+def false_claim(sentence: str, known_refs: set[str]) -> bool:
+    """The sentence says the answer itself logged or ordered something, and names no request this
+    conversation really filed ("I've logged your request REQ-000002" about a real one is true)."""
+    if not CLAIM_RE.search(sentence):
+        return False
+    refs = set(intent.TICKET_REF_RE.findall(sentence))
+    return not refs or not refs <= known_refs
+
+
+def drop_false_claims(text: str, known_refs: set[str]) -> str:
+    """The answer up to its first false claim, which becomes NO_CLAIM (what follows such a claim
+    usually builds on it); unchanged when there is none."""
+    kept: list[str] = []
+    for sentence in sentences(text):
+        if false_claim(sentence, known_refs):
+            kept.append(NO_CLAIM)
+            break
+        kept.append(sentence)
+    return "".join(kept).strip()
 
 
 def request_reply(ticket: Ticket, user_name: str | None = None) -> str:
@@ -134,6 +182,7 @@ class Prepared:
     hits: list[Hit]
     messages: list[dict[str, str]]
     max_tokens: int
+    known_refs: set[str]  # requests this conversation filed (REQ- references in its history)
 
 
 def _prepare(request: ChatRequest) -> ChatResponse | Prepared:
@@ -165,6 +214,7 @@ def _prepare(request: ChatRequest) -> ChatResponse | Prepared:
         )
         kind = intent_future.result()
         hits = hits_future.result()
+    log.info("session=%s intent=%s", session_id, kind)
     if kind == "request":
         return file_request(request, session_id, info)
 
@@ -174,7 +224,13 @@ def _prepare(request: ChatRequest) -> ChatResponse | Prepared:
     user_memory = memory.get_user_memory(request.user_id) if request.user_id else {}
     messages = build_messages(request.message, hits, history, request.mode, user_memory, request.user_name)
     max_tokens = settings.voice_max_tokens if request.mode == "voice" else settings.answer_max_tokens
-    return Prepared(session_id, info, hits, messages, max_tokens)
+    known_refs = {
+        ref
+        for m in history
+        if m.get("role") == "assistant"
+        for ref in intent.TICKET_REF_RE.findall(m["content"])
+    }
+    return Prepared(session_id, info, hits, messages, max_tokens, known_refs)
 
 
 def _finish(request: ChatRequest, prep: Prepared, text: str) -> ChatResponse:
@@ -213,7 +269,11 @@ def answer(request: ChatRequest) -> ChatResponse:
         temperature=settings.llm_temperature,
         max_tokens=prep.max_tokens,
     )
-    return _finish(request, prep, (completion.choices[0].message.content or "").strip())
+    text = (completion.choices[0].message.content or "").strip()
+    checked = drop_false_claims(text, prep.known_refs)
+    if checked != text:
+        log.warning("session=%s the answer claimed an action; replaced from: %r", prep.session_id, text[:200])
+    return _finish(request, prep, checked)
 
 
 def answer_stream(request: ChatRequest) -> Iterator[tuple[str, str | ChatResponse]]:
@@ -232,9 +292,31 @@ def answer_stream(request: ChatRequest) -> Iterator[tuple[str, str | ChatRespons
         max_tokens=prep.max_tokens,
         stream=True,
     )
+    # handed out a sentence at a time, each checked before it can be spoken (the voice agent speaks
+    # whole sentences anyway); a false claim ends the answer with NO_CLAIM
+    buffer, claimed = "", None
     for chunk in stream:
         delta = chunk.choices[0].delta.content if getattr(chunk, "choices", None) else None
-        if delta:
-            parts.append(delta)
-            yield "delta", delta
+        if not delta:
+            continue
+        buffer += delta
+        *done, buffer = sentences(buffer) if SENTENCE_END_RE.search(buffer) else [buffer]
+        for sentence in done:
+            if false_claim(sentence, prep.known_refs):
+                claimed = sentence
+                break
+            parts.append(sentence)
+            yield "delta", sentence
+        if claimed is not None:
+            break
+    if claimed is None and buffer.strip() and false_claim(buffer, prep.known_refs):
+        claimed = buffer
+    if claimed is not None:
+        getattr(stream, "close", lambda: None)()
+        log.warning("session=%s the answer claimed an action; replaced: %r", prep.session_id, claimed[:200])
+        parts.append(NO_CLAIM)
+        yield "delta", NO_CLAIM
+    elif buffer:
+        parts.append(buffer)
+        yield "delta", buffer
     yield "final", _finish(request, prep, "".join(parts).strip())

@@ -105,7 +105,7 @@ docker compose -f frontend/e2e/compose.yaml down -v
 
 They sign in and out, file a request in the chat and approve it in the portal (with Slack off and on), archive a conversation with Google Docs off and download it, and check that the public proxy refuses the internal routes. `E2E_SCREENSHOT=1 npx playwright test screenshot` on a fresh stack regenerates `docs/images/admin-portal-approvals.png`.
 
-CI runs all of this on every push and pull request (`.github/workflows/ci.yaml`). Against a running deployment, `NS=<project> scripts/demo-preflight.sh -f <values file>` checks models, the test pod and the n8n webhooks; `scripts/check-index.sh` lists what is indexed; `scripts/n8n-executions.sh` shows workflow runs with node errors.
+CI runs all of this on every push and pull request (`.github/workflows/ci.yaml`). Against a running deployment, `NS=<project> scripts/demo-preflight.sh -f <values file>` checks models, the test pod and the n8n webhooks; `scripts/check-index.sh` lists what is indexed; `scripts/n8n-executions.sh` shows workflow runs with node errors; `scripts/eval-requests.sh` runs sample requests and questions through the cluster's language model, with the deployed RAG API code and with the checkout's.
 
 ## Images
 

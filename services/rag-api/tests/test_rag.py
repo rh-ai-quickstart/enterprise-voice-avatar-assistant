@@ -46,6 +46,56 @@ def test_messages_name_the_person_when_known():
     assert rag.first_name("  Joe Bloggs ") == "Joe" and rag.first_name("   ") is None
 
 
+def test_every_answer_forbids_claiming_actions(monkeypatch):
+    from app.config import NO_ACTIONS, settings
+
+    for mode in ("text", "voice"):
+        assert NO_ACTIONS.strip() in rag.build_messages("Order me a laptop", hits(), [], mode)[0]["content"]
+    # a deployment that replaces the system prompt keeps the rule
+    monkeypatch.setattr(settings, "system_prompt", "You are {assistant_name}.")
+    assert NO_ACTIONS.strip() in rag.build_messages("Order me a laptop", hits(), [], "text")[0]["content"]
+
+
+def test_sentences_join_back_into_the_text():
+    text = "Laptops are replaced every 36 months [1]. Ask the desk! Why? Because"
+    assert rag.sentences(text) == [
+        "Laptops are replaced every 36 months [1]. ",
+        "Ask the desk! ",
+        "Why? ",
+        "Because",
+    ]
+    assert "".join(rag.sentences(text)) == text
+
+
+def test_an_answer_that_claims_an_action_is_cut_there():
+    known = {"REQ-000002"}
+    invented = (
+        "Laptops are replaced every 36 months [1]. Joe, I've logged your request REQ-000003: Monitor. "
+        "It needs approval."
+    )
+    assert (
+        rag.drop_false_claims(invented, known) == "Laptops are replaced every 36 months [1]. " + rag.NO_CLAIM
+    )
+    for claim in (
+        "I've logged a new request for you in the IT service portal.",
+        "I'll go ahead and log your request in the HR system.",
+        "Let me order that monitor for you.",
+        "I'm going to submit it now.",
+    ):
+        assert rag.drop_false_claims(claim, known) == rag.NO_CLAIM, claim
+
+
+def test_true_references_and_plain_answers_are_kept():
+    known = {"REQ-000002"}
+    for text in (
+        "I've logged your request REQ-000002 and it is waiting for approval [1].",
+        "I can't log requests myself. Laptops are replaced every 36 months [1].",
+        "I'll let you know here as soon as it's decided.",
+        "You can order a laptop through the IT service portal [2].",
+    ):
+        assert rag.drop_false_claims(text, known) == text, text
+
+
 def test_citation_markers_are_extracted_within_range():
     assert rag.cited_numbers("Every 90 days [2]. Also [1][7].", max_n=2) == {1, 2}
 
@@ -62,3 +112,44 @@ def test_retrieval_query_expands_short_followups():
     assert rag.retrieval_query("And for service accounts?", []) == "And for service accounts?"
     long = "What is the exact procedure for resetting a forgotten password when the portal is down?"
     assert rag.retrieval_query(long, history) == long
+
+
+def test_the_text_answer_keeps_requests_this_conversation_filed(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import guardrails, intent, knowledge_gaps, memory, retrieval
+    from app.guardrails import Verdict
+    from app.schemas import ChatRequest
+
+    filed = "Joe, I've logged your request REQ-000002: Replace laptop. It needs approval."
+    monkeypatch.setattr(memory, "ensure_conversation", lambda *a, **k: None)
+    monkeypatch.setattr(
+        memory,
+        "history",
+        lambda *a, **k: [
+            {"role": "user", "content": "My laptop broke"},
+            {"role": "assistant", "content": filed},
+        ],
+    )
+    monkeypatch.setattr(memory, "append", lambda *a, **k: None)
+    monkeypatch.setattr(knowledge_gaps, "record", lambda *a, **k: None)
+    monkeypatch.setattr(guardrails, "check_input", lambda text: Verdict(True, "none"))
+    monkeypatch.setattr(guardrails, "check_output", lambda user, answer: Verdict(True, "none"))
+    monkeypatch.setattr(intent, "detect", lambda message, previous=None: "question")
+    monkeypatch.setattr(retrieval, "search", lambda *a, **k: [])
+    replies = iter(
+        [
+            "I've logged your request REQ-000002 and it is waiting for approval.",
+            "Joe, I've logged your request REQ-000003: Monitor.",
+        ]
+    )
+
+    def create(**kwargs):
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=next(replies)))])
+
+    llm = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(rag.clients, "llm", lambda: llm)
+    first = rag.answer(ChatRequest(message="How long will the approval take?", session_id="s1"))
+    assert first.answer == "I've logged your request REQ-000002 and it is waiting for approval."
+    second = rag.answer(ChatRequest(message="And can you order me a monitor?", session_id="s1"))
+    assert second.answer == rag.NO_CLAIM

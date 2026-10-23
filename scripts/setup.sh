@@ -118,6 +118,8 @@ logfile() { echo "$STATE_DIR/logs/$1-$(date +%Y%m%d-%H%M%S).log"; }
 # shellcheck disable=SC1090
 . "$STATE" 2>/dev/null || true
 [ -n "$PROJECT_ENV" ] && PROJECT=$PROJECT_ENV   # the environment wins over the project saved by an earlier run
+# nodes found unable to start containers (scripts/deploy.sh writes them): every install and test pod avoids them
+[ -z "${AVOID_NODES:-}" ] && [ -s "$STATE_DIR/avoid-nodes" ] && AVOID_NODES=$(tr '\n' ' ' < "$STATE_DIR/avoid-nodes" | sed 's/ *$//')
 
 # ---------------------------------------------------------------- tools ---------------------
 # have_tool <command>: usable, not just present (macOS has a git stub that opens an installer

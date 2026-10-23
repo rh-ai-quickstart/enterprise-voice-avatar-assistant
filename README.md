@@ -245,6 +245,12 @@ The environment auto-stops after six hours and is destroyed after 48. Disable au
 RHDP if you keep it, and expect to redo the setup on a new cluster; the script makes that a
 short exercise.
 
+**Only an admin of one project, on a shared cluster?** The same script takes the namespace
+path when the login is not a cluster-admin: it runs from your laptop (on macOS it installs what
+it needs with Homebrew), changes nothing outside the project, uses the cluster's
+Models-as-a-Service for the models it offers, serves the others in the project on a booked GPU,
+and installs the chart with Helm. See [The namespace path](docs/SETUP.md#the-namespace-path).
+
 Accounts for the integrations, all free: a Slack workspace where you can create apps and
 channels, a [Tavus](https://platform.tavus.io) account for the avatar (25 conversational
 minutes a month, one stream), and a Google account with access to Google Cloud console for a

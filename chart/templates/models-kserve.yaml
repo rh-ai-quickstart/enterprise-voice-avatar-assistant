@@ -79,6 +79,10 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   predictor:
+    {{- with $.Values.models.podLabels }}
+    labels:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
     automountServiceAccountToken: false
     minReplicas: 1
     maxReplicas: 1

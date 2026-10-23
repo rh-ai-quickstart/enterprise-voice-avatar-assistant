@@ -198,6 +198,7 @@ Models. Each model has a `deploy` toggle: true creates a vLLM ServingRuntime and
 | Key | Default | Description |
 |---|---|---|
 | `models.runtimeImage` | `registry.redhat.io/rhaii/vllm-cuda-rhel9@sha256:ba060ec145e1b7ac3a3b25b89fc75f7d146746156990ff5858235eaa9d158e32` |  |
+| `models.podLabels` | `{}` | Labels added to every model server pod. Where Kueue manages the namespace, set kueue.x-k8s.io/queue-name to the LocalQueue that holds the GPUs; without it the pods join the namespace's default queue, which may have no GPU quota. |
 | `models.llm.deploy` | `true` | true: serve the model on OpenShift AI from this chart; false: use `endpoint`. |
 | `models.llm.name` | `llama-3-1-8b-instruct` | InferenceService name (also the in-cluster service name). |
 | `models.llm.displayName` | `Llama 3.1 8B Instruct (W4A16)` | Name shown in the OpenShift AI dashboard. |

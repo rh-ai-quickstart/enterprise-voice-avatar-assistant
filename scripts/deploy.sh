@@ -14,6 +14,8 @@
 #                            LLM_MODEL, LLM_API_KEY, STT_*, EMBEDDINGS_* in the environment)
 #     WAIT=0                 do not wait for pods and models
 #     RUN_TESTS=1            run `helm test` at the end
+#     HELM_TIMEOUT=20m       how long helm waits for the n8n-setup hook Job
+#     LOG_FILE=<path>        also write everything printed to this file
 #   Extra arguments go to helm, for example: scripts/deploy.sh -f my-values.yaml
 #
 # Secrets for the optional integrations (Slack, Tavus, Google) are read by
@@ -26,6 +28,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RELEASE="${RELEASE:-assistant}"
 WAIT="${WAIT:-1}"
 say() { printf '\n==> %s\n' "$*"; }
+[ -n "${LOG_FILE:-}" ] && exec > >(tee -a "$LOG_FILE") 2>&1
 
 command -v oc >/dev/null || { echo "oc is required"; exit 1; }
 command -v helm >/dev/null || { echo "helm is required"; exit 1; }
@@ -66,25 +69,45 @@ if [ -z "${AVATAR_PROVIDER:-}" ] && ! has_key TAVUS_API_KEY; then AVATAR_PROVIDE
 say "Integrations from the keys in assistant-integrations: Slack $SLACK_ON, Google Docs $DOCS_ON, avatar ${AVATAR_PROVIDER:-from the values}"
 
 say "Installing the chart"
-helm upgrade --install "$RELEASE" "$ROOT/chart" --namespace "$PROJECT" --set "global.domain=$DOMAIN" \
-  --set "integrations.slack.enabled=$SLACK_ON" --set "integrations.googleDocs.enabled=$DOCS_ON" "${AVATAR_ARGS[@]}" "${MODEL_ARGS[@]}" "$@"
+# The n8n-setup hook Job runs inside the install and needs n8n up first (volume, image pull),
+# which can take longer than Helm's default five minutes.
+if ! helm upgrade --install "$RELEASE" "$ROOT/chart" --namespace "$PROJECT" --timeout "${HELM_TIMEOUT:-20m}" --set "global.domain=$DOMAIN" \
+  --set "integrations.slack.enabled=$SLACK_ON" --set "integrations.googleDocs.enabled=$DOCS_ON" ${AVATAR_ARGS[@]+"${AVATAR_ARGS[@]}"} ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} "$@"; then
+  echo "  helm upgrade failed; pods not running:"; oc get pods -n "$PROJECT" --no-headers 2>/dev/null | grep -v -E 'Running|Completed' | sed 's/^/     /' || true
+  oc logs -n "$PROJECT" -l job-name=n8n-setup --tail=5 2>/dev/null | sed 's/^/     n8n-setup: /' || true
+  exit 1
+fi
 
+FAILED=0
+not_ready() { oc get pods -n "$PROJECT" --no-headers 2>/dev/null | grep -v -E 'Running|Completed' || true; }
+# Kueue (where it manages the project): workloads not admitted yet, with the reason (no quota, booking ended, ...)
+queued() { oc get workloads.kueue.x-k8s.io -n "$PROJECT" -o json 2>/dev/null | jq -r '.items[]? | select([.status.conditions[]? | select(.type=="Admitted" and .status=="True")] | length == 0) | "  queued by Kueue: \(.metadata.name): \([.status.conditions[]?.message] | last // "waiting for admission")"' 2>/dev/null || true; }
 if [ "$WAIT" = "1" ]; then
   say "Waiting for workloads"
   for d in $(oc get deploy -n "$PROJECT" -l app.kubernetes.io/instance="$RELEASE" -o name 2>/dev/null); do
     oc rollout status "$d" -n "$PROJECT" --timeout=600s || echo "  $d is not ready yet; continuing"
   done
   if oc get isvc -n "$PROJECT" >/dev/null 2>&1 && [ -n "$(oc get isvc -n "$PROJECT" -o name)" ]; then
-    say "Waiting for models (first start downloads weights; up to 30 minutes)"
-    for i in $(seq 1 180); do
+    say "Waiting for models (first start downloads weights; up to 40 minutes)"
+    for i in $(seq 1 240); do
       total=$(oc get isvc -n "$PROJECT" -o name | wc -l | tr -d ' ')
       ready=$(oc get isvc -n "$PROJECT" -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -c True || true)
       [ "$ready" = "$total" ] && break
-      [ $((i % 6)) -eq 0 ] && echo "  $ready/$total models ready"
+      if [ $((i % 6)) -eq 0 ]; then
+        echo "  $ready/$total models ready after $((i * 10))s"
+        for p in $(oc get pods -n "$PROJECT" -l serving.kserve.io/inferenceservice -o name 2>/dev/null); do
+          echo "  $p: $(oc get "$p" -n "$PROJECT" -o jsonpath='{.status.phase}' 2>/dev/null); log: $(oc logs "$p" -n "$PROJECT" -c kserve-container --tail=1 2>/dev/null | tr -d '\r' | cut -c1-150)"
+        done
+        queued
+      fi
       sleep 10
     done
     oc get isvc -n "$PROJECT"
+    [ "$ready" = "$total" ] || { echo "  FAIL models not Ready after 40 minutes: oc get pods -n $PROJECT -l serving.kserve.io/inferenceservice; oc describe isvc -n $PROJECT"; queued; FAILED=$((FAILED + 1)); }
   fi
+  say "Waiting for every pod"
+  for i in $(seq 1 60); do [ -z "$(not_ready)" ] && break; [ $((i % 6)) -eq 0 ] && { echo "  not ready after $((i * 10))s:"; not_ready | awk '{print "     "$1" "$3}'; queued; }; sleep 10; done
+  if [ -n "$(not_ready)" ]; then echo "  FAIL pods not ready:"; not_ready | sed 's/^/     /'; queued; echo "  oc describe pod <name> -n $PROJECT; oc logs <name> -n $PROJECT --previous"; FAILED=$((FAILED + 1)); else echo "  every pod Running or Completed"; fi
 fi
 
 say "URLs"
@@ -100,5 +123,6 @@ echo "  Credentials: oc extract secret/assistant-object-store -n $PROJECT --to=-
 
 if [ "${RUN_TESTS:-0}" = "1" ]; then
   say "Running helm test"
-  helm test "$RELEASE" -n "$PROJECT" --logs
+  helm test "$RELEASE" -n "$PROJECT" --logs || FAILED=$((FAILED + 1))
 fi
+[ "$FAILED" = 0 ] || { echo; echo "Deployment finished with $FAILED problem(s); see the FAIL lines above${LOG_FILE:+ and the log $LOG_FILE}"; exit 1; }

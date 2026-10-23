@@ -212,6 +212,10 @@ livekit:
 # ---------------------------------------------------------------------------
 models:
   runtimeImage: registry.redhat.io/rhaii/vllm-cuda-rhel9@sha256:ba060ec145e1b7ac3a3b25b89fc75f7d146746156990ff5858235eaa9d158e32
+  # Labels added to every model server pod. Where Kueue manages the namespace, set
+  # kueue.x-k8s.io/queue-name to the LocalQueue that holds the GPUs; without it the
+  # pods join the namespace's default queue, which may have no GPU quota.
+  podLabels: {}
 
   llm:
     deploy: true

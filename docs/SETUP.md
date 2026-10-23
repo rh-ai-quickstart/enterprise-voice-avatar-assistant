@@ -1,12 +1,26 @@
 # Using scripts/setup.sh
 
-`scripts/setup.sh` takes a freshly provisioned OpenShift AI cluster to a working demo from
-the bastion host. It discovers what the cluster already has, shows the state of nine steps,
-runs the remaining ones in order, and saves its progress so it can be stopped and resumed at
-any point. The README's [Setup](../README.md#setup) section says what the environment must
-look like and how to get there; this page is the reference for the script itself: how to
-call it, what each step checks and changes, where it keeps its files, and what to do when a
-step stops.
+`scripts/setup.sh` takes an OpenShift AI cluster to a working demo, from the bastion host or
+from a Mac or Linux laptop. It discovers what the cluster already has, shows the state of nine
+steps, runs the remaining ones in order, and saves its progress so it can be stopped and
+resumed at any point. The README's [Setup](../README.md#setup) section says what the
+environment must look like and how to get there; this page is the reference for the script
+itself: how to call it, what each step checks and changes, where it keeps its files, and what
+to do when a step stops.
+
+The access of the logged-in user decides the path, without a question:
+
+- **Cluster path** (cluster-admin, for example `kubeadmin` on a Red Hat Demo Platform
+  cluster): operators, GPU time-slicing, Argo CD. The sections below describe it.
+- **Namespace path** (an admin of one project only, for example a user project on a shared
+  cluster): nothing changes outside the project. Models come from the cluster's
+  Models-as-a-Service where it has them, the others run in the project on a booked GPU, and the
+  chart is installed with Helm. See [The namespace path](#the-namespace-path).
+
+On macOS the script installs what it needs with Homebrew, and offers to install Homebrew
+first: a current bash (macOS ships bash 3.2; the script restarts itself under Homebrew's
+bash), `oc`, `helm`, `jq`, `openssl` and `python3`. On Linux it installs `helm` and `oc` into
+`~/bin` and offers `sudo dnf install` for the rest.
 
 ## Run it
 
@@ -58,7 +72,13 @@ scripts/setup.sh --help     # the same list
 | `SECRETS_FILE` | `~/secrets.env` | The one file holding every key (see step 5) |
 | `STATE_DIR` | `~/.assistant-setup` | Progress, logs, the profile overlay and the pasted service account key |
 | `DEBUG` | unset | `DEBUG=1` also writes a full command trace next to the run log |
-| `PROFILE`, `REMOTE_*` | unset | `PROFILE=remote` with `REMOTE_LLM_ENDPOINT`, `REMOTE_LLM_MODEL`, `REMOTE_STT_ENDPOINT`, `REMOTE_EMB_ENDPOINT` (optional `REMOTE_STT_MODEL`, `REMOTE_EMB_MODEL`) uses remote OpenAI-compatible endpoints instead of GPU models |
+| `PROFILE`, `REMOTE_*` | unset | `PROFILE=remote` with `REMOTE_LLM_ENDPOINT`, `REMOTE_LLM_MODEL`, `REMOTE_STT_ENDPOINT`, `REMOTE_EMB_ENDPOINT` (optional `REMOTE_STT_MODEL`, `REMOTE_EMB_MODEL`) uses remote OpenAI-compatible endpoints instead of GPU models. On the namespace path, `REMOTE_<LLM\|STT\|EMB>_ENDPOINT` with `_MODEL` sets one model's endpoint |
+| `ACCESS` | from the permissions | `namespace` forces the namespace path (useful to try it as a cluster-admin), `cluster` the cluster path |
+| `DOMAIN` | from the cluster | Apps domain; the namespace path reads it from the console URL |
+| `MAAS_URL` | `https://maas.<apps domain>` | Namespace path: the Models-as-a-Service gateway |
+| `MAAS_LLM_MODEL`, `MAAS_STT_MODEL`, `MAAS_EMB_MODEL` | `llama-32-3b`, `whisper.*`, `bge-m3` | Namespace path: the Models-as-a-Service model used for each, when the service has it (a pattern) |
+| `MAAS_SUBSCRIPTION` | the one that includes every model used | Namespace path: the subscription the API key is bound to |
+| `KUEUE_QUEUE`, `GPU_RESOURCE` | from the quota | Namespace path: the local queue and the resource (`nvidia.com/gpu`, `nvidia.com/mig-1g.18gb`, ...) for the models served in the project; both together use a queue without quota of its own, such as one that borrows idle GPUs |
 
 Files the script writes, all under the home directory of the bastion user:
 
@@ -98,8 +118,9 @@ Every run starts the same way, whatever the options:
    when a step fails, or when a step finished but the cluster does not show it as done, and
    says what to look at. Run it again and it resumes at that step.
 
-Prompts appear in exactly two places: the login, and step 5 for the keys and the browser
-actions. Nothing else waits for Enter.
+Prompts appear in a few places only: the login, a confirmation of the cluster, user and
+project before the first change on them, the Let's Encrypt e-mail in step 4 when one is
+needed, and step 5 for the keys and the browser actions. Nothing else waits for Enter.
 
 ## The nine steps
 
@@ -248,6 +269,41 @@ oc extract secret/assistant-admin -n voice-avatar-assistant --keys=ADMIN_PASSWOR
 
 Everyone signs in to the portal with that password and their own name, which is what the
 requester hears ("approved by Dana") and what the audit log records.
+
+## The namespace path
+
+For a user who administers one project and nothing else, such as a user project on a shared
+OpenShift AI cluster. There is no bastion: run the script from your laptop, logged in with
+the token from the console (your name, top right, then **Copy login command**). With several
+clusters in one kubeconfig, give this one its own file so nothing else is touched:
+
+```bash
+export KUBECONFIG=~/.kube/<cluster> && oc login --server=https://api.<cluster domain>:6443 --token=<token>
+```
+
+```bash
+git clone https://github.com/rh-ai-quickstart/enterprise-voice-avatar-assistant.git && cd enterprise-voice-avatar-assistant && scripts/setup.sh
+```
+
+The project is the current one (`oc project`), or `PROJECT=<name>`. Before the first change
+the script asks to confirm the cluster, the user and the project. The steps, where they
+differ from the cluster path:
+
+| Step | On the namespace path |
+|---|---|
+| 1 Access and prerequisites | The tools (Homebrew on macOS), admin rights in the project, permission to create every kind the chart needs (routes with a host included), KServe in the project, the Kueue queues of the project with their GPU quota and the booking's end, the Models-as-a-Service models, a default StorageClass, cert-manager. The apps domain comes from the console URL |
+| 2 Deployment profile | Per model: `REMOTE_<X>_ENDPOINT` when given, else the Models-as-a-Service model (`MAAS_<X>_MODEL`), else the chart serves it in the project on the smallest GPU or MIG slice of a queue with quota that fits (10 GB for Whisper and BGE-M3, 24 GB for the language model). Without enough quota it stops with what is required, what the queues have, and the options (book GPUs, or remote endpoints). The overlay holds the endpoints, the GPU resource, the queue label (`models.podLabels`) and a 10 GiB n8n volume |
+| 3 Project check | Nothing is installed. Checks the project and that the queue still has quota, and warns when the booking ends within two hours |
+| 4 TURN certificate | The cluster's wildcard certificate is out of reach, so a namespaced cert-manager Issuer requests one for `livekit-turn-<project>.<apps domain>` from Let's Encrypt (HTTP-01; the e-mail defaults to the login). When the certificate is not Ready within ten minutes, the setup continues without TURN; `--step 4`, then `--step 6`, tries again later |
+| 5 Keys and integrations | As on the cluster path, plus one Models-as-a-Service API key, created with your login and bound to a subscription that includes every model used there (`MAAS_API_KEY` in `~/secrets.env`; `LLM_API_KEY` and `EMBEDDINGS_API_KEY` get its value). Nothing to do in a browser |
+| 6 Deploy with Helm | `scripts/deploy.sh`: `helm upgrade --install` of release `assistant` with `chart/values-demo-cluster.yaml` and the overlay, then waits for the workloads, the models (reporting Kueue workloads that are not admitted, with the reason) and every pod, and runs `helm test` |
+| 7 to 9 | As on the cluster path |
+
+Models served in the project run only while the GPU booking lasts: when it ends Kueue stops
+them, and voice (Whisper) or search (BGE-M3) stop with them, while the models from
+Models-as-a-Service keep working. Book again, then `scripts/setup.sh --step 2` if the queue or
+the slice changed, and `--step 6`. To remove the demo: `helm uninstall assistant -n <project>`,
+then `oc delete pvc -l app.kubernetes.io/instance=assistant -n <project>`.
 
 ## Resuming, re-running, starting over
 

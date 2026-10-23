@@ -1,33 +1,71 @@
 #!/usr/bin/env bash
-# Interactive, resumable setup of the demo on a fresh cluster. Runs on the bastion host,
-# logged in to the cluster as an administrator, from a clone of this repository.
+# Interactive, resumable setup of the demo on a cluster, from a clone of this repository. Runs
+# on the bastion host or on a Mac or Linux laptop, logged in to the cluster with oc.
 #
 #   scripts/setup.sh            discover the cluster, show progress, run every remaining step in order;
 #                               it only stops for values it cannot know (keys, browser work) or on failure
 #   scripts/setup.sh --status   discovery and progress only, changes nothing
 #   scripts/setup.sh --step N   run step N (again), then stop
-#   scripts/setup.sh --yes      never prompt: keys come from ~/secrets.env, missing ones are skipped (no Let's Encrypt e-mail)
+#   scripts/setup.sh --yes      never prompt: keys come from ~/secrets.env, missing ones are skipped
 #   scripts/setup.sh --reset    forget the saved progress (the cluster is not touched)
 #
-# Without a GPU the script stops and says what the demo needs. To use remote model endpoints
-# instead, run it with PROFILE=remote and REMOTE_LLM_ENDPOINT, REMOTE_LLM_MODEL,
+# The access decides the path. A cluster-admin gets the full setup: operators, GPU sharing,
+# Argo CD. A user who is only an admin of one project (a shared cluster) gets the namespace
+# path: models from the cluster's Models-as-a-Service where it has them, the others served in
+# the project on a GPU queue (Kueue), a TURN certificate from cert-manager, a Helm install.
+# ACCESS=namespace forces that path; PROJECT picks the project (default: the current one).
+#
+# With cluster-admin and no GPU the script stops and says what the demo needs. To use remote
+# model endpoints instead, run it with PROFILE=remote and REMOTE_LLM_ENDPOINT, REMOTE_LLM_MODEL,
 # REMOTE_STT_ENDPOINT, REMOTE_EMB_ENDPOINT (and the keys in ~/secrets.env).
+#
+# On macOS missing tools (a current bash, oc, helm, jq, ...) are installed with Homebrew,
+# which the script offers to install first.
 #
 # Progress and discovered facts are kept in ~/.assistant-setup/state.env. Every run is logged
 # to ~/.assistant-setup/logs/setup-<timestamp>.log (the bootstrap and deploy steps add their
 # own logs next to it); DEBUG=1 also writes a full command trace to <log>.trace. Every step
 # checks the cluster before doing anything, so work done by hand or by an earlier run is
 # recognised and not repeated.
+
+# ---------------------------------------------------------------- macOS ---------------------
+# Written for bash 3.2 (what macOS ships) up to the exec: the rest of the script and the
+# scripts it calls need bash 4 or later, so on a Mac they run under Homebrew's bash.
+IS_MAC=0; [ "$(uname -s)" = Darwin ] && IS_MAC=1
+YES=0; case " $* " in *" --yes "*|*" -y "*) YES=1;; esac
+brew_env() { local b; for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do if [ -x "$b" ]; then eval "$("$b" shellenv)"; return 0; fi; done; return 1; }
+ensure_brew() {  # Homebrew, installed with its official installer after asking (it asks for the Mac password once)
+  if command -v brew >/dev/null 2>&1 || brew_env; then return 0; fi
+  echo "  Homebrew (https://brew.sh) installs the tools this setup needs on macOS, and it is not installed."
+  if [ "$YES" != 1 ]; then
+    local a; printf '  Install Homebrew now with its official installer? [Y/n]: '; read -r a
+    case "$a" in ""|[Yy]*) ;; *) echo "  Install Homebrew from https://brew.sh, then run scripts/setup.sh again."; return 1;; esac
+  fi
+  NONINTERACTIVE=$YES /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && brew_env
+}
+[ "$IS_MAC" = 1 ] && brew_env
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  [ "$IS_MAC" = 1 ] || { echo "bash 4 or later is required (this is bash $BASH_VERSION)"; exit 1; }
+  if ! { command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix)/bin/bash" ]; }; then
+    echo "macOS ships bash $BASH_VERSION; the setup needs bash 4 or later, installing it with Homebrew (brew install bash)"
+    ensure_brew && brew install bash || { echo "could not install bash with Homebrew; run: brew install bash"; exit 1; }
+  fi
+  exec "$(brew --prefix)/bin/bash" "$0" "$@"
+fi
+
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="$HOME/bin:$HOME/.local/bin:$PATH"   # tools this script installs for the user go to ~/bin
 STATE_DIR="${STATE_DIR:-$HOME/.assistant-setup}"
 STATE="$STATE_DIR/state.env"
 SECRETS_FILE="${SECRETS_FILE:-$HOME/secrets.env}"
+PROJECT_ENV="${PROJECT:-}"; ACCESS_ENV="${ACCESS:-}"; DOMAIN_ENV="${DOMAIN:-}"
 PROJECT="${PROJECT:-voice-avatar-assistant}"
 LLM_NAME="${LLM_NAME:-llama-32-3b-instruct}"
-YES=0; MODE=next; ONLY=""
-for a in "$@"; do case "$a" in --status) MODE=status;; --yes|-y) YES=1;; --reset) MODE=reset;; --step) MODE=step;; [0-9]*) ONLY="$a";; -h|--help) sed -n 2,14p "$0"; exit 0;; esac; done
+# namespace path: the Models-as-a-Service model names (patterns) used when the service has them
+MAAS_LLM_MODEL="${MAAS_LLM_MODEL:-llama-32-3b}"; MAAS_STT_MODEL="${MAAS_STT_MODEL:-whisper.*}"; MAAS_EMB_MODEL="${MAAS_EMB_MODEL:-bge-m3}"
+MODE=next; ONLY=""
+for a in "$@"; do case "$a" in --status) MODE=status;; --yes|-y) YES=1;; --reset) MODE=reset;; --step) MODE=step;; [0-9]*) ONLY="$a";; -h|--help) sed -n 2,29p "$0"; exit 0;; esac; done
 mkdir -p "$STATE_DIR/logs"; touch "$STATE"; chmod 700 "$STATE_DIR"
 [ "$MODE" = reset ] && { rm -f "$STATE"; touch "$STATE"; echo "progress forgotten ($STATE)"; exit 0; }
 RUN_LOG="$STATE_DIR/logs/setup-$(date +%Y%m%d-%H%M%S).log"
@@ -79,6 +117,38 @@ confirm() { local ans; [ "$YES" = 1 ] && return 0; read -r -p "  $1 [Y/n]: " ans
 logfile() { echo "$STATE_DIR/logs/$1-$(date +%Y%m%d-%H%M%S).log"; }
 # shellcheck disable=SC1090
 . "$STATE" 2>/dev/null || true
+[ -n "$PROJECT_ENV" ] && PROJECT=$PROJECT_ENV   # the environment wins over the project saved by an earlier run
+
+# ---------------------------------------------------------------- tools ---------------------
+# have_tool <command>: usable, not just present (macOS has a git stub that opens an installer
+# dialog, and LibreSSL as openssl)
+have_tool() { case "$1" in git) git --version >/dev/null 2>&1;; openssl) openssl version 2>/dev/null | grep -q '^OpenSSL';; *) command -v "$1" >/dev/null 2>&1;; esac; }
+# ensure_tool <command> [quiet]: present, or installed: with Homebrew on macOS (after Homebrew
+# itself), with dnf (after asking) or the OpenShift mirror (oc) on Linux
+ensure_tool() {
+  local t=$1 quiet=${2:-} f arch
+  if have_tool "$t"; then [ -n "$quiet" ] || ok "$t"; return 0; fi
+  if [ "$IS_MAC" = 1 ]; then
+    case "$t" in oc) f=openshift-cli;; python3) f=python;; openssl) f=openssl@3;; *) f=$t;; esac
+    note "$t not found; installing it with Homebrew (brew install $f)"
+    if ensure_brew && brew install "$f" >/dev/null; then
+      [ "$t" = openssl ] && export PATH="$(brew --prefix openssl@3)/bin:$PATH"
+      have_tool "$t" && { ok "$t (installed with Homebrew)"; return 0; }
+    fi
+    bad "could not install $t; run: brew install $f"; return 1
+  fi
+  if [ "$t" = oc ]; then
+    arch=""; [ "$(uname -m)" = aarch64 ] && arch=-arm64
+    note "oc not found; installing it into $HOME/bin from mirror.openshift.com"
+    mkdir -p "$HOME/bin"
+    if curl -fsSL --max-time 300 "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux$arch.tar.gz" | tar -xzf - -C "$HOME/bin" oc 2>/dev/null && have_tool oc; then ok "oc $(oc version --client -o json | jq -r .releaseClientVersion 2>/dev/null)"; return 0; fi
+    bad "could not install oc; get it from https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/"; return 1
+  fi
+  if command -v dnf >/dev/null && confirm "$t is missing; install it with: sudo dnf install -y $t ?"; then
+    sudo dnf install -y "$t" >/dev/null && have_tool "$t" && { ok "$t (installed with dnf)"; return 0; }
+  fi
+  bad "$t missing (sudo dnf install -y $t)"; return 1
+}
 
 # ---------------------------------------------------------------- login ---------------------
 # Logs in when the bastion is not (or its token expired): proposes the API URL it can find,
@@ -87,6 +157,7 @@ logfile() { echo "$STATE_DIR/logs/$1-$(date +%Y%m%d-%H%M%S).log"; }
 # none: install it into ~/bin from the cluster's own download site, else from get.helm.sh.
 ensure_helm() {
   command -v helm >/dev/null && { ok "helm $(helm version --short 2>/dev/null | cut -d+ -f1)"; return 0; }
+  [ "$IS_MAC" = 1 ] && { ensure_tool helm; return; }
   local arch; arch=$(uname -m); case "$arch" in x86_64) arch=amd64;; aarch64) arch=arm64;; esac
   mkdir -p "$HOME/bin"
   note "helm not found; installing it into $HOME/bin"
@@ -105,7 +176,7 @@ ensure_helm() {
   return 1
 }
 ensure_login() {
-  command -v oc >/dev/null || { bad "oc is not installed on this host (https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/)"; return 1; }
+  ensure_tool oc quiet || return 1
   if oc whoami >/dev/null 2>&1; then return 0; fi
   say "${B}Cluster login${N}"
   local reason; reason=$(oc whoami 2>&1 | head -1); note "oc whoami: ${reason:-no session}"
@@ -118,12 +189,21 @@ ensure_login() {
   local api user pass
   ask api "API URL (from the provisioning e-mail, https://api.<guid>.<base domain>:6443)" "${uniq[0]:-}"
   [ -n "$api" ] || { bad "an API URL is needed"; return 1; }
-  ask user "User" "${LOGIN_USER:-kubeadmin}"
+  ask user "User (type token to log in with an API token instead)" "${LOGIN_USER:-kubeadmin}"
+  if [ "$user" = token ]; then
+    # clusters with single sign-on: the token comes from the console, <your name> > Copy login command
+    ask_secret pass "API token (console: your name, top right > Copy login command > Display token)"
+    [ -n "$pass" ] || { bad "a token is needed"; return 1; }
+    if oc login "$api" --token="$pass" >/dev/null 2>&1 || oc login "$api" --token="$pass" --insecure-skip-tls-verify=true >/dev/null 2>&1; then
+      ok "logged in to $api as $(oc whoami)"; save API_URL "$api"; save LOGIN_USER token; return 0
+    fi
+    bad "login failed: $(oc login "$api" --token="$pass" --insecure-skip-tls-verify=true 2>&1 | tail -1)"; return 1
+  fi
   ask_secret pass "Password for $user"
   [ -n "$pass" ] || { bad "a password is needed"; return 1; }
   if oc login "$api" -u "$user" -p "$pass" >/dev/null 2>&1 || oc login "$api" -u "$user" -p "$pass" --insecure-skip-tls-verify=true >/dev/null 2>&1; then
     ok "logged in to $api as $(oc whoami)"; save API_URL "$api"; save LOGIN_USER "$user"
-    oc auth can-i create namespaces >/dev/null 2>&1 && ok "cluster-admin permissions" || warn "this user cannot create cluster resources; the bootstrap needs kubeadmin or a cluster-admin"
+    oc auth can-i '*' '*' --all-namespaces >/dev/null 2>&1 && ok "cluster-admin permissions" || note "no cluster-admin: the setup stays inside one project (namespace path)"
     return 0
   fi
   bad "login failed: $(oc login "$api" -u "$user" -p "$pass" --insecure-skip-tls-verify=true 2>&1 | tail -1)"
@@ -141,11 +221,41 @@ discover() {
   API=""; USER_NAME=""; OCP_VERSION=""; DOMAIN="${DOMAIN:-}"; NODE_COUNT=0; INSTANCE=""; GPUS="${GPUS:-0}"; GPU_PRODUCT=""; GPU_MEMORY=""; GPU_REPLICAS=""; GPU_ALLOC=0
   RHOAI_VERSION=""; DSC=""; KSERVE=""; OP_NFD=no; OP_GPU=no; OP_CM=no; OP_GITOPS=no; LLM_NS="${LLM_NS:-}"; LLM_READY=""; LLM_SHARE=""
   PROJECT_EXISTS=no; ARGO_READY=no; TURN_SECRET=no; SECRETS_IN_CLUSTER=no; APP_STATE=""; ISVC_TOTAL=0; ISVC_READY=0; PODS_NOT_READY=1; FRONTEND_URL=""; N8N_URL=""; DOCS_INDEXED=""; DOCS_CLASSIFIED=""
+  ACCESS=""; KUBE_VERSION=""; PROJECT_ADMIN=no; KSERVE_API=no; KUEUE=no; LOCAL_QUEUES=""; GPU_OFFERS=""; MAAS_URL="${MAAS_URL:-}"; MAAS_IDS=""; HELM_STATE=""; CERT_MANAGER=no
   LOGGED_IN=0; command -v oc >/dev/null && oc whoami >/dev/null 2>&1 && LOGGED_IN=1
   [ "$LOGGED_IN" = 1 ] || return
   progress() { [ "${QUIET_DISCOVERY:-0}" = 1 ] || printf '  %s..%s %s\n' "$D" "$N" "$1"; }
-  progress "cluster and nodes"
+  progress "cluster and access"
   API=$(oc whoami --show-server); USER_NAME=$(oc whoami)
+  ACCESS=$ACCESS_ENV; [ -n "$ACCESS" ] || { oc auth can-i '*' '*' --all-namespaces >/dev/null 2>&1 && ACCESS=cluster || ACCESS=namespace; }
+  if [ "$ACCESS" = namespace ]; then
+    STEPS[0]="Access and prerequisites"; STEPS[2]="Project check"; STEPS[5]="Deploy with Helm"
+    discover_namespace
+  else
+    discover_cluster
+  fi
+  progress "project and application"
+  PROJECT_EXISTS=$(oc get namespace "$PROJECT" >/dev/null 2>&1 && echo yes || echo no)
+  TURN_SECRET=$(oc get secret livekit-turn-tls -n "$PROJECT" >/dev/null 2>&1 && echo yes || echo no)
+  SECRETS_IN_CLUSTER=$(oc get secret assistant-integrations -n "$PROJECT" >/dev/null 2>&1 && echo yes || echo no)
+  if [ "$ACCESS" = cluster ]; then
+    ARGO_READY=$([ "$(oc get deployment openshift-gitops-server -n openshift-gitops -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ] && echo yes || echo no)
+    APP_STATE=$(oc get applications.argoproj.io voice-avatar-assistant -n openshift-gitops -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null)
+  elif command -v helm >/dev/null; then
+    HELM_STATE=$(helm status assistant -n "$PROJECT" -o json 2>/dev/null | jq -r '.info.status // empty')
+  fi
+  ISVC_TOTAL=$(oc get isvc -n "$PROJECT" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+  ISVC_READY=$(oc get isvc -n "$PROJECT" -o json 2>/dev/null | jq '[.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status=="True"))] | length')
+  PODS_NOT_READY=$(oc get pods -n "$PROJECT" --no-headers 2>/dev/null | grep -v -E 'Running|Completed' | wc -l | tr -d ' ')
+  FRONTEND_URL=$(oc get route frontend -n "$PROJECT" -o jsonpath='https://{.spec.host}' 2>/dev/null)
+  N8N_URL=$(oc get route n8n -n "$PROJECT" -o jsonpath='https://{.spec.host}' 2>/dev/null)
+  DOCS_INDEXED=""; DOCS_CLASSIFIED=""
+  if [ "$PODS_NOT_READY" = 0 ] && [ -n "$FRONTEND_URL" ]; then
+    read -r DOCS_INDEXED DOCS_CLASSIFIED < <(doc_counts)
+  fi
+}
+discover_cluster() {
+  progress "cluster and nodes"
   OCP_VERSION=$(oc get clusterversion version -o jsonpath='{.status.desired.version}' 2>/dev/null)
   DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}' 2>/dev/null)
   NODE_COUNT=$(oc get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
@@ -178,22 +288,45 @@ discover() {
     LLM_READY=$(oc get isvc "$LLM_NAME" -n "$LLM_NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
     LLM_SHARE=$(oc get isvc "$LLM_NAME" -n "$LLM_NS" -o json 2>/dev/null | jq -r '.spec.predictor.model.args // [] | .[] | select(startswith("--gpu-memory-utilization")) | sub("^--gpu-memory-utilization=?";"")' | head -1)
   fi
-  progress "project and application"
-  PROJECT_EXISTS=$(oc get namespace "$PROJECT" >/dev/null 2>&1 && echo yes || echo no)
-  ARGO_READY=$([ "$(oc get deployment openshift-gitops-server -n openshift-gitops -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ] && echo yes || echo no)
-  TURN_SECRET=$(oc get secret livekit-turn-tls -n "$PROJECT" >/dev/null 2>&1 && echo yes || echo no)
-  SECRETS_IN_CLUSTER=$(oc get secret assistant-integrations -n "$PROJECT" >/dev/null 2>&1 && echo yes || echo no)
-  APP_STATE=$(oc get applications.argoproj.io voice-avatar-assistant -n openshift-gitops -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null)
-  ISVC_TOTAL=$(oc get isvc -n "$PROJECT" --no-headers 2>/dev/null | wc -l | tr -d ' ')
-  ISVC_READY=$(oc get isvc -n "$PROJECT" -o json 2>/dev/null | jq '[.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status=="True"))] | length')
-  PODS_NOT_READY=$(oc get pods -n "$PROJECT" --no-headers 2>/dev/null | grep -v -E 'Running|Completed' | wc -l | tr -d ' ')
-  FRONTEND_URL=$(oc get route frontend -n "$PROJECT" -o jsonpath='https://{.spec.host}' 2>/dev/null)
-  N8N_URL=$(oc get route n8n -n "$PROJECT" -o jsonpath='https://{.spec.host}' 2>/dev/null)
-  DOCS_INDEXED=""; DOCS_CLASSIFIED=""
-  if [ "$PODS_NOT_READY" = 0 ] && [ -n "$FRONTEND_URL" ]; then
-    read -r DOCS_INDEXED DOCS_CLASSIFIED < <(doc_counts)
+}
+# A project admin cannot read nodes, operators or the ingress configuration: the facts come
+# from the project, the API groups, the console URL, Kueue and the Models-as-a-Service API
+discover_namespace() {
+  progress "project, GPU queues and Models-as-a-Service"
+  KUBE_VERSION=$(oc version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion // empty')
+  OCP_VERSION=$(oc get clusterversion version -o jsonpath='{.status.desired.version}' 2>/dev/null)
+  DOMAIN=$DOMAIN_ENV
+  if [ -z "$DOMAIN" ]; then local c; c=$(oc whoami --show-console 2>/dev/null); c=${c#https://}; c=${c%%/*}; [ "${c#*.}" != "$c" ] && DOMAIN=${c#*.}; fi
+  # the project: the one given or saved, else the current one, as long as this user administers it
+  is_admin() { oc auth can-i create rolebindings -n "$1" >/dev/null 2>&1 && oc auth can-i create secrets -n "$1" >/dev/null 2>&1; }
+  if [ -z "$PROJECT_ENV" ] && ! is_admin "$PROJECT"; then local cur; cur=$(oc project -q 2>/dev/null); [ -n "$cur" ] && is_admin "$cur" && PROJECT=$cur; fi
+  is_admin "$PROJECT" && PROJECT_ADMIN=yes
+  # captured before matching: grep -q in a pipe can end oc early, which pipefail counts as a failure
+  local apis; apis=$'\n'$(oc api-resources --api-group=serving.kserve.io -o name 2>/dev/null; oc api-resources --api-group=cert-manager.io -o name 2>/dev/null)
+  [[ "$apis" == *$'\n'inferenceservices.* ]] && KSERVE_API=yes
+  [[ "$apis" == *$'\n'issuers.* ]] && CERT_MANAGER=yes
+  # Kueue: a model pod needs a LocalQueue whose ClusterQueue has GPU quota (on a shared cluster,
+  # a booking). GPU_OFFERS lines: <local queue> <resource> <units> <until, epoch or empty>
+  local lq cq
+  while read -r lq cq; do
+    [ -n "$lq" ] || continue
+    KUEUE=yes; LOCAL_QUEUES+="${LOCAL_QUEUES:+ }$lq"
+    GPU_OFFERS+="$(oc get clusterqueues.kueue.x-k8s.io "$cq" -o json 2>/dev/null | jq -r --arg lq "$lq" '(.metadata.labels["rhai-tmm.dev/until"] // "") as $u | .spec.resourceGroups[].flavors[].resources[] | select(.name | test("^nvidia.com/(gpu|mig-)")) | select((.nominalQuota | tostring | tonumber? // 0) > 0) | "\($lq) \(.name) \(.nominalQuota) \($u)"')"$'\n'
+  done < <(oc get localqueues.kueue.x-k8s.io -n "$PROJECT" -o json 2>/dev/null | jq -r '.items[]? | "\(.metadata.name) \(.spec.clusterQueue)"')
+  [ -n "$(printf '%s' "$GPU_OFFERS" | tr -d '[:space:]')" ] || GPU_OFFERS=""
+  # Models-as-a-Service (OpenShift AI): the model list answers to the user's own token
+  [ -n "$MAAS_URL" ] || { [ -n "$DOMAIN" ] && MAAS_URL="https://maas.$DOMAIN"; }
+  if [ -n "$MAAS_URL" ]; then
+    MAAS_IDS=$(curl -s --max-time 15 -H "Authorization: Bearer $(oc whoami -t 2>/dev/null)" "$MAAS_URL/maas-api/v1/models" 2>/dev/null | jq -r '.data[]? | select(.ready != false) | .id' 2>/dev/null | tr '\n' ' ')
   fi
 }
+# maas_find <name pattern>: the id of the first MaaS model whose name matches; maas_endpoint <id>:
+# its OpenAI-compatible base URL (ids look like publishers/<namespace>/models/<name>)
+val() { printf '%s' "${!1:-}"; }   # the value of the variable named $1
+maas_find() { local id; for id in $MAAS_IDS; do case "$id" in */models/*) [[ "${id##*/}" =~ ^($1)$ ]] && { echo "$id"; return 0; };; esac; done; return 1; }
+maas_endpoint() { local p=${1%/models/*}; echo "$MAAS_URL/${p##*/}/${1##*/}/v1"; }
+gpu_offers() { printf '%s' "$GPU_OFFERS" | grep -v '^[[:space:]]*$'; }
+until_text() { [ -n "$1" ] || return 0; if [ "$IS_MAC" = 1 ]; then date -r "$1" '+%a %d %b %H:%M'; else date -d "@$1" '+%a %d %b %H:%M'; fi; }
 
 # ---------------------------------------------------------------- profile -------------------
 # gpu:    every GPU on the cluster is used, each advertised 4 times through time-slicing so the
@@ -207,14 +340,71 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
   remote)
     jq -n --arg le "$REMOTE_LLM_ENDPOINT" --arg lm "$REMOTE_LLM_MODEL" --arg se "$REMOTE_STT_ENDPOINT" --arg sm "$REMOTE_STT_MODEL" --arg ee "$REMOTE_EMB_ENDPOINT" --arg em "$REMOTE_EMB_MODEL" \
       '{models:{llm:{deploy:false,endpoint:$le,servedModelName:$lm},stt:{deploy:false,endpoint:$se,servedModelName:$sm},embeddings:{deploy:false,endpoint:$ee,servedModelName:$em},guardrails:{provider:"none",deploy:false}}}' ;;
+  namespace)
+    # per model: a remote endpoint (Models-as-a-Service or REMOTE_*), or the chart on a GPU of the
+    # queue, which gets the whole card or MIG slice (hence the higher memory shares)
+    jq -n --arg q "${GPU_QUEUE:-}" \
+      --arg ls "$MODEL_LLM_SRC" --arg lu "${MODEL_LLM_URL:-}" --arg ln "${MODEL_LLM_NAME:-}" --arg lg "${MODEL_LLM_GPU:-}" \
+      --arg ss "$MODEL_STT_SRC" --arg su "${MODEL_STT_URL:-}" --arg sn "${MODEL_STT_NAME:-}" --arg sg "${MODEL_STT_GPU:-}" \
+      --arg es "$MODEL_EMB_SRC" --arg eu "${MODEL_EMB_URL:-}" --arg en "${MODEL_EMB_NAME:-}" --arg eg "${MODEL_EMB_GPU:-}" '
+      def gpu($g): if $g == "" or $g == "nvidia.com/gpu" then {} else {resources: {requests: {"nvidia.com/gpu": null, ($g): "1"}, limits: {"nvidia.com/gpu": null, ($g): "1"}}} end;
+      def model($s; $u; $n; $g; $chart): if $s == "chart" then {deploy: true} + gpu($g) + $chart else {deploy: false, endpoint: $u, servedModelName: $n} end;
+      {models: ({
+         llm: model($ls; $lu; $ln; $lg; {servedModelName: "llama-3.1-8b-instruct"}),
+         stt: model($ss; $su; $sn; $sg; {args: ["--gpu-memory-utilization=0.85", "--max-num-seqs=8", "--enforce-eager"]}),
+         embeddings: model($es; $eu; $en; $eg; {args: ["--runner=pooling", "--max-model-len=8192", "--gpu-memory-utilization=0.85", "--max-num-seqs=8", "--enforce-eager"]}),
+         guardrails: {provider: "none", deploy: false}}
+       + (if $q != "" and ([$ls, $ss, $es] | index("chart")) then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end)),
+       n8n: {storage: "10Gi"}}' ;;
   *)
     jq -n --argjson d "$llm_deploy" '{models:{llm:{deploy:$d,args:["--max-model-len=8192","--gpu-memory-utilization=0.45","--max-num-seqs=8","--enforce-eager","--enable-auto-tool-choice","--tool-call-parser=llama3_json"]},stt:{deploy:true,args:["--gpu-memory-utilization=0.15","--max-num-seqs=8","--enforce-eager"]},embeddings:{args:["--runner=pooling","--max-model-len=8192","--gpu-memory-utilization=0.12","--max-num-seqs=8","--enforce-eager"]},guardrails:{provider:"none",deploy:false}}}' ;;
   esac > "$STATE_DIR/values-object.json"
 }
+# Namespace profile, per model: REMOTE_<X>_ENDPOINT when given, else the Models-as-a-Service
+# model named MAAS_<X>_MODEL, else the chart's own model on a GPU of a Kueue queue with quota.
+# A chart model needs this much GPU memory (GB): the 8B language model 24, Whisper and BGE-M3 10.
+model_title() { case "$1" in LLM) echo "language model";; STT) echo "speech-to-text";; EMB) echo "embeddings";; esac; }
+chart_model() { case "$1" in LLM) echo "Llama 3.1 8B Instruct (4-bit)";; STT) echo "Whisper large-v3-turbo";; EMB) echo "BGE-M3";; esac; }
+gpu_size() { case "$1" in nvidia.com/mig-*) local s=${1##*.}; s=${s%gb}; echo "$s";; *) echo 999;; esac; }   # GB; a whole card counts as plenty
+# assign_gpus <queue> <kind...>: gives each kind the smallest resource of the queue that fits;
+# prints "<kind> <resource>" lines, or fails when the queue's quota cannot hold them all
+assign_gpus() {
+  local q=$1; shift; local -a res=() units=() out=(); local kind i best min lq r u
+  while read -r lq r u _; do [ "$lq" = "$q" ] && { res+=("$r"); units+=("$u"); }; done < <(gpu_offers)
+  for kind in "$@"; do
+    case "$kind" in LLM) min=24;; *) min=10;; esac
+    best=""
+    for i in "${!res[@]}"; do
+      [ "${units[$i]}" -gt 0 ] && [ "$(gpu_size "${res[$i]}")" -ge "$min" ] || continue
+      if [ -z "$best" ] || [ "$(gpu_size "${res[$i]}")" -lt "$(gpu_size "${res[$best]}")" ]; then best=$i; fi
+    done
+    [ -n "$best" ] || return 1
+    units[$best]=$((units[best] - 1)); out+=("$kind ${res[$best]}")
+  done
+  printf '%s\n' "${out[@]}"
+}
 
 # ---------------------------------------------------------------- status --------------------
 STEPS=("Cluster and prerequisites" "Deployment profile" "Cluster bootstrap" "TURN certificate" "Keys and integrations" "Deploy with Argo CD" "n8n workflows" "Sample documents" "Verification")
+turn_state() {  # step 4, both paths
+  if [ "$TURN_SECRET" = yes ]; then echo "done|secret livekit-turn-tls present"
+  elif [ -n "${TURN_SKIPPED:-}" ]; then echo "done|TURN skipped: voice works on open networks only; scripts/setup.sh --step 4 tries again"
+  elif [ "$PROJECT_EXISTS" != yes ]; then echo "todo|after the bootstrap"; else echo "todo|secret missing"; fi
+}
+model_summary() { local k s out=""; for k in LLM STT EMB; do s=$(val "MODEL_${k}_SRC"); case "$s" in maas|remote) out+="$(model_title $k) $s $(val "MODEL_${k}_NAME"), ";; chart) out+="$(model_title $k) in the project ($(val "MODEL_${k}_GPU")), ";; esac; done; echo "${out%, }"; }
+step_state_namespace() {
+  case "$1" in
+  1) if [ "$LOGGED_IN" != 1 ]; then echo "attention|not logged in to a cluster"; elif [ "$PROJECT_ADMIN" != yes ]; then echo "attention|$USER_NAME is not an admin of project $PROJECT: run with PROJECT=<a project you administer>";
+     elif [ -n "${STEP_1_DONE:-}" ]; then echo "done|project $PROJECT (admin), Kubernetes $KUBE_VERSION, ${LOCAL_QUEUES:+Kueue queues $LOCAL_QUEUES, }$(echo $MAAS_IDS | wc -w | tr -d ' ') Models-as-a-Service model(s)"; else echo "todo|project $PROJECT (admin); tools and permissions to check"; fi ;;
+  2) if [ "${PROFILE:-}" = namespace ]; then echo "done|namespace: $(model_summary)${GPU_QUEUE:+, queue $GPU_QUEUE}"; else echo "todo|namespace profile: Models-as-a-Service where it has the model, else a GPU queue"; fi ;;
+  3) if [ "$PROJECT_ADMIN" = yes ] && [ -n "${STEP_3_DONE:-}" ]; then echo "done|project $PROJECT ready${GPU_QUEUE:+, GPU queue $GPU_QUEUE}"; else echo "todo|project $PROJECT, permissions and GPU queue to check"; fi ;;
+  4) turn_state ;;
+  6) if [ "$HELM_STATE" = deployed ] && [ "${PODS_NOT_READY:-1}" = 0 ]; then echo "done|Helm release assistant deployed, ${ISVC_READY:-0}/${ISVC_TOTAL:-0} models Ready"; elif [ -n "$HELM_STATE" ]; then echo "attention|Helm release $HELM_STATE, ${PODS_NOT_READY} pod(s) not ready"; else echo "todo|not deployed"; fi ;;
+  *) ACCESS=cluster step_state "$1" ;;
+  esac
+}
 step_state() {  # prints done|todo|attention and a detail
+  [ "$ACCESS" = namespace ] && { step_state_namespace "$1"; return; }
   case "$1" in
   1) if [ "$LOGGED_IN" != 1 ]; then echo "attention|not logged in to a cluster"; elif [ -z "$RHOAI_VERSION" ]; then echo "attention|OpenShift AI not found";
      elif [[ "$RHOAI_VERSION" == 2.* ]]; then echo "attention|OpenShift AI $RHOAI_VERSION; 3.x is required"; elif [ "$KSERVE" != Managed ]; then echo "todo|KServe is ${KSERVE:-unset} (bootstrap fixes it)";
@@ -222,7 +412,7 @@ step_state() {  # prints done|todo|attention and a detail
   2) if [ -n "${PROFILE:-}" ]; then echo "done|$PROFILE${LLM_NS:+; language model $LLM_NS/$LLM_NAME}"; else echo "todo|suggested: $(suggest_profile)"; fi ;;
   3) if [ "$PROJECT_EXISTS" = yes ] && [ "$ARGO_READY" = yes ] && [ -n "${STEP_3_DONE:-}" ]; then echo "done|project, Argo CD, GPU sharing (${GPU_ALLOC:-?} schedulable GPUs)";
      elif [ "$PROJECT_EXISTS" = yes ] && [ "$ARGO_READY" = yes ]; then echo "todo|project and Argo CD exist; run to verify GPU sharing and the model share"; else echo "todo|project ${PROJECT_EXISTS}, Argo CD ${ARGO_READY}"; fi ;;
-  4) if [ "$TURN_SECRET" = yes ]; then echo "done|secret livekit-turn-tls present"; elif [ "$PROJECT_EXISTS" != yes ]; then echo "todo|after the bootstrap"; else echo "todo|secret missing"; fi ;;
+  4) turn_state ;;
   5) if [ "$SECRETS_IN_CLUSTER" = yes ] && [ -n "${STEP_5_DONE:-}" ]; then echo "done|$SECRETS_FILE and the cluster secrets"; elif [ "$SECRETS_IN_CLUSTER" = yes ]; then echo "todo|cluster secrets exist; run to review the keys"; elif [ -f "$SECRETS_FILE" ]; then echo "todo|$SECRETS_FILE exists, not yet applied"; else echo "todo|no $SECRETS_FILE yet"; fi ;;
   6) if [ "$APP_STATE" = "Synced/Healthy" ] && [ "${PODS_NOT_READY:-1}" = 0 ]; then echo "done|application Synced/Healthy, ${ISVC_READY:-0}/${ISVC_TOTAL:-0} models Ready"; elif [ -n "$APP_STATE" ]; then echo "attention|application $APP_STATE, ${PODS_NOT_READY} pod(s) not ready"; else echo "todo|not deployed"; fi ;;
   7) if [ -n "${STEP_7_DONE:-}" ]; then echo "done|owner account, API key, workflows active"; elif [ -n "$N8N_URL" ]; then echo "todo|$N8N_URL"; else echo "todo|after the deployment"; fi ;;
@@ -232,7 +422,8 @@ step_state() {  # prints done|todo|attention and a detail
 }
 show_status() {
   say ""; say "${B}Enterprise voice avatar assistant: setup${N}"
-  if [ "$LOGGED_IN" = 1 ]; then say "  cluster $API as $USER_NAME, apps domain $DOMAIN"; else say "  ${R}not logged in${N}: the script asks for the API URL, user and password when run"; fi
+  if [ "$LOGGED_IN" = 1 ]; then say "  cluster $API as $USER_NAME, apps domain ${DOMAIN:-unknown}"; else say "  ${R}not logged in${N}: the script asks for the API URL, user and password (or a token) when run"; fi
+  if [ "$ACCESS" = namespace ]; then say "  access: admin of project $PROJECT only, so the namespace path (Helm, no cluster changes)"; elif [ "$ACCESS" = cluster ]; then say "  access: cluster-admin, so the full path (operators, GPU sharing, Argo CD)"; fi
   say "  progress file $STATE; this run's log $RUN_LOG"; say ""
   NEXT=""
   for i in 1 2 3 4 5 6 7 8 9; do
@@ -248,8 +439,9 @@ show_status() {
 step1() {
   say "${B}Step 1: cluster and prerequisites${N}"
   [ "$LOGGED_IN" = 1 ] || { ensure_login && discover || return 1; }
-  for t in oc jq git openssl curl python3; do command -v $t >/dev/null && ok "$t" || { bad "$t missing (sudo dnf install -y $t)"; return 1; }; done
+  for t in oc jq git openssl curl python3; do ensure_tool "$t" || return 1; done
   ensure_helm || return 1
+  [ "$ACCESS" = namespace ] && { step1_namespace; return; }
   oc auth can-i create namespaces >/dev/null 2>&1 && ok "cluster-admin permissions" || { bad "this user cannot create cluster resources; use kubeadmin"; return 1; }
   ok "OpenShift $OCP_VERSION on $NODE_COUNT node(s), $INSTANCE"
   case "$OCP_VERSION" in 4.1[0-8].*) warn "OpenShift AI 3.x needs OpenShift 4.19.9 or later";; esac
@@ -264,7 +456,31 @@ step1() {
   save OCP_VERSION "$OCP_VERSION"; save RHOAI_VERSION "$RHOAI_VERSION"; save GPUS "${GPUS:-0}"; save DOMAIN "$DOMAIN"; save LLM_NS "${LLM_NS:-}"
   [ "$KSERVE" = Managed ]
 }
+step1_namespace() {
+  ok "namespace access on $API as $USER_NAME: no cluster-admin, so the setup stays inside one project and installs with Helm"
+  [ -n "$DOMAIN" ] && ok "apps domain $DOMAIN (from the console URL)" || { bad "could not work out the apps domain; run with DOMAIN=apps.<cluster domain>"; return 1; }
+  [ "$PROJECT_ADMIN" = yes ] && ok "project $PROJECT: $USER_NAME is an admin" || { bad "$USER_NAME is not an admin of project $PROJECT; run with PROJECT=<a project you administer> (oc projects lists them)"; return 1; }
+  local r missing=()
+  for r in deployments services configmaps secrets persistentvolumeclaims serviceaccounts roles rolebindings jobs pods routes routes/custom-host; do
+    oc auth can-i create "$r" -n "$PROJECT" >/dev/null 2>&1 || missing+=("$r")
+  done
+  [ "${#missing[@]}" = 0 ] && ok "can create every kind the chart needs in $PROJECT" || { bad "missing permissions in $PROJECT: create ${missing[*]}"; return 1; }
+  if [ -n "$KUBE_VERSION" ]; then ok "Kubernetes $KUBE_VERSION${OCP_VERSION:+, OpenShift $OCP_VERSION}"; fi
+  if [ "$KSERVE_API" = yes ] && oc auth can-i create inferenceservices -n "$PROJECT" >/dev/null 2>&1; then ok "KServe: models can be served in the project"; else note "no KServe access in the project: every model has to come from Models-as-a-Service or a remote endpoint"; fi
+  if [ "$KUEUE" = yes ]; then
+    ok "Kueue manages $PROJECT; local queues: $LOCAL_QUEUES"
+    local lq res units until
+    if [ -n "$GPU_OFFERS" ]; then while read -r lq res units until; do ok "GPU quota on queue $lq: $units x $res${until:+ (booked until $(until_text "$until"))}"; done < <(gpu_offers)
+    else note "no queue of $PROJECT has GPU quota: models that need a GPU require a booking (or a remote endpoint)"; fi
+  fi
+  if [ -n "$MAAS_IDS" ]; then ok "Models-as-a-Service at $MAAS_URL: $(for i in $MAAS_IDS; do printf '%s ' "${i##*/}"; done)"; else note "no Models-as-a-Service found${MAAS_URL:+ at $MAAS_URL} (MAAS_URL=<url> points to one)"; fi
+  local sc; sc=$(oc get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null)
+  [ -n "$sc" ] && ok "default StorageClass $sc" || warn "no default StorageClass visible to this user; the volumes rely on the cluster having one"
+  [ "$CERT_MANAGER" = yes ] && oc auth can-i create issuers.cert-manager.io -n "$PROJECT" >/dev/null 2>&1 && ok "cert-manager: the TURN certificate can be requested in the project (step 4)" || note "no cert-manager access in the project: step 4 skips TURN (voice then works on open networks only)"
+  save DOMAIN "$DOMAIN"; save PROJECT "$PROJECT"; mark 1
+}
 step2() {
+  [ "$ACCESS" = namespace ] && { step2_namespace; return; }
   say "${B}Step 2: deployment profile${N} (decided from the GPUs on the cluster)"
   local mem_gib=""; [ -n "$GPU_MEMORY" ] && mem_gib=$((GPU_MEMORY / 1024))
   say "  found: ${GPUS:-0} GPU(s)${GPU_PRODUCT:+ $GPU_PRODUCT}${mem_gib:+ with $mem_gib GiB each}${LLM_NS:+; language model $LLM_NS/$LLM_NAME already deployed}"
@@ -293,7 +509,54 @@ step2() {
   fi
   save PROFILE "$PROFILE"; write_values_object; ok "profile $PROFILE saved ($STATE_DIR/values-object.json)"; mark 2
 }
+step2_namespace() {
+  say "${B}Step 2: deployment profile${N} (each model from Models-as-a-Service when it has it, else served in $PROJECT on a GPU queue)"
+  unsave PROFILE   # a choice that stops half-way leaves the step to do
+  local k id v q="" lines="" lq need=(); local -A src=() url=() name=() gpu=()
+  for k in LLM STT EMB; do
+    v="REMOTE_${k}_ENDPOINT"
+    if [ -n "${!v:-}" ]; then
+      src[$k]=remote; url[$k]=${!v}; v="REMOTE_${k}_MODEL"; name[$k]=${!v:-}
+      [ -n "${name[$k]}" ] || { bad "REMOTE_${k}_ENDPOINT needs REMOTE_${k}_MODEL (the model id)"; return 1; }
+    elif v="MAAS_${k}_MODEL"; id=$(maas_find "${!v}"); then
+      src[$k]=maas; url[$k]=$(maas_endpoint "$id"); name[$k]=${id##*/}
+    else
+      src[$k]=chart; need+=("$k")
+    fi
+  done
+  if [ "${#need[@]}" -gt 0 ]; then
+    [ "$KSERVE_API" = yes ] || { bad "$(for k in "${need[@]}"; do printf '%s, ' "$(model_title "$k")"; done | sed 's/, $//'): not on Models-as-a-Service, and the project cannot serve models (no KServe); set REMOTE_<LLM|STT|EMB>_ENDPOINT and _MODEL"; return 1; }
+    if [ -n "${KUEUE_QUEUE:-}" ] && [ -n "${GPU_RESOURCE:-}" ]; then
+      q=$KUEUE_QUEUE; lines=$(for k in "${need[@]}"; do echo "$k $GPU_RESOURCE"; done)   # e.g. a queue that borrows without quota of its own
+    elif [ "$KUEUE" = yes ]; then
+      for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do lines=$(assign_gpus "$lq" "${need[@]}") && { q=$lq; break; }; done
+    else
+      lines=$(for k in "${need[@]}"; do echo "$k ${GPU_RESOURCE:-nvidia.com/gpu}"; done)   # no Kueue: plain GPU requests
+      warn "no Kueue in $PROJECT: the models request ${GPU_RESOURCE:-nvidia.com/gpu} directly; a project admin cannot see whether the nodes have free GPUs"
+    fi
+    if [ -z "$lines" ]; then
+      bad "not enough GPU quota for $(for k in "${need[@]}"; do printf '%s, ' "$(chart_model "$k")"; done | sed 's/, $//'), which Models-as-a-Service does not offer."
+      say "     required: one GPU or MIG slice per model, 10 GB or more for Whisper and BGE-M3 (MIG 1g.18gb is enough), 24 GB or more for the language model"
+      say "     available: $( [ -n "$GPU_OFFERS" ] && gpu_offers | awk '{printf "%s x %s on queue %s; ", $3, $2, $1}' || echo "no queue of $PROJECT with GPU quota")"
+      say "     options: book GPUs for $PROJECT (on a shared cluster: the console's GPU booking page), then run scripts/setup.sh again;"
+      say "              or a remote endpoint per model: REMOTE_STT_ENDPOINT=... REMOTE_STT_MODEL=... (LLM, EMB likewise), keys in $SECRETS_FILE"
+      return 1
+    fi
+    while read -r k v; do gpu[$k]=$v; done <<< "$lines"
+  fi
+  save GPU_QUEUE "$q"
+  for k in LLM STT EMB; do
+    save "MODEL_${k}_SRC" "${src[$k]}"; save "MODEL_${k}_URL" "${url[$k]:-}"; save "MODEL_${k}_NAME" "${name[$k]:-}"; save "MODEL_${k}_GPU" "${gpu[$k]:-}"
+    case "${src[$k]}" in
+      maas)   ok "$(model_title $k): Models-as-a-Service ${name[$k]} (${url[$k]})" ;;
+      remote) ok "$(model_title $k): remote endpoint ${name[$k]} (${url[$k]})" ;;
+      chart)  ok "$(model_title $k): $(chart_model $k) served in $PROJECT on 1 x ${gpu[$k]}${q:+ from queue $q}" ;;
+    esac
+  done
+  PROFILE=namespace; save PROFILE namespace; write_values_object; ok "profile namespace saved ($STATE_DIR/values-object.json); no guardrail model"; mark 2
+}
 step3() {
+  [ "$ACCESS" = namespace ] && { step3_namespace; return; }
   say "${B}Step 3: cluster bootstrap${N} (operators, KServe, GPU sharing, model share, Argo CD, project)"
   [ -n "${PROFILE:-}" ] || { bad "choose the profile first (step 2)"; return 1; }
   local log; log=$(logfile bootstrap); local slices; slices=$(profile_slices "$PROFILE")
@@ -302,10 +565,27 @@ step3() {
   PROJECT="$PROJECT" GPU_SLICES="$slices" LLM_NAME="${LLM_NS:+$LLM_NAME}" LLM_GPU_FRACTION="$frac" LOG_FILE="$log" "$ROOT/scripts/bootstrap-cluster.sh" && { mark 3; return 0; }
   bad "bootstrap reported problems; see $log, fix, and run: scripts/setup.sh --step 3"; return 1
 }
+step3_namespace() {
+  say "${B}Step 3: project check${N} (namespace access: nothing is installed or changed outside $PROJECT)"
+  [ "$PROJECT_ADMIN" = yes ] || { bad "$USER_NAME is not an admin of project $PROJECT; run with PROJECT=<a project you administer>"; return 1; }
+  ok "project $PROJECT exists and $USER_NAME administers it"
+  if [ -n "${GPU_QUEUE:-}" ] && [ -z "${GPU_RESOURCE:-}" ]; then
+    local lq res units until found=0
+    while read -r lq res units until; do
+      [ "$lq" = "$GPU_QUEUE" ] || continue; found=1
+      ok "queue $GPU_QUEUE: $units x $res${until:+, booked until $(until_text "$until")}"
+      [ -n "$until" ] && [ "$until" -lt $(( $(date +%s) + 7200 )) ] && warn "the booking shown by the queue ends within two hours ($(until_text "$until")); the models on it stop when it ends, so check or extend it on the booking page"
+    done < <(gpu_offers)
+    [ "$found" = 1 ] || { bad "queue $GPU_QUEUE has no GPU quota any more (did the booking end?); book again, then run scripts/setup.sh --step 2"; return 1; }
+  elif [ -n "${GPU_QUEUE:-}" ]; then note "queue $GPU_QUEUE with $GPU_RESOURCE as given (KUEUE_QUEUE, GPU_RESOURCE)"
+  else ok "no model needs a GPU in the project"; fi
+  mark 3
+}
 step4() {
   say "${B}Step 4: TURN certificate${N} (voice through corporate networks needs TURN over TLS with a trusted certificate)"
   [ "$PROJECT_EXISTS" = yes ] || { bad "project missing; run step 3 first"; return 1; }
   local host="livekit-turn-${PROJECT}.${DOMAIN}" secret=livekit-turn-tls
+  [ "$ACCESS" = namespace ] && { step4_namespace "$host" "$secret"; return; }
   local name; name=$(oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.spec.defaultCertificate.name}' 2>/dev/null); name="${name:-router-certs-default}"
   local tmp; tmp=$(mktemp -d)
   say "  \$ oc get secret $name -n openshift-ingress   (the cluster's wildcard certificate)"
@@ -321,7 +601,7 @@ step4() {
   rm -rf "$tmp"
   warn "the wildcard certificate is self-signed or does not cover *.$DOMAIN; cert-manager can request one from Let's Encrypt (the apps domain must be reachable from the internet)"
   [ "$YES" = 1 ] || ask ACME_EMAIL "E-mail for Let's Encrypt (empty to skip TURN for now)" "${ACME_EMAIL:-}"
-  [ -n "${ACME_EMAIL:-}" ] || { warn "TURN skipped: voice works on open networks only. Rerun later: scripts/setup.sh --step 4"; mark 4; return 0; }
+  [ -n "${ACME_EMAIL:-}" ] || { warn "TURN skipped: voice works on open networks only. Rerun later: scripts/setup.sh --step 4"; save TURN_SKIPPED 1; mark 4; return 0; }
   save ACME_EMAIL "$ACME_EMAIL"
   oc get crd clusterissuers.cert-manager.io >/dev/null 2>&1 || { bad "cert-manager is not installed (step 3 installs it)"; return 1; }
   oc apply -f - <<YAML >/dev/null
@@ -360,7 +640,65 @@ YAML
     [ "$waited" -ge 600 ] && { bad "certificate not Ready after 10 min; oc describe certificate $secret -n $PROJECT; oc get order,challenge -n $PROJECT"; return 1; }
     sleep 15; waited=$((waited + 15)); [ $((waited % 60)) -eq 0 ] && note "waiting for the ACME challenge (${waited}s)"
   done
-  ok "certificate Ready for $host (renews itself)"; mark 4
+  ok "certificate Ready for $host (renews itself)"; unsave TURN_SKIPPED; mark 4
+}
+# With project access the cluster's wildcard certificate is out of reach: a namespaced
+# cert-manager Issuer requests one for the TURN host from Let's Encrypt (HTTP-01, before the
+# chart's passthrough route claims the host). When that does not work, the setup continues
+# without TURN and a later run picks the certificate up.
+step4_namespace() {
+  local host=$1 secret=$2
+  turn_skip() { warn "TURN skipped: $1. Voice works on open networks only; scripts/setup.sh --step 4 tries again, --step 6 then turns TURN on"; save TURN_SKIPPED 1; mark 4; }
+  cert_ready() { [ "$(oc get certificate "$secret" -n "$PROJECT" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = "True" ]; }
+  if [ "$TURN_SECRET" = yes ] && { cert_ready || ! oc get certificate "$secret" -n "$PROJECT" >/dev/null 2>&1; }; then ok "secret $PROJECT/$secret present"; unsave TURN_SKIPPED; mark 4; return 0; fi
+  [ "$CERT_MANAGER" = yes ] && oc auth can-i create issuers.cert-manager.io -n "$PROJECT" >/dev/null 2>&1 && oc auth can-i create certificates.cert-manager.io -n "$PROJECT" >/dev/null 2>&1 \
+    || { turn_skip "no cert-manager access in $PROJECT"; return 0; }
+  note "the cluster's wildcard certificate is not readable with project access; cert-manager requests one for $host from Let's Encrypt (the apps domain must be reachable from the internet)"
+  local def=""; [[ "$USER_NAME" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] && def=$USER_NAME
+  local email=${ACME_EMAIL:-$def}
+  [ "$YES" = 1 ] || ask email "E-mail for Let's Encrypt (expiry notices; empty to skip TURN for now)" "$email"
+  [ -n "$email" ] || { turn_skip "no e-mail for Let's Encrypt"; return 0; }
+  save ACME_EMAIL "$email"
+  oc apply -f - <<YAML >/dev/null || { turn_skip "the Issuer or Certificate was refused"; return 0; }
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-http01
+  namespace: ${PROJECT}
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: ${email}
+    privateKeySecretRef:
+      name: letsencrypt-http01-account
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: openshift-default
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ${secret}
+  namespace: ${PROJECT}
+spec:
+  secretName: ${secret}
+  dnsNames:
+    - ${host}
+  issuerRef:
+    name: letsencrypt-http01
+    kind: Issuer
+YAML
+  ok "Issuer letsencrypt-http01 and Certificate $PROJECT/$secret applied; waiting for the ACME challenge"
+  local waited=0
+  until cert_ready; do
+    if [ "$waited" -ge 600 ]; then
+      note "challenge state: $(oc get challenges.acme.cert-manager.io -n "$PROJECT" -o jsonpath='{range .items[*]}{.status.state} {.status.reason}{"\n"}{end}' 2>/dev/null | head -1 | cut -c1-200)"
+      turn_skip "the certificate is not Ready after 10 minutes (oc describe certificate $secret -n $PROJECT)"; return 0
+    fi
+    sleep 15; waited=$((waited + 15)); [ $((waited % 60)) -eq 0 ] && note "waiting for the ACME challenge (${waited}s)"
+  done
+  ok "certificate Ready for $host (renews itself)"; unsave TURN_SKIPPED; mark 4
 }
 # pause <text>: shows a browser action and waits for Enter (Skip returns 1). With --yes it only prints.
 pause() { say "$1"; [ "$YES" = 1 ] && return 0; local a; read -r -p "  Press Enter when done (or type Skip): " a; ! is_skip "$a"; }
@@ -387,6 +725,38 @@ except urllib.error.HTTPError as e:
 except Exception as e:  # noqa: BLE001
     print("ERROR " + str(e)[:200])
 PY
+}
+# Models-as-a-Service: one API key for the models served there, created with the user's own
+# login and bound to a subscription that includes all of them (a user with several
+# subscriptions would otherwise have to name one in a header on every call, which the services
+# cannot do). Runs inside step 5, which defines put().
+maas_ok() { [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Authorization: Bearer $1" "$2/models")" = 200 ]; }
+ensure_maas_key() {
+  local k url="" names=() tok sub body r key i v
+  for k in LLM STT EMB; do [ "$(val "MODEL_${k}_SRC")" = maas ] && { url=${url:-$(val "MODEL_${k}_URL")}; names+=("$(val "MODEL_${k}_NAME")"); }; done
+  [ -n "$url" ] || return 0
+  say ""; say "  ${B}Models-as-a-Service key${N} for ${names[*]} (created with your login; nothing to do in a browser)"
+  if [ -n "${MAAS_API_KEY:-}" ] && maas_ok "$MAAS_API_KEY" "$url"; then ok "MAAS_API_KEY in $SECRETS_FILE works"
+  else
+    [ -n "${MAAS_API_KEY:-}" ] && warn "MAAS_API_KEY in $SECRETS_FILE is refused; creating a new key"
+    tok=$(oc whoami -t 2>/dev/null); [ -n "$tok" ] || { bad "this login has no token to create a key with (oc whoami -t); log in with a token, or put MAAS_API_KEY in $SECRETS_FILE"; return 1; }
+    sub=${MAAS_SUBSCRIPTION:-$(curl -s --max-time 20 -H "Authorization: Bearer $tok" "$MAAS_URL/maas-api/v1/subscriptions" 2>/dev/null \
+      | jq -r --argjson need "$(printf '%s\n' "${names[@]}" | jq -R . | jq -sc .)" '[.[]? | select([.model_refs[]?.name] as $m | all($need[]; . as $n | $m | index($n)))] | sort_by((.subscription_id_header == "system-authenticated"), -(.priority // 0)) | .[0].subscription_id_header // empty' 2>/dev/null)}
+    body=$(jq -nc --arg n "voice-avatar-assistant-$PROJECT" --arg s "$sub" '{name: $n, description: "Enterprise voice avatar assistant, created by scripts/setup.sh"} + (if $s != "" then {subscription: $s} else {} end)')
+    r=$(curl -s --max-time 30 -X POST -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' -d "$body" "$MAAS_URL/maas-api/v1/api-keys")
+    key=$(printf '%s' "$r" | jq -r '.key // empty' 2>/dev/null)
+    [ -n "$key" ] || { bad "Models-as-a-Service did not create a key: $(printf '%s' "$r" | jq -r '.error // .message // .' 2>/dev/null | head -1 | cut -c1-200)"; return 1; }
+    put MAAS_API_KEY "$key"; MAAS_API_KEY=$key
+    for i in 1 2 3 4 5 6; do maas_ok "$key" "$url" && break; sleep 5; done
+    maas_ok "$key" "$url" || { bad "the new key is refused by $url/models; check the subscription (MAAS_SUBSCRIPTION=<name>) and run --step 5 again"; return 1; }
+    ok "key created${sub:+ for subscription $sub} (expires $(printf '%s' "$r" | jq -r '.expiresAt // "never"')); saved to $SECRETS_FILE as MAAS_API_KEY"
+  fi
+  for k in LLM STT EMB; do
+    [ "$(val "MODEL_${k}_SRC")" = maas ] || continue
+    [ "$k" = EMB ] && v=EMBEDDINGS_API_KEY || v=${k}_API_KEY
+    put "$v" "$MAAS_API_KEY"; printf -v "$v" '%s' "$MAAS_API_KEY"; export "$v"
+  done
+  ok "the models served by Models-as-a-Service use that key"
 }
 step5() {
   say "${B}Step 5: keys and integrations${N} (one file: $SECRETS_FILE; each browser action is shown one at a time and checked)"
@@ -551,6 +921,14 @@ step5() {
     say ""; say "  ${B}Remote model keys${N} for the endpoints of step 2."
     for k in LLM_API_KEY STT_API_KEY EMBEDDINGS_API_KEY; do need_key "$k" "$k" '.' "" "the remote model behind it" || return 1; done
   fi
+  if [ "${PROFILE:-}" = namespace ]; then
+    ensure_maas_key || return 1
+    for k in LLM STT EMB; do
+      [ "$(val "MODEL_${k}_SRC")" = remote ] || continue
+      [ "$k" = EMB ] && v=EMBEDDINGS_API_KEY || v=${k}_API_KEY
+      [ -n "${!v:-}" ] && ok "$v already in the file" || need_key "$v" "$v for the remote $(model_title $k) endpoint (none if it needs no key)" '.' "" "the remote $(model_title $k)"
+    done
+  fi
   say ""; say "  keys present in $SECRETS_FILE:"; grep -v '^#' "$SECRETS_FILE" | grep -v '=$' | grep -v '^$' | sed 's/=.*/=<set>/' | sed 's/^/     /'
   note "edit the file at any time with: nano $SECRETS_FILE ; the deploy step (6) applies it. Changed a key later? scripts/setup.sh --step 5 then --step 6."
   [ "$PROJECT_EXISTS" = yes ] || { bad "project $PROJECT missing; run step 3 first"; return 1; }
@@ -574,7 +952,22 @@ step5() {
   note "admin portal password (generated, kept on re-runs): oc extract secret/assistant-admin -n $PROJECT --keys=ADMIN_PASSWORD --to=-"
   mark 5
 }
+step6_namespace() {
+  say "${B}Step 6: deploy with Helm${N} (release assistant in $PROJECT)"
+  [ "${PROFILE:-}" = namespace ] || { bad "choose the profile first (step 2)"; return 1; }
+  write_values_object   # from the choices saved in step 2
+  local log extra=(); log=$(logfile deploy)
+  [ "$TURN_SECRET" = yes ] || { extra+=(--set livekit.turn.enabled=false); note "no TURN certificate: LiveKit runs without TURN (voice on open networks only)"; }
+  say "  values chart/values-demo-cluster.yaml plus $STATE_DIR/values-object.json, secrets from $SECRETS_FILE (log $log)"
+  say "  this takes 5 to 20 minutes: image pulls, and the weights of the models served in the project"
+  # shellcheck disable=SC1090
+  set -a; [ -f "$SECRETS_FILE" ] && . "$SECRETS_FILE"; set +a
+  env PROJECT="$PROJECT" DOMAIN="$DOMAIN" SECRETS_FILE="$SECRETS_FILE" LOG_FILE="$log" RUN_TESTS=1 MODELS= \
+    "$ROOT/scripts/deploy.sh" -f "$ROOT/chart/values-demo-cluster.yaml" -f "$STATE_DIR/values-object.json" "${extra[@]}" && { mark 6; return 0; }
+  bad "deployment reported problems; see $log, fix, and run: scripts/setup.sh --step 6"; return 1
+}
 step6() {
+  [ "$ACCESS" = namespace ] && { step6_namespace; return; }
   say "${B}Step 6: deploy with Argo CD${N}"
   [ -n "${PROFILE:-}" ] || { bad "choose the profile first (step 2)"; return 1; }
   [ -f "$STATE_DIR/values-object.json" ] || write_values_object
@@ -594,7 +987,11 @@ step7() {
   local key waited=0; key=$(oc get secret assistant-n8n-api -n "$PROJECT" -o jsonpath='{.data.N8N_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
   while [ -z "$key" ] && [ "$waited" -lt 600 ]; do   # the job runs during the Argo CD sync; give it 10 minutes
     local pod; pod=$(oc get pods -n "$PROJECT" -l job-name=n8n-setup --no-headers 2>/dev/null | tail -1)
-    [ -n "$pod" ] || { bad "job n8n-setup has not run (no pod); oc get applications.argoproj.io voice-avatar-assistant -n openshift-gitops shows the sync state"; return 1; }
+    if [ -z "$pod" ]; then
+      if [ "$ACCESS" = namespace ]; then bad "job n8n-setup has not run (no pod); helm status assistant -n $PROJECT shows the release state; scripts/setup.sh --step 6 runs it again"
+      else bad "job n8n-setup has not run (no pod); oc get applications.argoproj.io voice-avatar-assistant -n openshift-gitops shows the sync state"; fi
+      return 1
+    fi
     case "$pod" in
       *CrashLoopBackOff*|*Error*)
         bad "job n8n-setup is failing: ${pod}"; oc logs -n "$PROJECT" -l job-name=n8n-setup --tail=3 2>/dev/null | sed 's/^/     /'
@@ -634,7 +1031,8 @@ step8() {
 step9() {
   say "${B}Step 9: verification${N}"
   local extra=(); [ -f "$STATE_DIR/values-object.json" ] && extra=(-f "$STATE_DIR/values-object.json")
-  local llm_set=(); [ -f "$HOME/assistant-cluster.env" ] && { . "$HOME/assistant-cluster.env"; llm_set=(--set "models.llm.endpoint=$LLM_ENDPOINT" --set "models.llm.servedModelName=$LLM_MODEL"); }
+  # the namespace profile's overlay holds every endpoint; the cluster path keeps the language model's on the side
+  local llm_set=(); [ "$ACCESS" != namespace ] && [ -f "$HOME/assistant-cluster.env" ] && { . "$HOME/assistant-cluster.env"; llm_set=(--set "models.llm.endpoint=$LLM_ENDPOINT" --set "models.llm.servedModelName=$LLM_MODEL"); }
   say "  \$ NS=$PROJECT scripts/demo-preflight.sh -f chart/values-demo-cluster.yaml ${extra[*]:-} --set global.domain=$DOMAIN ${llm_set[*]:-}"
   if NS="$PROJECT" "$ROOT/scripts/demo-preflight.sh" -f "$ROOT/chart/values-demo-cluster.yaml" "${extra[@]}" --set "global.domain=$DOMAIN" "${llm_set[@]}"; then
     mark 9; say ""; say "  ${G}Ready for the demo.${N}"; say "  frontend $FRONTEND_URL"; say "  n8n      $N8N_URL (login $(oc get secret assistant-n8n -n "$PROJECT" -o jsonpath='{.data.N8N_OWNER_EMAIL}' 2>/dev/null | base64 -d), password N8N_OWNER_PASSWORD in $SECRETS_FILE)"
@@ -645,15 +1043,26 @@ step9() {
   else bad "preflight reported problems (docs/troubleshooting.md); fix and run: scripts/setup.sh --step 9"; return 1; fi
 }
 
+# confirm_target: the first change on a cluster and project waits for a yes, so a laptop logged
+# in to another cluster (or a forgotten KUBECONFIG) cannot be set up by mistake
+confirm_target() {
+  local t="$API $PROJECT"
+  [ "${CONFIRMED_TARGET:-}" = "$t" ] && return 0
+  confirm "Set up the demo on $API as $USER_NAME, in project $PROJECT ($ACCESS access)?" \
+    || { say "  Nothing changed. Log in to the intended cluster (oc login, or KUBECONFIG) or set PROJECT, then run scripts/setup.sh again."; exit 1; }
+  save CONFIRMED_TARGET "$t"
+}
+
 # ---------------------------------------------------------------- main ----------------------
-command -v jq >/dev/null || { echo "jq is required: sudo dnf install -y jq"; exit 1; }
+ensure_tool jq quiet || exit 1
 [ "$MODE" = status ] || ensure_login || { discover; show_status; exit 1; }
 say "$(ts) discovering the cluster (a few seconds)"
 discover; show_status
 case "$MODE" in
 status) exit 0 ;;
-step) [ -n "$ONLY" ] || { echo "usage: scripts/setup.sh --step N"; exit 1; }; ensure_helm || exit 1; run_step "$ONLY"; rc=$?; discover; show_status; exit $rc ;;
+step) [ -n "$ONLY" ] || { echo "usage: scripts/setup.sh --step N"; exit 1; }; confirm_target; ensure_helm || exit 1; run_step "$ONLY"; rc=$?; discover; show_status; exit $rc ;;
 esac
+confirm_target
 ensure_helm || exit 1   # the deployment test and the verification render the test pod with helm
 while :; do
   [ -n "$NEXT" ] || { say "  ${G}Every step is done.${N} scripts/setup.sh --step N runs one again."; exit 0; }

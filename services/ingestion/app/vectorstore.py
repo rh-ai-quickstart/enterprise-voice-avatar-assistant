@@ -1,13 +1,17 @@
 """Qdrant collection management and document-level upsert/delete."""
 
+import threading
 import uuid
 from typing import Any
 
 from qdrant_client import QdrantClient, models
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from .config import settings
 
 _client: QdrantClient | None = None
+# Two ingestion jobs run at the same time: the first documents would both create the collection
+_collection_lock = threading.Lock()
 
 
 def client() -> QdrantClient:
@@ -23,11 +27,18 @@ def ping() -> None:
 
 def ensure_collection(dimension: int) -> None:
     name = settings.qdrant_collection
-    if not client().collection_exists(name):
-        client().create_collection(
-            collection_name=name,
-            vectors_config=models.VectorParams(size=dimension, distance=models.Distance.COSINE),
-        )
+    with _collection_lock:
+        if client().collection_exists(name):
+            return
+        try:
+            client().create_collection(
+                collection_name=name,
+                vectors_config=models.VectorParams(size=dimension, distance=models.Distance.COSINE),
+            )
+        except UnexpectedResponse as exc:
+            if exc.status_code == 409:  # created meanwhile by another replica
+                return
+            raise
         client().create_payload_index(
             collection_name=name, field_name="doc_id", field_schema=models.PayloadSchemaType.KEYWORD
         )

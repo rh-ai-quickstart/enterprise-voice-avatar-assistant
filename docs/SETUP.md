@@ -304,9 +304,11 @@ example with `input/output error` from its container storage), and the scheduler
 choosing it because it looks empty. While step 6 waits, `scripts/deploy.sh` notices pods whose
 sandbox failed four times on a node, gives their Deployments and InferenceServices a node
 affinity that leaves that node out, and deletes the stuck pods so they start elsewhere. The
-node is saved (`AVOID_NODES` in the progress file, `~/.assistant-setup/avoid-nodes`) and every
-later install and test pod avoids it through the chart value `global.avoidNodes`. Tell the
-cluster admins about the node: only they can repair it.
+node is saved in `~/.assistant-setup/avoid-nodes` and every later install avoids it through the
+chart value `global.avoidNodes`. The connectivity test pod (end of step 6, and step 9 through
+`scripts/test-services.sh`) does the same on its own: when its sandbox fails three times it adds
+the node to the list and starts again elsewhere, up to three times. Step 4's ACME solver pod
+keeps off the listed nodes too. Tell the cluster admins about the node: only they can repair it.
 
 Models served in the project run only while the GPU booking lasts: when it ends Kueue stops
 them, and voice (Whisper) or search (BGE-M3) stop with them, while the models from

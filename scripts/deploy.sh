@@ -13,7 +13,7 @@
 #                            of deploying the models with the chart (or preset LLM_ENDPOINT,
 #                            LLM_MODEL, LLM_API_KEY, STT_*, EMBEDDINGS_* in the environment)
 #     WAIT=0                 do not wait for pods and models
-#     RUN_TESTS=1            run `helm test` at the end
+#     RUN_TESTS=1            run the connectivity test pod at the end (helm test's pod, via scripts/test-services.sh)
 #     HELM_TIMEOUT=20m       how long helm waits for the n8n-setup hook Job
 #     LOG_FILE=<path>        also write everything printed to this file
 #     AVOID_NODES="<node> ..." nodes to keep every pod off (global.avoidNodes); nodes found unable to
@@ -171,7 +171,10 @@ h=$(oc get route object-store -n "$PROJECT" -o jsonpath='{.spec.host}' 2>/dev/nu
 echo "  Credentials: oc extract secret/assistant-object-store -n $PROJECT --to=-   (object store web UI); n8n: oc extract secret/assistant-n8n -n $PROJECT --keys=N8N_OWNER_PASSWORD --to=-"
 
 if [ "${RUN_TESTS:-0}" = "1" ]; then
-  say "Running helm test"
-  helm test "$RELEASE" -n "$PROJECT" --logs || FAILED=$((FAILED + 1))
+  # the chart's test pod, rendered with the same values (what helm test runs), through the script
+  # that starts it again on another node when its node cannot start containers
+  say "Running the connectivity test pod"
+  NS="$PROJECT" RELEASE="$RELEASE" AVOID_NODES="$AVOID_NODES" AVOID_NODES_FILE="${AVOID_NODES_FILE:-}" "$ROOT/scripts/test-services.sh" \
+    --set "global.domain=$DOMAIN" ${AVATAR_ARGS[@]+"${AVATAR_ARGS[@]}"} ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} "$@" || FAILED=$((FAILED + 1))
 fi
 [ "$FAILED" = 0 ] || { echo; echo "Deployment finished with $FAILED problem(s); see the FAIL lines above${LOG_FILE:+ and the log $LOG_FILE}"; exit 1; }

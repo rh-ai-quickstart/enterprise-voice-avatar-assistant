@@ -118,8 +118,9 @@ logfile() { echo "$STATE_DIR/logs/$1-$(date +%Y%m%d-%H%M%S).log"; }
 # shellcheck disable=SC1090
 . "$STATE" 2>/dev/null || true
 [ -n "$PROJECT_ENV" ] && PROJECT=$PROJECT_ENV   # the environment wins over the project saved by an earlier run
-# nodes found unable to start containers (scripts/deploy.sh writes them): every install and test pod avoids them
-[ -z "${AVOID_NODES:-}" ] && [ -s "$STATE_DIR/avoid-nodes" ] && AVOID_NODES=$(tr '\n' ' ' < "$STATE_DIR/avoid-nodes" | sed 's/ *$//')
+# nodes found unable to start containers: deploy.sh and test-services.sh keep the full list in this
+# file, which wins over the progress file; every install and test pod avoids them
+[ -s "$STATE_DIR/avoid-nodes" ] && AVOID_NODES=$(tr '\n' ' ' < "$STATE_DIR/avoid-nodes" | sed 's/ *$//')
 
 # ---------------------------------------------------------------- tools ---------------------
 # have_tool <command>: usable, not just present (macOS has a git stub that opens an installer
@@ -661,6 +662,18 @@ step4_namespace() {
   [ "$YES" = 1 ] || ask email "E-mail for Let's Encrypt (expiry notices; empty to skip TURN for now)" "$email"
   [ -n "$email" ] || { turn_skip "no e-mail for Let's Encrypt"; return 0; }
   save ACME_EMAIL "$email"
+  # the ACME solver pod that answers the challenge keeps off the nodes known to be broken
+  local solver_pod=""
+  [ -n "${AVOID_NODES:-}" ] && solver_pod="            podTemplate:
+              spec:
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                        - matchFields:
+                            - key: metadata.name
+                              operator: NotIn
+                              values: [$(echo $AVOID_NODES | tr ' ' ',')]"
   oc apply -f - <<YAML >/dev/null || { turn_skip "the Issuer or Certificate was refused"; return 0; }
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -677,6 +690,7 @@ spec:
       - http01:
           ingress:
             ingressClassName: openshift-default
+${solver_pod}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -1042,9 +1056,9 @@ step9() {
   local extra=(); [ -f "$STATE_DIR/values-object.json" ] && extra=(-f "$STATE_DIR/values-object.json")
   # the namespace profile's overlay holds every endpoint; the cluster path keeps the language model's on the side
   local llm_set=(); [ "$ACCESS" != namespace ] && [ -f "$HOME/assistant-cluster.env" ] && { . "$HOME/assistant-cluster.env"; llm_set=(--set "models.llm.endpoint=$LLM_ENDPOINT" --set "models.llm.servedModelName=$LLM_MODEL"); }
-  [ -n "${AVOID_NODES:-}" ] && llm_set+=(--set "global.avoidNodes={$(echo $AVOID_NODES | tr ' ' ',')}")   # the test pod too
   say "  \$ NS=$PROJECT scripts/demo-preflight.sh -f chart/values-demo-cluster.yaml ${extra[*]:-} --set global.domain=$DOMAIN ${llm_set[*]:-}"
-  if NS="$PROJECT" "$ROOT/scripts/demo-preflight.sh" -f "$ROOT/chart/values-demo-cluster.yaml" "${extra[@]}" --set "global.domain=$DOMAIN" "${llm_set[@]}"; then
+  # the test pod avoids the known broken nodes and moves off a newly found one (scripts/test-services.sh)
+  if NS="$PROJECT" AVOID_NODES="${AVOID_NODES:-}" AVOID_NODES_FILE="$STATE_DIR/avoid-nodes" "$ROOT/scripts/demo-preflight.sh" -f "$ROOT/chart/values-demo-cluster.yaml" "${extra[@]}" --set "global.domain=$DOMAIN" "${llm_set[@]}"; then
     mark 9; say ""; say "  ${G}Ready for the demo.${N}"; say "  frontend $FRONTEND_URL"; say "  n8n      $N8N_URL (login $(oc get secret assistant-n8n -n "$PROJECT" -o jsonpath='{.data.N8N_OWNER_EMAIL}' 2>/dev/null | base64 -d), password N8N_OWNER_PASSWORD in $SECRETS_FILE)"
     say "  admin    $FRONTEND_URL/admin (sign in with your name and the password from: oc extract secret/assistant-admin -n $PROJECT --keys=ADMIN_PASSWORD --to=-)"
     say "  Walk through docs/demo-script.md: a cited text answer, a voice session (the browser asks for the microphone), a request by voice with its Slack card, the archive button."

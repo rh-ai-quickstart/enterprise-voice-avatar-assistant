@@ -9,6 +9,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   enableServiceLinks: false
+  {{- include "assistant.affinity" $ | nindent 2 }}
   restartPolicy: Never
   containers:
     - name: test
@@ -27,6 +28,11 @@ spec:
               key: LLM_API_KEY
         - name: STT_BASE_URL
           value: {{ include "assistant.modelEndpoint" (dict "root" . "key" "stt") | quote }}
+        - name: STT_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.models }}
+              key: STT_API_KEY
         - name: EMBEDDINGS_BASE_URL
           value: {{ include "assistant.modelEndpoint" (dict "root" . "key" "embeddings") | quote }}
         - name: EMBEDDINGS_MODEL
@@ -39,6 +45,11 @@ spec:
         {{- if ne .Values.models.guardrails.provider "none" }}
         - name: GUARDRAILS_BASE_URL
           value: {{ include "assistant.modelEndpoint" (dict "root" . "key" "guardrails") | quote }}
+        - name: GUARDRAILS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.models }}
+              key: GUARDRAILS_API_KEY
         {{- end }}
         - name: CA
           value: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
@@ -48,13 +59,19 @@ spec:
         - |
           set -u
           failed=0
+          # curl --cacert replaces the system trust store: the service CA (in-cluster HTTPS
+          # models) goes next to the system bundle, so public endpoints such as
+          # Models-as-a-Service still verify
+          cat /etc/pki/tls/certs/ca-bundle.crt "$CA" > /tmp/ca-bundle.crt 2>/dev/null; CA=/tmp/ca-bundle.crt
+          # check <name> <url> [api key]: remote model endpoints answer /models only with their key
           check() {
-            name="$1"; url="$2"
-            if curl -sf --max-time 20 --cacert "$CA" "$url" >/dev/null; then echo "OK      $name"; else echo "FAILED  $name ($url)"; failed=1; fi
+            name="$1"; url="$2"; key="${3:-none}"
+            if [ "$key" != none ] && [ -n "$key" ]; then set -- -H "Authorization: Bearer $key"; else set --; fi
+            if curl -sf --max-time 20 --cacert "$CA" "$@" "$url" >/dev/null; then echo "OK      $name"; else echo "FAILED  $name ($url)"; failed=1; fi
           }
-          [ -n "$STT_BASE_URL" ] && check stt-models "$STT_BASE_URL/models"
-          [ -n "$EMBEDDINGS_BASE_URL" ] && check embeddings-models "$EMBEDDINGS_BASE_URL/models"
-          [ -n "${GUARDRAILS_BASE_URL:-}" ] && check guardrails-models "$GUARDRAILS_BASE_URL/models"
+          [ -n "$STT_BASE_URL" ] && check stt-models "$STT_BASE_URL/models" "$STT_API_KEY"
+          [ -n "$EMBEDDINGS_BASE_URL" ] && check embeddings-models "$EMBEDDINGS_BASE_URL/models" "$EMBEDDINGS_API_KEY"
+          [ -n "${GUARDRAILS_BASE_URL:-}" ] && check guardrails-models "$GUARDRAILS_BASE_URL/models" "${GUARDRAILS_API_KEY:-none}"
           if [ -n "$EMBEDDINGS_BASE_URL" ]; then
             if curl -sf --max-time 60 --cacert "$CA" -H "Authorization: Bearer $EMBEDDINGS_API_KEY" -H "Content-Type: application/json" \
               -d "{\"model\": \"$EMBEDDINGS_MODEL\", \"input\": \"hello\"}" "$EMBEDDINGS_BASE_URL/embeddings" >/dev/null; then echo "OK      embeddings ($EMBEDDINGS_MODEL)"; else echo "FAILED  embeddings ($EMBEDDINGS_BASE_URL, model $EMBEDDINGS_MODEL)"; failed=1; fi

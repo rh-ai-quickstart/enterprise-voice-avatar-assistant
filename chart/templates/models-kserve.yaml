@@ -84,6 +84,7 @@ spec:
       {{- toYaml . | nindent 6 }}
     {{- end }}
     automountServiceAccountToken: false
+    {{- include "assistant.affinity" $ | nindent 4 }}
     minReplicas: 1
     maxReplicas: 1
     # GPU-bound single replica: a rolling update would need a second GPU while

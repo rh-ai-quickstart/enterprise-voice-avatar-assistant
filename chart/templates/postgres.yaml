@@ -37,6 +37,7 @@ spec:
         {{- include "assistant.componentLabels" (dict "root" . "name" "postgres") | nindent 8 }}
     spec:
       enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
       containers:
         - name: postgres
           image: {{ .Values.postgres.image }}

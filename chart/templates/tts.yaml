@@ -16,6 +16,7 @@ spec:
         {{- include "assistant.componentLabels" (dict "root" . "name" "tts") | nindent 8 }}
     spec:
       enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
       containers:
         - name: tts
           image: {{ .Values.models.tts.image }}

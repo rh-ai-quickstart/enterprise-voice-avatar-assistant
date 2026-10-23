@@ -48,6 +48,7 @@ spec:
         checksum/config: {{ toYaml .Values.livekit | sha256sum | trunc 16 }}
     spec:
       enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
       containers:
         - name: livekit
           image: {{ .Values.livekit.image }}

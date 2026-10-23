@@ -16,6 +16,9 @@ global:
   # Leave empty to use the cluster default StorageClass.
   storageClassName: ""
   imagePullPolicy: IfNotPresent
+  # Nodes no pod of the chart is scheduled on, for example a node of a shared cluster that
+  # cannot start containers. scripts/deploy.sh adds the nodes it finds failing.
+  avoidNodes: []
 
 # Application images built from this repository and published by CI as
 # <registry>/enterprise-voice-avatar-assistant-<service>:<tag> for frontend,

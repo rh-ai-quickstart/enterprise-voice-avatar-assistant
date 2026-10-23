@@ -40,6 +40,7 @@ spec:
         {{- include "assistant.componentLabels" (dict "root" . "name" "n8n") | nindent 8 }}
     spec:
       enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
       terminationGracePeriodSeconds: 60
       {{- if .Values.n8n.workflows.autoImport }}
       # Imports the shipped workflows (and the Slack credential when a bot token is in the

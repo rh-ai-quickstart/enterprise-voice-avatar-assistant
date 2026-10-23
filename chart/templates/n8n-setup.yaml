@@ -73,6 +73,7 @@ spec:
       serviceAccountName: n8n-setup
       restartPolicy: OnFailure
       enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
       containers:
         - name: setup
           image: {{ .Values.n8n.setup.image }}

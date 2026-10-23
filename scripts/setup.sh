@@ -960,10 +960,17 @@ step6_namespace() {
   [ "$TURN_SECRET" = yes ] || { extra+=(--set livekit.turn.enabled=false); note "no TURN certificate: LiveKit runs without TURN (voice on open networks only)"; }
   say "  values chart/values-demo-cluster.yaml plus $STATE_DIR/values-object.json, secrets from $SECRETS_FILE (log $log)"
   say "  this takes 5 to 20 minutes: image pulls, and the weights of the models served in the project"
+  [ -n "${AVOID_NODES:-}" ] && note "pods avoid the nodes $AVOID_NODES, found unable to start containers by an earlier run"
   # shellcheck disable=SC1090
   set -a; [ -f "$SECRETS_FILE" ] && . "$SECRETS_FILE"; set +a
+  # deploy.sh moves stuck pods off a node that cannot start containers and writes it to the file;
+  # the saved list keeps every later install and test pod off it
+  local rc=0
   env PROJECT="$PROJECT" DOMAIN="$DOMAIN" SECRETS_FILE="$SECRETS_FILE" LOG_FILE="$log" RUN_TESTS=1 MODELS= \
-    "$ROOT/scripts/deploy.sh" -f "$ROOT/chart/values-demo-cluster.yaml" -f "$STATE_DIR/values-object.json" "${extra[@]}" && { mark 6; return 0; }
+    AVOID_NODES="${AVOID_NODES:-}" AVOID_NODES_FILE="$STATE_DIR/avoid-nodes" \
+    "$ROOT/scripts/deploy.sh" -f "$ROOT/chart/values-demo-cluster.yaml" -f "$STATE_DIR/values-object.json" "${extra[@]}" || rc=$?
+  [ -s "$STATE_DIR/avoid-nodes" ] && save AVOID_NODES "$(tr '\n' ' ' < "$STATE_DIR/avoid-nodes" | sed 's/ *$//')"
+  [ "$rc" = 0 ] && { mark 6; return 0; }
   bad "deployment reported problems; see $log, fix, and run: scripts/setup.sh --step 6"; return 1
 }
 step6() {
@@ -1033,6 +1040,7 @@ step9() {
   local extra=(); [ -f "$STATE_DIR/values-object.json" ] && extra=(-f "$STATE_DIR/values-object.json")
   # the namespace profile's overlay holds every endpoint; the cluster path keeps the language model's on the side
   local llm_set=(); [ "$ACCESS" != namespace ] && [ -f "$HOME/assistant-cluster.env" ] && { . "$HOME/assistant-cluster.env"; llm_set=(--set "models.llm.endpoint=$LLM_ENDPOINT" --set "models.llm.servedModelName=$LLM_MODEL"); }
+  [ -n "${AVOID_NODES:-}" ] && llm_set+=(--set "global.avoidNodes={$(echo $AVOID_NODES | tr ' ' ',')}")   # the test pod too
   say "  \$ NS=$PROJECT scripts/demo-preflight.sh -f chart/values-demo-cluster.yaml ${extra[*]:-} --set global.domain=$DOMAIN ${llm_set[*]:-}"
   if NS="$PROJECT" "$ROOT/scripts/demo-preflight.sh" -f "$ROOT/chart/values-demo-cluster.yaml" "${extra[@]}" --set "global.domain=$DOMAIN" "${llm_set[@]}"; then
     mark 9; say ""; say "  ${G}Ready for the demo.${N}"; say "  frontend $FRONTEND_URL"; say "  n8n      $N8N_URL (login $(oc get secret assistant-n8n -n "$PROJECT" -o jsonpath='{.data.N8N_OWNER_EMAIL}' 2>/dev/null | base64 -d), password N8N_OWNER_PASSWORD in $SECRETS_FILE)"

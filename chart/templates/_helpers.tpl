@@ -26,6 +26,23 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{- end -}}
 
 {{/*
+Node affinity that keeps every pod off global.avoidNodes (empty when the list is).
+*/}}
+{{- define "assistant.affinity" -}}
+{{- with .Values.global.avoidNodes -}}
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchFields:
+            - key: metadata.name
+              operator: NotIn
+              values:
+                {{- toYaml . | nindent 16 }}
+{{- end }}
+{{- end -}}
+
+{{/*
 Container security context compatible with the restricted SCC.
 */}}
 {{- define "assistant.securityContext" -}}

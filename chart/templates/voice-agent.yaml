@@ -18,6 +18,7 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum | trunc 16 }}
     spec:
       enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
       terminationGracePeriodSeconds: 60
       containers:
         - name: voice-agent

@@ -299,6 +299,15 @@ differ from the cluster path:
 | 6 Deploy with Helm | `scripts/deploy.sh`: `helm upgrade --install` of release `assistant` with `chart/values-demo-cluster.yaml` and the overlay, then waits for the workloads, the models (reporting Kueue workloads that are not admitted, with the reason) and every pod, and runs `helm test` |
 | 7 to 9 | As on the cluster path |
 
+A node of a shared cluster can fail to start containers (every pod's sandbox fails, for
+example with `input/output error` from its container storage), and the scheduler keeps
+choosing it because it looks empty. While step 6 waits, `scripts/deploy.sh` notices pods whose
+sandbox failed four times on a node, gives their Deployments and InferenceServices a node
+affinity that leaves that node out, and deletes the stuck pods so they start elsewhere. The
+node is saved (`AVOID_NODES` in the progress file, `~/.assistant-setup/avoid-nodes`) and every
+later install and test pod avoids it through the chart value `global.avoidNodes`. Tell the
+cluster admins about the node: only they can repair it.
+
 Models served in the project run only while the GPU booking lasts: when it ends Kueue stops
 them, and voice (Whisper) or search (BGE-M3) stop with them, while the models from
 Models-as-a-Service keep working. Book again, then `scripts/setup.sh --step 2` if the queue or
@@ -355,6 +364,8 @@ about them now and what to check if it happens again:
 |---|---|---|
 | Step 3 waits for the model "to run only with the new share", then Whisper and BGE-M3 crash-loop in step 6 with `Free memory on device … less than desired` | The old model pod with the 95% share is still on the card | The bootstrap sets the `Recreate` strategy, deletes the stale pod and restarts a crash-looping new one. If it still times out: `oc get pods -n my-first-model` and the pod log it prints |
 | Step 6: `helm is required` | No `helm` on the bastion | The script installs it into `~/bin`; if both download sites are unreachable, install it by hand and run again |
+| Step 6 (namespace path): pods in `ContainerCreating` on one node with `FailedCreatePodSandBox ... input/output error` | That node of the shared cluster cannot start containers | `scripts/deploy.sh` moves the pods off it and saves it in `AVOID_NODES`; report the node to the cluster admins |
+| Step 6 (namespace path): `helm test` fails the model checks of a Models-as-a-Service endpoint | Test pods before this fix trusted only the cluster's internal CA and sent no key to `/models` | Fixed in the chart; `git pull`, then `scripts/setup.sh --step 6` |
 | Step 7: `job n8n-setup is failing` with `401` | The job could not keep n8n's login cookie | Fixed in the job; the step prints the last log lines of the job. After a fix in the repository: `git pull`, `--step 6` (re-syncs and re-runs the job) |
 | Step 7: a workflow `INACTIVE` | The import container could not publish it, usually a missing credential or an older workflow file on the volume | `oc logs deploy/n8n -c import-workflows`. Workflows are re-imported whenever the shipped files change; a workflow edited in the n8n editor is overwritten by that |
 | Step 6 sits on `waiting for completion of hook batch/Job/n8n-setup` | The hook Job keeps failing and holds the sync | The deploy ends that sync and starts a new one at the latest revision; the job's log says why it failed |

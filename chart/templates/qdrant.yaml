@@ -38,6 +38,7 @@ spec:
         {{- include "assistant.componentLabels" (dict "root" . "name" "qdrant") | nindent 8 }}
     spec:
       enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
       containers:
         - name: qdrant
           image: {{ .Values.qdrant.image }}

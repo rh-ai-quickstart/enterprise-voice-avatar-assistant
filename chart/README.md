@@ -60,6 +60,7 @@ Generated from `values.yaml` by `../scripts/gen-values-reference.py --write`; ru
 | `global.domain` | `""` | Wildcard apps domain of the cluster, e.g. apps.ocp.example.com. When set, Routes get deterministic hosts (<name>-<namespace>.<domain>) and n8n and LiveKit learn their public URLs. When empty, OpenShift assigns hosts and you must set n8n.publicHost and livekit.publicHost yourself. |
 | `global.storageClassName` | `""` | Leave empty to use the cluster default StorageClass. |
 | `global.imagePullPolicy` | `IfNotPresent` |  |
+| `global.avoidNodes` | `[]` | Nodes no pod of the chart is scheduled on, for example a node of a shared cluster that cannot start containers. scripts/deploy.sh adds the nodes it finds failing. |
 
 ### `images`
 

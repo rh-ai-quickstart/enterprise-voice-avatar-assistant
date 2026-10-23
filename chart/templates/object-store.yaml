@@ -64,6 +64,7 @@ spec:
         {{- include "assistant.componentLabels" (dict "root" . "name" "object-store") | nindent 8 }}
     spec:
       enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
       containers:
         - name: versitygw
           image: {{ .Values.objectStore.image }}

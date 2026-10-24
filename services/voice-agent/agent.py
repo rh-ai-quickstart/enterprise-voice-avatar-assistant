@@ -23,6 +23,7 @@ from livekit.agents import (
     JobContext,
     JobProcess,
     RoomOutputOptions,
+    StopResponse,
     WorkerOptions,
     cli,
 )
@@ -93,6 +94,14 @@ class Assistant(Agent):
         self._session_id = session_id
         self._user_id = user_id
         self._user_name = user_name
+
+    async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+        """Noise is not a question: Whisper turns short sounds and silence into "-", "Oh." or stock
+        phrases, which would get an answer, a chat bubble and a knowledge gap each."""
+        text = getattr(new_message, "text_content", None) or ""
+        if helpers.is_noise_transcript(text):
+            log.info("session=%s ignoring noise transcript %r", self._session_id, text[:80])
+            raise StopResponse()
 
     async def llm_node(self, chat_ctx, tools, model_settings):
         """Replace the LLM step with a call to the RAG API so voice and text share one answer path.
@@ -190,7 +199,10 @@ class Assistant(Agent):
 
 
 def prewarm(proc: JobProcess) -> None:
-    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=settings.vad_min_silence_seconds)
+    proc.userdata["vad"] = silero.VAD.load(
+        min_silence_duration=settings.vad_min_silence_seconds,
+        min_speech_duration=settings.vad_min_speech_seconds,
+    )
     proc.userdata["turn_detector"] = False
     if turn_detector_enabled():
         try:  # load the model (~108 MB) here rather than on the first turn

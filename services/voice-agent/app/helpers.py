@@ -2,6 +2,7 @@
 
 import json
 import re
+from itertools import pairwise
 from typing import Any
 
 MARKER_RE = re.compile(r"\s*\[\d{1,2}\]")
@@ -53,8 +54,9 @@ class SentenceBuffer:
 
 
 def session_id_from_room(room_name: str) -> str:
-    """The frontend names rooms session-<id>; the RAG API session is the <id> part."""
-    return room_name.removeprefix(ROOM_PREFIX)
+    """Rooms are named session-<id>.<suffix> (a room of its own for every voice start; older ones
+    have no suffix); the RAG API session is the <id> part."""
+    return room_name.removeprefix(ROOM_PREFIX).split(".", 1)[0]
 
 
 def user_id_from_identity(identity: str | None) -> str | None:
@@ -136,3 +138,54 @@ def turn_timings(role: str | None, metrics: Any) -> str:
         if isinstance(value := get(key), int | float)
     ]
     return f"{role} " + " ".join(parts) if parts else ""
+
+
+# What Whisper makes of noise and silence: lone fillers, and stock phrases from its training data
+NOISE_WORDS = {
+    "a",
+    "ah",
+    "and",
+    "bye",
+    "hm",
+    "hmm",
+    "huh",
+    "i",
+    "mhm",
+    "mm",
+    "oh",
+    "ok",
+    "okay",
+    "so",
+    "the",
+    "uh",
+    "uhm",
+    "um",
+    "wow",
+    "yeah",
+    "yep",
+    "you",
+}
+NOISE_PHRASES = {
+    "bye bye",
+    "please subscribe",
+    "thank you",
+    "thank you for watching",
+    "thank you very much",
+    "thanks for watching",
+    "you you",
+}
+
+
+def is_noise_transcript(text: str) -> bool:
+    """True for a transcript that is no request to the assistant: no words, a lone filler, a
+    phrase Whisper invents for silence, or a clause of four words or more repeated word for word."""
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    if not words:
+        return True
+    if len(words) == 1 and words[0] in NOISE_WORDS:
+        return True
+    if " ".join(words) in NOISE_PHRASES:
+        return True
+    clauses = [" ".join(re.findall(r"[a-z0-9']+", c)) for c in re.split(r"[,.!?;]+", text.lower())]
+    clauses = [c for c in clauses if c]
+    return any(a == b and len(a.split()) >= 4 for a, b in pairwise(clauses))

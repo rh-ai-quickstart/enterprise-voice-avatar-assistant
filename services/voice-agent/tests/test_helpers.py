@@ -11,6 +11,7 @@ def test_speakable_strips_markers_and_markdown():
 
 def test_session_and_user_ids():
     assert helpers.session_id_from_room("session-abc123") == "abc123"
+    assert helpers.session_id_from_room("session-abc123.1f2e3d4c") == "abc123"
     assert helpers.session_id_from_room("lobby") == "lobby"
     assert helpers.user_id_from_identity("user-mohamed") == "mohamed"
     assert helpers.user_id_from_identity(None) is None
@@ -84,3 +85,29 @@ def test_turn_timings_lists_the_recorded_stages_in_order():
     assert helpers.turn_timings("assistant", {}) == ""
     assert helpers.turn_timings("assistant", None) == ""
     assert helpers.turn_timings("system", {"e2e_latency": 1.0}) == ""
+
+
+def test_noise_transcripts_are_recognised():
+    # what the phantom turns on the cluster looked like
+    for noise in [
+        "-",
+        "",
+        "...",
+        "and",
+        "Oh.",
+        "- Wow.",
+        "Thank you.",
+        "Thanks for watching!",
+        "That's not good, I don't think we can watch it, I don't think we can watch it.",
+    ]:
+        assert helpers.is_noise_transcript(noise), noise
+    for question in [
+        "How many days of annual leave do I get?",
+        "Hello",
+        "Yes, please file it",
+        "What about normal users?",
+        "I need a new laptop, mine no longer boots",
+        "no, no",
+        "thank you, how do I reset my password?",
+    ]:
+        assert not helpers.is_noise_transcript(question), question

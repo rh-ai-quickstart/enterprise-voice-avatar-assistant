@@ -77,7 +77,10 @@ def test_memory_is_noop_without_database():
 def test_voice_token_is_issued():
     with TestClient(app) as client:
         body = client.get("/v1/voice/token", params={"session_id": "abc", "identity": "mo"}).json()
-    assert body["room"] == "session-abc"
+    assert body["room"].startswith("session-abc.") and body["session_id"] == "abc"
+    with TestClient(app) as client:
+        again = client.get("/v1/voice/token", params={"session_id": "abc", "identity": "mo"}).json()
+    assert again["room"] != body["room"]  # every voice start gets a room of its own
     assert body["identity"] == "mo"
     assert body["token"].count(".") == 2
 

@@ -1,5 +1,6 @@
-"""LiveKit access tokens for the browser. Rooms are named after the chat session so voice and text share memory."""
+"""LiveKit access tokens for the browser. Rooms carry the chat session id so voice and text share memory."""
 
+import secrets
 from datetime import timedelta
 
 from livekit import api
@@ -8,7 +9,10 @@ from .config import settings
 
 
 def room_for_session(session_id: str) -> str:
-    return f"session-{session_id}"
+    """session-<id>.<random>: a room of its own for every voice start. Reusing the name right after
+    "End voice" met the previous avatar still in (or rejoining) the room under the same identity,
+    and the new avatar failed to start. Session ids never contain a dot (schemas.SESSION_ID)."""
+    return f"session-{session_id}.{secrets.token_hex(4)}"
 
 
 def mint_token(

@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     )
     # Seconds of silence after which the VAD reports the end of speech
     vad_min_silence_seconds: float = 0.3
+    # Shortest sound the VAD counts as speech: clicks, coughs and short noises below it start no turn
+    vad_min_speech_seconds: float = 0.25
     # End-of-turn model on the audio (LiveKit's turn-detector-v1-mini, runs inside the worker):
     # with it the short silences above do not cut people off mid-sentence. "none" switches it off.
     turn_detector: str = "v1-mini"

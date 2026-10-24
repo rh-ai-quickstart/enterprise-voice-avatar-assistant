@@ -1,0 +1,39 @@
+# OpenSpline's GPU service (https://github.com/openspline/openspline, MIT): turns the agent's
+# speech and a portrait into a talking-head video with the SoulX-FlashHead models, and joins the
+# LiveKit room itself. The self-hosted alternative to the Tavus avatar.
+#
+# Optional. By default the chart needs no image of its own: the stock Python image installs this
+# same pinned release onto the worker's volume on first start (chart/templates/openspline.yaml).
+# An image built from this file skips that install: set openspline.image to it. Keep
+# OPENSPLINE_REF in step with openspline.ref in chart/values.yaml.
+#
+# The steps of OpenSpline's install.sh without its interactive parts, pinned to one commit. The
+# models are not in the image: the chart downloads them into the volume on first start
+# (`openspline models`), so the image stays a few GB and the weights survive restarts.
+FROM registry.access.redhat.com/ubi9/python-311:latest
+
+ARG OPENSPLINE_REF=6d53966e412a9c2946f3b777735ac04aa8879b0b
+ARG UV_VERSION=0.8.17
+
+WORKDIR /opt/app-root/openspline
+RUN curl -fsSL "https://github.com/openspline/openspline/archive/${OPENSPLINE_REF}.tar.gz" | tar -xz --strip-components=1 \
+ && pip install --no-cache-dir "uv==${UV_VERSION}" \
+ && uv venv --python python3.11 .venv \
+ && uv pip install --python .venv/bin/python --no-deps --require-hashes -r requirements/server.txt \
+ && uv pip install --python .venv/bin/python --torch-backend cu126 --require-hashes \
+      -r requirements/server.txt -r requirements/cu126.txt \
+ && uv pip install --python .venv/bin/python --no-deps ./packages/server ./packages/python \
+ && rm -rf /opt/app-root/src/.cache "$HOME/.cache" \
+ && chmod -R g+rwX /opt/app-root/openspline
+
+# Writable places for an arbitrary user id (restricted SCC): runtime files in /tmp, models and
+# the Hugging Face cache on the chart's volume (mounted at /data)
+ENV PATH=/opt/app-root/openspline/.venv/bin:$PATH \
+    HOME=/tmp \
+    OPENSPLINE_MODEL_DIR=/data/models/avatar \
+    OPENSPLINE_AUDIO_MODEL_DIR=/data/models/audio \
+    OPENSPLINE_RUNTIME_DIR=/tmp/runtime \
+    HF_HOME=/data/.hf
+
+EXPOSE 7860
+CMD ["openspline", "serve", "--host", "0.0.0.0", "--port", "7860"]

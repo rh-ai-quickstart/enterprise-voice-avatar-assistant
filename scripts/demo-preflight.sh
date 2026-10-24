@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Pre-flight before a demo: models Ready, Argo CD status (when the project is managed by
-# Argo CD), the connectivity test pod, the public API proxy and the admin portal, and the n8n
-# webhooks. Read-only apart from the test pod.
+# Pre-flight before a demo: models Ready, the OpenSpline avatar (when deployed), Argo CD status
+# (when the project is managed by Argo CD), the connectivity test pod, the public API proxy and
+# the admin portal, and the n8n webhooks. Read-only apart from the test pod.
 #
 # Usage: NS=<namespace> scripts/demo-preflight.sh [-f values.yaml]
 #   The values arguments are passed to the test pod render (use the same file as the
@@ -36,6 +36,20 @@ SQL
     if [ -z "$missing" ]; then echo "  the RAG API and ingestion tables exist"
     else echo "  missing: $missing (a service started before PostgreSQL answered: oc rollout restart deployment/rag-api deployment/ingestion -n $NS)"; rc=1; fi
   else echo "  cannot query PostgreSQL (oc exec deploy/postgres -n $NS)"; rc=1; fi
+fi
+
+# The self-hosted avatar (avatarProvider openspline): its GPU worker holds one voice session at a
+# time, so a browser still in a call keeps the next session audio-only until it ends
+if oc get deploy/openspline -n "$NS" >/dev/null 2>&1; then
+  echo "=== OpenSpline avatar ==="
+  if body=$(oc exec deploy/openspline -n "$NS" -c openspline -- curl -s --max-time 10 http://localhost:7860/readyz 2>/dev/null) && [ -n "$body" ]; then
+    state=$(printf '%s' "$body" | jq -r '[.workers[]? | if (.ready | not) then "loading" elif .occupied then "in a session" else "free" end] | join(", ")' 2>/dev/null)
+    case "$state" in
+      free) echo "  GPU worker loaded and free" ;;
+      "in a session") echo "  GPU worker loaded, in a voice session now (the next session waits for it to end)" ;;
+      *) echo "  GPU worker ${state:-missing}: oc logs deploy/openspline -n $NS"; rc=1 ;;
+    esac
+  else echo "  not answering: oc logs deploy/openspline --all-containers -n $NS"; rc=1; fi
 fi
 
 echo "=== connectivity test pod ==="

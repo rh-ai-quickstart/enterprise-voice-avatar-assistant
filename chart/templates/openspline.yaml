@@ -1,0 +1,198 @@
+{{- if eq .Values.voiceAgent.avatarProvider "openspline" }}
+{{- $o := .Values.openspline }}
+{{- /* without an image of its own, the stock Python image runs the install kept on the volume */}}
+{{- $bin := ternary "openspline" "/data/openspline/venv/bin/openspline" (not (empty $o.image)) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openspline-data
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "openspline") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.global.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $o.storage }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openspline
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "openspline") | nindent 4 }}
+spec:
+  replicas: 1
+  # the GPU and the volume are released before the next pod starts
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "assistant.selector" (dict "root" . "name" "openspline") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "assistant.componentLabels" (dict "root" . "name" "openspline") | nindent 8 }}
+        {{- with $o.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
+      initContainers:
+        {{- if not $o.image }}
+        # First start only: the steps of OpenSpline's install.sh, pinned to one commit, into a
+        # virtual environment on the volume (PyTorch with CUDA and the server, a few GB)
+        - name: install
+          image: {{ $o.baseImage }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["/bin/bash", "-euc"]
+          args:
+            - |
+              dir=/data/openspline
+              if [ -f "$dir/installed-$REF" ]; then echo "OpenSpline $REF already installed"; exit 0; fi
+              echo "installing OpenSpline $REF (first start only)"
+              rm -rf "$dir" "$UV_CACHE_DIR" && mkdir -p "$dir/src"
+              curl -fsSL --retry 3 "https://github.com/openspline/openspline/archive/$REF.tar.gz" | tar -xz --strip-components=1 -C "$dir/src"
+              python3.11 -m venv /tmp/tools && /tmp/tools/bin/pip install --quiet --no-cache-dir "uv==$UV_VERSION"
+              uv=/tmp/tools/bin/uv
+              cd "$dir/src"
+              $uv venv --python python3.11 "$dir/venv"
+              $uv pip install --python "$dir/venv/bin/python" --no-deps --require-hashes -r requirements/server.txt
+              $uv pip install --python "$dir/venv/bin/python" --torch-backend cu126 --require-hashes -r requirements/server.txt -r requirements/cu126.txt
+              $uv pip install --python "$dir/venv/bin/python" --no-deps ./packages/server ./packages/python
+              cd / && rm -rf "$dir/src" "$UV_CACHE_DIR"
+              touch "$dir/installed-$REF"
+              echo "OpenSpline $REF installed"
+          env:
+            - name: REF
+              value: {{ $o.ref | quote }}
+            - name: UV_VERSION
+              value: {{ $o.uvVersion | quote }}
+            - name: HOME
+              value: /tmp
+            # on the volume, so the environment hard-links the downloaded packages instead of copying
+            - name: UV_CACHE_DIR
+              value: /data/.uv-cache
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          securityContext:
+            {{- include "assistant.securityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+        {{- end }}
+        # First start (and a change of quality): the SoulX-FlashHead and wav2vec2 weights from
+        # Hugging Face, at the revisions OpenSpline pins
+        - name: models
+          image: {{ $o.image | default $o.baseImage }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["/bin/bash", "-euc"]
+          args:
+            - |
+              if [ -f "/data/models/ready-$QUALITY" ]; then echo "models for $QUALITY quality present"; exit 0; fi
+              {{ $bin }} models --directory /data/models --quality "$QUALITY"
+              touch "/data/models/ready-$QUALITY"
+          env:
+            - name: QUALITY
+              value: {{ $o.quality | quote }}
+            - name: HOME
+              value: /tmp
+            - name: HF_HOME
+              value: /data/.hf
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            {{- include "assistant.securityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: openspline
+          image: {{ $o.image | default $o.baseImage }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: [{{ $bin | quote }}, "serve", "--host", "0.0.0.0", "--port", "7860"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: HF_HOME
+              value: /data/.hf
+            - name: OPENSPLINE_MODEL_DIR
+              value: /data/models/avatar
+            - name: OPENSPLINE_AUDIO_MODEL_DIR
+              value: /data/models/audio
+            - name: OPENSPLINE_RUNTIME_DIR
+              value: /tmp/runtime
+          ports:
+            - name: http
+              containerPort: 7860
+              protocol: TCP
+          # the server listens once its GPU worker has loaded the model (a minute or two)
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 90
+          # 503 while the worker is not loaded (it reloads after a failure)
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            {{- toYaml $o.resources | nindent 12 }}
+          securityContext:
+            {{- include "assistant.securityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: openspline-data
+        - name: tmp
+          emptyDir: {}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openspline
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "openspline") | nindent 4 }}
+spec:
+  selector:
+    {{- include "assistant.selector" (dict "root" . "name" "openspline") | nindent 4 }}
+  ports:
+    - name: http
+      port: 7860
+      targetPort: http
+{{- end }}

@@ -687,6 +687,19 @@ realtime = [
 ]
 
 [[package]]
+name = "openspline"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b2/d3/252b54283acea7beb6c7c7f53bb8fe5f252d605d3fab3259ed73229b12a8/openspline-0.1.1.tar.gz", hash = "sha256:3c87c02fd1c25b8ad3b46db96532838e3dcdde96ff005706a6a2f4f1a4a1731d", size = 12460 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/90/9df4068a14b0fdc671ebf6c1fc6aebab891b8a2e34e1e435b8c9082a3359/openspline-0.1.1-py3-none-any.whl", hash = "sha256:7d3ca9a091f3657b866d8804fbd6698db02b89749dd40d085c814f6899367ecd", size = 17532 },
+]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.44.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1202,6 +1215,7 @@ dependencies = [
     { name = "livekit-plugins-simli" },
     { name = "livekit-plugins-tavus" },
     { name = "openai" },
+    { name = "openspline" },
     { name = "pydantic-settings" },
 ]
 
@@ -1221,6 +1235,7 @@ requires-dist = [
     { name = "livekit-plugins-simli", specifier = ">=1.8,<2" },
     { name = "livekit-plugins-tavus", specifier = ">=1.8,<2" },
     { name = "openai", specifier = ">=1.50" },
+    { name = "openspline", specifier = ">=0.1.1,<0.2" },
     { name = "pydantic-settings", specifier = ">=2.5" },
 ]
 

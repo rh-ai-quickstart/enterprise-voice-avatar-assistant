@@ -12,6 +12,7 @@ dependencies = [
   "openai>=1.50",
   "httpx>=0.27",
   "pydantic-settings>=2.5",
+  "openspline>=0.1.1,<0.2",
 ]
 
 [dependency-groups]

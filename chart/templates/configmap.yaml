@@ -48,3 +48,6 @@ data:
   AVATAR_PROVIDER: {{ .Values.voiceAgent.avatarProvider | quote }}
   # Faces offered in the UI; the RAG API serves the list and the voice agent applies the choice
   AVATAR_FACES: {{ .Values.voiceAgent.faces | default list | toJson | quote }}
+  # The self-hosted avatar worker (avatarProvider openspline); the RAG API tests it, the voice agent uses it
+  OPENSPLINE_URL: "http://openspline:7860"
+  OPENSPLINE_QUALITY: {{ .Values.openspline.quality | quote }}

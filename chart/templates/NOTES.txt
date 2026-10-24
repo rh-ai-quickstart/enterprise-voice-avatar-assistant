@@ -26,6 +26,14 @@ Models:
 {{- $ttsGpu := "" }}
 {{- range $k, $v := (dig "limits" (dict) .Values.models.tts.resources) }}{{ if hasPrefix "nvidia.com/" $k }}{{ $ttsGpu = $k }}{{ end }}{{ end }}
   tts         {{ if .Values.models.tts.deploy }}Kokoro (in-cluster, {{ $ttsGpu | default "CPU" }}){{ else }}external {{ .Values.models.tts.endpoint }}{{ end }}
+{{- $avatarGpu := "" }}
+{{- range $k, $v := (dig "limits" (dict) .Values.openspline.resources) }}{{ if hasPrefix "nvidia.com/" $k }}{{ $avatarGpu = $k }}{{ end }}{{ end }}
+
+Avatar: {{ .Values.voiceAgent.avatarProvider }}
+{{- if eq .Values.voiceAgent.avatarProvider "openspline" }} (self-hosted, deployment openspline on {{ $avatarGpu | default "no GPU" }})
+  The first start installs OpenSpline and downloads its weights onto volume openspline-data
+  (10 to 20 minutes): oc logs deploy/openspline -c {{ if .Values.openspline.image }}models{{ else }}install{{ end }} -f -n {{ .Release.Namespace }}
+{{- end }}
 
 Next steps:
   oc get pods -n {{ .Release.Namespace }}            # model pods take several minutes on first start

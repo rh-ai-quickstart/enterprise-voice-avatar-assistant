@@ -15,7 +15,7 @@
 #   TARGET_REVISION=main             branch, tag or commit
 #   DOMAIN=<apps domain>             default: read from the cluster
 #   SLACK_ENABLED, GOOGLE_DOCS_ENABLED   true/false; default: on when the keys are in assistant-integrations
-#   AVATAR_PROVIDER=none|tavus|simli|hedra   default: none without TAVUS_API_KEY (voice is audio-only),
+#   AVATAR_PROVIDER=none|openspline|tavus|simli|hedra   default: none without TAVUS_API_KEY (voice is audio-only),
 #                                    otherwise what the values file says
 #   WAIT=1                           0 = register the application and return
 #   RUN_TESTS=0                      1 = run the connectivity test pod at the end
@@ -94,7 +94,7 @@ if has_key SLACK_BOT_TOKEN && ! has_key SLACK_SIGNING_SECRET; then warn "SLACK_S
 if [ -z "${SLACK_ENABLED:-}" ]; then SLACK_ENABLED=false; has_key SLACK_BOT_TOKEN && SLACK_ENABLED=true; fi
 if [ -z "${GOOGLE_DOCS_ENABLED:-}" ]; then GOOGLE_DOCS_ENABLED=false; has_key GOOGLE_SERVICE_ACCOUNT_JSON && has_key GOOGLE_DOCS_FOLDER_ID && GOOGLE_DOCS_ENABLED=true; fi
 # Without a Tavus key the avatar is off and voice sessions are audio-only; a key leaves it to the values
-if [ -z "${AVATAR_PROVIDER:-}" ] && ! has_key TAVUS_API_KEY; then AVATAR_PROVIDER=none; fi
+case "${AVATAR_PROVIDER:-}" in ""|tavus) has_key TAVUS_API_KEY || AVATAR_PROVIDER=none;; esac
 AVATAR_PARAM=""; [ -n "${AVATAR_PROVIDER:-}" ] && AVATAR_PARAM=",{\"name\":\"voiceAgent.avatarProvider\",\"value\":\"$AVATAR_PROVIDER\"}"
 ok "integrations: Slack $SLACK_ENABLED, Google Docs $GOOGLE_DOCS_ENABLED, avatar ${AVATAR_PROVIDER:-from $VALUES_FILE}; approvals in the admin portal$([ "$SLACK_ENABLED" = true ] && echo " and in Slack")"
 

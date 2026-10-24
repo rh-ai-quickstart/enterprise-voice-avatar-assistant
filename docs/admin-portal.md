@@ -201,7 +201,7 @@ secrets, the last `integration.error` event, and a **Test** button:
 |---|---|---|
 | Slack | `integrations.slack.enabled`, `SLACK_BOT_TOKEN` present | `auth.test`, then `conversations.list`: the five channels exist and the bot is a member |
 | Google Docs | `integrations.googleDocs.enabled`, the service account and folder present | Drive `files.get` on the folder: it is reachable and `capabilities.canAddChildren` is true |
-| Avatar | `voiceAgent.avatarProvider`, the provider's key present | Tavus: list the configured faces with the key; other providers: key present |
+| Avatar | `voiceAgent.avatarProvider`, the provider's key present (OpenSpline needs none) | Tavus: list the configured faces with the key; OpenSpline: the worker answers and has its model loaded; other providers: key present |
 | n8n | always on | n8n API with the key the chart stores: all seven workflows exist and are active |
 | Models | the endpoints in the config map | `GET /models` on each endpoint; the served model name is listed |
 

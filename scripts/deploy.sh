@@ -15,6 +15,8 @@
 #     WAIT=0                 do not wait for pods and models
 #     RUN_TESTS=1            run the connectivity test pod at the end (helm test's pod, via scripts/test-services.sh)
 #     HELM_TIMEOUT=20m       how long helm waits for the n8n-setup hook Job
+#     AVATAR_PROVIDER=<name> openspline (the self-hosted worker on a GPU), tavus, simli, hedra or none;
+#                            default: the values file, or none without TAVUS_API_KEY
 #     LOG_FILE=<path>        also write everything printed to this file
 #     AVOID_NODES="<node> ..." nodes to keep every pod off (global.avoidNodes); nodes found unable to
 #                            start containers while waiting are added, and AVOID_NODES_FILE keeps the list
@@ -24,7 +26,7 @@
 # scripts/create-secrets.sh from the environment; see its header. Slack and Google Docs are
 # turned on (integrations.*.enabled) when their keys are in the integrations secret; a --set in
 # the helm arguments wins. Without TAVUS_API_KEY the avatar is off (voice is audio-only) unless
-# AVATAR_PROVIDER names another provider.
+# AVATAR_PROVIDER names another provider; openspline needs no key.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RELEASE="${RELEASE:-assistant}"
@@ -66,7 +68,7 @@ has_key() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpa
 SLACK_ON=false; has_key SLACK_BOT_TOKEN && SLACK_ON=true
 DOCS_ON=false; has_key GOOGLE_SERVICE_ACCOUNT_JSON && has_key GOOGLE_DOCS_FOLDER_ID && DOCS_ON=true
 AVATAR_ARGS=()
-if [ -z "${AVATAR_PROVIDER:-}" ] && ! has_key TAVUS_API_KEY; then AVATAR_PROVIDER=none; fi
+case "${AVATAR_PROVIDER:-}" in ""|tavus) has_key TAVUS_API_KEY || AVATAR_PROVIDER=none;; esac
 [ -n "${AVATAR_PROVIDER:-}" ] && AVATAR_ARGS=(--set "voiceAgent.avatarProvider=$AVATAR_PROVIDER")
 say "Integrations from the keys in assistant-integrations: Slack $SLACK_ON, Google Docs $DOCS_ON, avatar ${AVATAR_PROVIDER:-from the values}"
 
@@ -153,6 +155,23 @@ if [ "$WAIT" = "1" ]; then
     done
     oc get isvc -n "$PROJECT"
     [ "$ready" = "$total" ] || { echo "  FAIL models not Ready after 40 minutes: oc get pods -n $PROJECT -l serving.kserve.io/inferenceservice; oc describe isvc -n $PROJECT"; queued; FAILED=$((FAILED + 1)); }
+  fi
+  if oc get deploy openspline -n "$PROJECT" >/dev/null 2>&1; then
+    say "Waiting for the OpenSpline avatar worker (its first start installs OpenSpline and downloads its weights; up to 40 minutes)"
+    os_ready=""
+    for i in $(seq 1 240); do
+      [ "$(oc get deploy openspline -n "$PROJECT" -o jsonpath='{.status.availableReplicas}' 2>/dev/null)" = 1 ] && { os_ready=1; break; }
+      if [ $((i % 6)) -eq 0 ]; then
+        # the container at work: install, models (init containers) or the server loading the model
+        pod=$(oc get pods -n "$PROJECT" -l app.kubernetes.io/name=openspline -o json 2>/dev/null | jq -r '.items[0] // empty | "\(.metadata.name) \(([.status.initContainerStatuses[]? | select(.state.running) | .name] + [.status.containerStatuses[]? | select(.state.running) | .name])[0] // .status.phase)"')
+        os_pod=""; os_ctr=""; read -r os_pod os_ctr <<< "$pod" || true
+        echo "  after $((i * 10))s: ${os_pod:-no pod yet}${os_ctr:+ in $os_ctr}${os_ctr:+: $(oc logs "$os_pod" -n "$PROJECT" -c "$os_ctr" --tail=1 2>/dev/null | tr -d '\r' | cut -c1-150)}"
+        queued; avoid_bad_nodes
+      fi
+      sleep 10
+    done
+    if [ -n "$os_ready" ]; then echo "  openspline ready: voice sessions get the self-hosted avatar"
+    else echo "  FAIL openspline not ready after 40 minutes: oc logs deploy/openspline --all-containers -n $PROJECT"; queued; FAILED=$((FAILED + 1)); fi
   fi
   say "Waiting for every pod"
   for i in $(seq 1 60); do [ -z "$(not_ready)" ] && break; [ $((i % 2)) -eq 0 ] && avoid_bad_nodes; [ $((i % 6)) -eq 0 ] && { echo "  not ready after $((i * 10))s:"; not_ready | awk '{print "     "$1" "$3}'; queued; }; sleep 10; done

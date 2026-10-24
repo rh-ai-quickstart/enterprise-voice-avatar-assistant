@@ -143,6 +143,21 @@ def test_avatar_test_looks_up_the_faces(monkeypatch):
     ]
 
 
+def test_openspline_test_asks_the_worker(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_provider", "openspline")
+    loading = {"workers": [{"id": "gpu-0", "ready": False, "occupied": False}]}
+    http = FakeHttp({"http://openspline:7860/readyz": (503, loading)})
+    monkeypatch.setattr(integrations, "_http", lambda: http)
+    checks = integrations._test_avatar()
+    assert [(c["name"], c["ok"]) for c in checks] == [("service", True), ("GPU worker", False)]
+    loaded = {"workers": [{"id": "gpu-0", "ready": True, "occupied": True}]}
+    monkeypatch.setattr(
+        integrations, "_http", lambda: FakeHttp({"http://openspline:7860/readyz": (200, loaded)})
+    )
+    checks = integrations._test_avatar()
+    assert checks[1] == {"name": "GPU worker", "ok": True, "detail": "1 of 1 loaded, 1 in a voice session"}
+
+
 def test_n8n_test_counts_active_workflows(monkeypatch):
     monkeypatch.setenv("N8N_API_KEY", "n8n-key")
     data = [{"name": f"WF{i} x", "active": i != 6} for i in range(1, 8)] + [

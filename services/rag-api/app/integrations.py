@@ -231,6 +231,8 @@ def _test_google_docs() -> list[dict[str, Any]]:
 
 def _test_avatar() -> list[dict[str, Any]]:
     provider = settings.avatar_provider
+    if provider == "openspline":
+        return _test_openspline()
     key = AVATAR_KEYS.get(provider)
     if not key:
         return [_check("provider", provider == "none", f"unknown provider {provider}")]
@@ -249,6 +251,30 @@ def _test_avatar() -> list[dict[str, Any]]:
             (found[i].get("face_name") or "found") if i in found else "not found with this key",
         )
         for i in ids
+    ]
+
+
+def _test_openspline() -> list[dict[str, Any]]:
+    """The self-hosted avatar: the service answers and its GPU worker has the model loaded. A
+    worker holds one voice session at a time; /readyz says 503 until the model is loaded."""
+    url = settings.openspline_url.rstrip("/")
+    try:
+        with _http() as http:
+            response = http.get(f"{url}/readyz")
+        workers = response.json().get("workers", [])
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        return [_check("service", False, f"{url} unreachable: {exc}")]
+    ready = [w for w in workers if w.get("ready")]
+    busy = [w for w in ready if w.get("occupied")]
+    return [
+        _check("service", True, f"{url} answers"),
+        _check(
+            "GPU worker",
+            bool(ready),
+            f"{len(ready)} of {len(workers)} loaded, {len(busy)} in a voice session"
+            if workers
+            else "no worker configured",
+        ),
     ]
 
 

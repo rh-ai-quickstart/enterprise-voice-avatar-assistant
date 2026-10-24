@@ -1,5 +1,7 @@
 """Configuration. Every setting is an environment variable; names match the Helm chart's config map and secrets."""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,7 +51,7 @@ class Settings(BaseSettings):
     llm_model: str = "llama-3.1-8b-instruct"
     llm_api_key: str = "none"
 
-    # Avatar: none | simli | tavus | hedra
+    # Avatar: none | openspline | simli | tavus | hedra
     avatar_provider: str = "none"
     # Give up on the avatar and answer audio-only if the provider has not joined within this time
     avatar_start_timeout_seconds: float = 25.0
@@ -65,6 +67,11 @@ class Settings(BaseSettings):
     tavus_persona_id: str | None = None
     hedra_api_key: str | None = None
     hedra_avatar_image: str | None = None
+    # OpenSpline, the self-hosted avatar (the chart's openspline worker on a GPU): no key, it joins
+    # the room through the in-cluster LiveKit address. low is one GPU; high needs a GPU pair.
+    openspline_url: str = "http://openspline:7860"
+    openspline_quality: str = "low"
+    openspline_portrait: str = str(Path(__file__).parent / "portraits" / "default.png")
 
     # Extra CA bundle trusted for in-cluster endpoints served over TLS (OpenShift service CA)
     service_ca_file: str | None = None

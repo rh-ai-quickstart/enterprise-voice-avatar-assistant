@@ -329,7 +329,7 @@ PROJECT=voice-avatar-assistant scripts/deploy.sh
 oc extract secret/assistant-admin -n ${PROJECT} --keys=ADMIN_PASSWORD --to=-
 ```
 
-   The n8n workflows are imported and published automatically on first start. If `SLACK_BOT_TOKEN` was in the environment, Slack is wired and turned on too (`integrations.slack.enabled`); likewise Google Docs with a service account key and a Drive folder. Without `TAVUS_API_KEY` the avatar is off (`voiceAgent.avatarProvider=none`) and voice sessions are audio-only; `AVATAR_PROVIDER=simli` or `hedra` picks another provider.
+   The n8n workflows are imported and published automatically on first start. If `SLACK_BOT_TOKEN` was in the environment, Slack is wired and turned on too (`integrations.slack.enabled`); likewise Google Docs with a service account key and a Drive folder. Without `TAVUS_API_KEY` the avatar is off (`voiceAgent.avatarProvider=none`) and voice sessions are audio-only; `AVATAR_PROVIDER=openspline` (self-hosted, on a GPU, no key), `simli` or `hedra` picks another provider.
 
 #### Alternative deployment options
 
@@ -439,7 +439,7 @@ A presenter script with timings, exact questions and expected answers is in [doc
 
 **Voice.** The voice agent is a LiveKit Agents worker. Silero VAD detects turns and enables interruption, Whisper transcribes, the RAG API produces the answer, and the TTS model synthesizes it. When an avatar provider is configured, the agent hands its audio to the provider, which publishes synchronized video into the room. With no provider configured, the agent publishes audio only.
 
-**Avatar providers.** The provider is selected by a single value (`voiceAgent.avatarProvider`): `none` for audio only, or `tavus`, `simli`, or `hedra` through their LiveKit plugins. A provider whose key is missing counts as `none`, and the deploy scripts set `none` when there is no Tavus key, so the assistant runs the same without an avatar account. The provider only receives the assistant's synthesized speech, never the microphone. A self-hosted renderer built on the LiveKit avatar worker API (MuseTalk on a GPU, or LiteAvatar on CPU) is the planned open-source option.
+**Avatar providers.** The provider is selected by a single value (`voiceAgent.avatarProvider`): `none` for audio only, `openspline` for the self-hosted avatar, or `tavus`, `simli`, or `hedra` through their LiveKit plugins. [OpenSpline](https://github.com/openspline/openspline) (MIT) runs in the project on a whole GPU: the chart deploys its worker, which animates a portrait with the SoulX-FlashHead models and joins the room itself, so nothing leaves the cluster and no account is needed; its first start installs it and downloads its weights onto a volume (10 to 20 minutes), and one worker serves one voice session at a time. `scripts/setup.sh` asks which avatar to use in step 2. For the cloud providers, a provider whose key is missing counts as `none`, and the deploy scripts set `none` when there is no Tavus key, so the assistant runs the same without an avatar account. A cloud provider only receives the assistant's synthesized speech, never the microphone.
 
 **Guardrails.** Input and output checks run in the RAG API with a provider switch: `none` (the demo setting), `granite-guardian` (Granite Guardian 3.3 8B served on OpenShift AI), `llama-guard`, or `trustyai` (the TrustyAI Guardrails orchestrator). Blocked requests return a safe message and are logged; answers stream sentence by sentence only with `none`.
 

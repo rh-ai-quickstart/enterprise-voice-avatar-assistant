@@ -36,6 +36,25 @@ def test_tavus_requires_face_and_key(monkeypatch):
         avatars.build()
 
 
+def test_openspline_needs_no_key_and_joins_through_the_in_cluster_livekit(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr(settings, "avatar_provider", "openspline")
+    monkeypatch.setattr(settings, "livekit_url", "ws://livekit:7880")
+    monkeypatch.setattr(settings, "livekit_public_url", "wss://livekit.example.com")
+    monkeypatch.setattr(settings, "openspline_url", "http://openspline:7860")
+    assert avatars.missing_key() is None
+    assert avatars.active()
+    avatar = avatars.build("r3f4182ef554")  # a Tavus face id is ignored: OpenSpline has its portrait
+    assert avatar.provider == "openspline"
+    assert avatar.url == "ws://livekit:7880"
+    assert avatar.client.url == "http://openspline:7860"
+    assert avatar.quality == "low"
+    assert Path(avatar.portrait).is_file()
+    # its start() takes no livekit_url, so the public URL is never handed to it
+    assert avatars.start_kwargs(avatar) == {}
+
+
 def test_start_kwargs_uses_public_livekit_url(monkeypatch):
     class Provider:
         async def start(self, session, *, room, livekit_url=None, livekit_api_key=None):

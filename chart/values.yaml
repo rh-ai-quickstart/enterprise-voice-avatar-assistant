@@ -391,8 +391,10 @@ voiceAgent:
   enabled: true
   image: ""
   replicas: 1
-  # none | simli | tavus | hedra (see services/voice-agent/app/avatars.py). A provider whose key is
-  # missing from the integrations secret counts as none: voice is audio-only and no face is offered.
+  # none | openspline | tavus | simli | hedra (see services/voice-agent/app/avatars.py).
+  # openspline is self-hosted: the chart deploys its GPU worker (see openspline below) and no key
+  # is needed. For the others, a provider whose key is missing from the integrations secret counts
+  # as none: voice is audio-only and no face is offered.
   avatarProvider: none
   # Extra environment for the worker; explicit entries win over the config map and secrets,
   # so non-secret provider settings such as TAVUS_FACE_ID can be pinned here.
@@ -410,3 +412,32 @@ voiceAgent:
     limits:
       cpu: "2"
       memory: 2Gi
+
+# OpenSpline (MIT, https://github.com/openspline/openspline), the self-hosted avatar: animates a
+# portrait with the SoulX-FlashHead models on a GPU and joins the LiveKit room itself. Deployed
+# when voiceAgent.avatarProvider is openspline. One worker serves one voice session at a time.
+openspline:
+  # Empty: the stock Python image below installs the pinned OpenSpline release onto the volume on
+  # first start, so no image build or registry is needed and later starts reuse the install. Or an
+  # image built from services/avatar-openspline/Containerfile, which already has it.
+  image: ""
+  baseImage: registry.access.redhat.com/ubi9/python-311:latest
+  # OpenSpline commit installed on first start, and the uv release that installs it
+  ref: 6d53966e412a9c2946f3b777735ac04aa8879b0b
+  uvVersion: 0.8.17
+  # low: one GPU, 512 x 512 video at 25 frames a second (high needs a GPU pair and is not wired here)
+  quality: low
+  # Volume for the install and the model weights, about 8 GB each; kept across upgrades
+  storage: 30Gi
+  # A whole GPU: real-time video needs its compute. On a Kueue-managed project, add the queue in
+  # podLabels (kueue.x-k8s.io/queue-name); scripts/setup.sh does both from the booked quota.
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+      nvidia.com/gpu: "1"
+    limits:
+      cpu: "8"
+      memory: 24Gi
+      nvidia.com/gpu: "1"
+  podLabels: {}

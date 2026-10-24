@@ -9,9 +9,10 @@ from .config import settings
 
 log = logging.getLogger("voice-agent.avatar")
 
-PROVIDERS = ("none", "simli", "tavus", "hedra")
+PROVIDERS = ("none", "openspline", "simli", "tavus", "hedra")
 TAVUS_API_URL = "https://tavusapi.com/v2"
-# The key each provider cannot start without; the RAG API checks the same ones before offering faces
+# The key each provider cannot start without; the RAG API checks the same ones before offering faces.
+# OpenSpline runs in the cluster and needs none.
 KEYS = {"simli": "simli_api_key", "tavus": "tavus_api_key", "hedra": "hedra_api_key"}
 _warned: set[str] = set()
 
@@ -57,10 +58,25 @@ def tavus_kwargs(face_id: str, pal_id: str | None, api_key: str, params: Any) ->
 
 def build(face_id: str | None = None) -> Any | None:
     """Return an avatar session object for the configured provider, or None for audio only.
-    face_id overrides the configured Tavus face for this session."""
+    face_id overrides the configured Tavus face for this session (OpenSpline has its portrait)."""
     name = provider()
     if name == "none":
         return None
+    if name == "openspline":
+        # Self-hosted: the chart's GPU worker animates the portrait and joins the room itself
+        # through the in-cluster LiveKit address this worker registers with
+        from openspline import Openspline
+        from openspline.integrations.livekit import AvatarSession
+
+        quality = settings.openspline_quality
+        return AvatarSession(
+            settings.openspline_portrait,
+            quality=quality,
+            client=Openspline(url=settings.openspline_url, quality=quality),
+            url=settings.livekit_url,
+            api_key=settings.livekit_api_key,
+            api_secret=settings.livekit_api_secret,
+        )
     if name == "simli":
         from livekit.plugins import simli
 

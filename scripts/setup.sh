@@ -19,6 +19,10 @@
 # model endpoints instead, run it with PROFILE=remote and REMOTE_LLM_ENDPOINT, REMOTE_LLM_MODEL,
 # REMOTE_STT_ENDPOINT, REMOTE_EMB_ENDPOINT (and the keys in ~/secrets.env).
 #
+# The avatar video is chosen in step 2: tavus (Tavus cloud, its key in step 5), openspline
+# (self-hosted, OpenSpline on a whole GPU of the project) or none (audio only); AVATAR_PROVIDER
+# answers the question, and a later run can switch with --step 2 then --step 6.
+#
 # On macOS missing tools (a current bash, oc, helm, jq, ...) are installed with Homebrew,
 # which the script offers to install first.
 #
@@ -59,7 +63,7 @@ export PATH="$HOME/bin:$HOME/.local/bin:$PATH"   # tools this script installs fo
 STATE_DIR="${STATE_DIR:-$HOME/.assistant-setup}"
 STATE="$STATE_DIR/state.env"
 SECRETS_FILE="${SECRETS_FILE:-$HOME/secrets.env}"
-PROJECT_ENV="${PROJECT:-}"; ACCESS_ENV="${ACCESS:-}"; DOMAIN_ENV="${DOMAIN:-}"
+PROJECT_ENV="${PROJECT:-}"; ACCESS_ENV="${ACCESS:-}"; DOMAIN_ENV="${DOMAIN:-}"; AVATAR_ENV="${AVATAR_PROVIDER:-}"
 PROJECT="${PROJECT:-voice-avatar-assistant}"
 LLM_NAME="${LLM_NAME:-llama-32-3b-instruct}"
 # namespace path: the Models-as-a-Service model names (patterns) used when the service has them
@@ -120,6 +124,7 @@ logfile() { echo "$STATE_DIR/logs/$1-$(date +%Y%m%d-%H%M%S).log"; }
 # shellcheck disable=SC1090
 . "$STATE" 2>/dev/null || true
 [ -n "$PROJECT_ENV" ] && PROJECT=$PROJECT_ENV   # the environment wins over the project saved by an earlier run
+[ -n "$AVATAR_ENV" ] && AVATAR_CHOICE=$AVATAR_ENV   # likewise the avatar
 # nodes found unable to start containers: deploy.sh and test-services.sh keep the full list in this
 # file, which wins over the progress file; every install and test pod avoids them
 [ -s "$STATE_DIR/avoid-nodes" ] && AVOID_NODES=$(tr '\n' ' ' < "$STATE_DIR/avoid-nodes" | sed 's/ *$//')
@@ -366,13 +371,17 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
        n8n: {storage: "10Gi"}}' ;;
   *)
     jq -n --argjson d "$llm_deploy" '{models:{llm:{deploy:$d,args:["--max-model-len=8192","--gpu-memory-utilization=0.45","--max-num-seqs=8","--enforce-eager","--enable-auto-tool-choice","--tool-call-parser=llama3_json"]},stt:{deploy:true,args:["--gpu-memory-utilization=0.15","--max-num-seqs=8","--enforce-eager"]},embeddings:{args:["--runner=pooling","--max-model-len=8192","--gpu-memory-utilization=0.12","--max-num-seqs=8","--enforce-eager"]},guardrails:{provider:"none",deploy:false}}}' ;;
-  esac > "$STATE_DIR/values-object.json"
+  esac | jq --arg av "${AVATAR_CHOICE:-}" --arg ag "${AVATAR_GPU:-}" --arg q "${GPU_QUEUE:-}" '
+    # the avatar chosen in step 2; OpenSpline gets the GPU (whole card or MIG slice) assigned to it
+    def gpu($g): if $g == "" or $g == "nvidia.com/gpu" then {} else {resources: {requests: {"nvidia.com/gpu": null, ($g): "1"}, limits: {"nvidia.com/gpu": null, ($g): "1"}}} end;
+    (if $av == "" then . else . * {voiceAgent: {avatarProvider: $av}} end)
+    | if $av == "openspline" then . * {openspline: (gpu($ag) + (if $q != "" then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end))} else . end' > "$STATE_DIR/values-object.json"
 }
 # Namespace profile, per model: REMOTE_<X>_ENDPOINT when given, else the Models-as-a-Service
 # model named MAAS_<X>_MODEL, else the chart's own model on a GPU of a Kueue queue with quota.
 # A chart model needs this much GPU memory (GB): the 8B language model 24, Whisper and BGE-M3 10.
-model_title() { case "$1" in LLM) echo "language model";; STT) echo "speech-to-text";; EMB) echo "embeddings";; TTS) echo "text-to-speech";; esac; }
-chart_model() { case "$1" in LLM) echo "Llama 3.1 8B Instruct (4-bit)";; STT) echo "Whisper large-v3-turbo";; EMB) echo "BGE-M3";; TTS) echo "Kokoro";; esac; }
+model_title() { case "$1" in LLM) echo "language model";; STT) echo "speech-to-text";; EMB) echo "embeddings";; TTS) echo "text-to-speech";; AVATAR) echo "avatar";; esac; }
+chart_model() { case "$1" in LLM) echo "Llama 3.1 8B Instruct (4-bit)";; STT) echo "Whisper large-v3-turbo";; EMB) echo "BGE-M3";; TTS) echo "Kokoro";; AVATAR) echo "the OpenSpline avatar";; esac; }
 gpu_size() { case "$1" in nvidia.com/mig-*) local s=${1##*.}; s=${s%gb}; echo "$s";; *) echo 999;; esac; }   # GB; a whole card counts as plenty
 # assign_gpus <queue> <kind...>: gives each kind the smallest resource of the queue that fits;
 # prints "<kind> <resource>" lines, or fails when the queue's quota cannot hold them all
@@ -380,7 +389,7 @@ assign_gpus() {
   local q=$1; shift; local -a res=() units=() out=(); local kind i best min lq r u
   while read -r lq r u _; do [ "$lq" = "$q" ] && { res+=("$r"); units+=("$u"); }; done < <(gpu_offers)
   for kind in "$@"; do
-    case "$kind" in LLM) min=24;; TTS) min=4;; *) min=10;; esac
+    case "$kind" in LLM) min=24;; TTS) min=4;; AVATAR) min=999;; *) min=10;; esac   # the avatar: a whole card, for 25 frames a second
     best=""
     for i in "${!res[@]}"; do
       [ "${units[$i]}" -gt 0 ] && [ "$(gpu_size "${res[$i]}")" -ge "$min" ] || continue
@@ -392,6 +401,23 @@ assign_gpus() {
   printf '%s\n' "${out[@]}"
 }
 
+# choose_avatar <suggestion> <allowed...>: sets AVATAR_CHOICE (AVATAR_PROVIDER or an earlier run answers it)
+choose_avatar() {
+  local def=$1 a; shift
+  [ -n "$AVATAR_ENV" ] && [[ " $* " != *" $AVATAR_ENV "* ]] && { bad "AVATAR_PROVIDER=$AVATAR_ENV: here it is one of $*"; return 1; }
+  [ -n "${AVATAR_CHOICE:-}" ] && [[ " $* " == *" $AVATAR_CHOICE "* ]] && def=$AVATAR_CHOICE
+  say "  avatar video, one of:"
+  [[ " $* " == *" tavus "* ]] && say "     tavus       Tavus cloud: its key in step 5; the free plan has 25 minutes a month and one stream"
+  [[ " $* " == *" openspline "* ]] && say "     openspline  self-hosted: OpenSpline on a whole GPU of $PROJECT; its first start takes 10 to 20 minutes"
+  say "     none        audio only"
+  while :; do
+    ask a "avatar ($(echo "$*" | sed 's/ /, /g'))" "$def"
+    [[ " $* " == *" $a "* ]] && { AVATAR_CHOICE=$a; return 0; }
+    say "     type one of: $*"; [ "$YES" = 1 ] && return 1
+  done
+}
+avatar_summary() { case "${AVATAR_CHOICE:-}" in openspline) echo "avatar OpenSpline${AVATAR_GPU:+ on $AVATAR_GPU}";; tavus) echo "avatar Tavus";; none) echo "no avatar";; esac; }
+
 # ---------------------------------------------------------------- status --------------------
 STEPS=("Cluster and prerequisites" "Deployment profile" "Cluster bootstrap" "TURN certificate" "Keys and integrations" "Deploy with Argo CD" "n8n workflows" "Sample documents" "Verification")
 turn_state() {  # step 4, both paths
@@ -399,7 +425,7 @@ turn_state() {  # step 4, both paths
   elif [ -n "${TURN_SKIPPED:-}" ]; then echo "done|TURN skipped: voice works on open networks only; scripts/setup.sh --step 4 tries again"
   elif [ "$PROJECT_EXISTS" != yes ]; then echo "todo|after the bootstrap"; else echo "todo|secret missing"; fi
 }
-model_summary() { local k s out=""; for k in LLM STT EMB; do s=$(val "MODEL_${k}_SRC"); case "$s" in maas|remote) out+="$(model_title $k) $s $(val "MODEL_${k}_NAME"), ";; chart) out+="$(model_title $k) in the project ($(val "MODEL_${k}_GPU")), ";; esac; done; [ -n "${MODEL_TTS_GPU:-}" ] && out+="text-to-speech on $MODEL_TTS_GPU, "; echo "${out%, }"; }
+model_summary() { local k s out=""; for k in LLM STT EMB; do s=$(val "MODEL_${k}_SRC"); case "$s" in maas|remote) out+="$(model_title $k) $s $(val "MODEL_${k}_NAME"), ";; chart) out+="$(model_title $k) in the project ($(val "MODEL_${k}_GPU")), ";; esac; done; [ -n "${MODEL_TTS_GPU:-}" ] && out+="text-to-speech on $MODEL_TTS_GPU, "; [ -n "${AVATAR_CHOICE:-}" ] && out+="$(avatar_summary), "; echo "${out%, }"; }
 step_state_namespace() {
   case "$1" in
   1) if [ "$LOGGED_IN" != 1 ]; then echo "attention|not logged in to a cluster"; elif [ "$PROJECT_ADMIN" != yes ]; then echo "attention|$USER_NAME is not an admin of project $PROJECT: run with PROJECT=<a project you administer>";
@@ -417,7 +443,7 @@ step_state() {  # prints done|todo|attention and a detail
   1) if [ "$LOGGED_IN" != 1 ]; then echo "attention|not logged in to a cluster"; elif [ -z "$RHOAI_VERSION" ]; then echo "attention|OpenShift AI not found";
      elif [[ "$RHOAI_VERSION" == 2.* ]]; then echo "attention|OpenShift AI $RHOAI_VERSION; 3.x is required"; elif [ "$KSERVE" != Managed ]; then echo "todo|KServe is ${KSERVE:-unset} (bootstrap fixes it)";
      else echo "done|OpenShift $OCP_VERSION, OpenShift AI $RHOAI_VERSION, $NODE_COUNT node(s) $INSTANCE, ${GPUS:-0} GPU(s) ${GPU_PRODUCT:+($GPU_PRODUCT)}, KServe Managed"; fi ;;
-  2) if [ -n "${PROFILE:-}" ]; then echo "done|$PROFILE${LLM_NS:+; language model $LLM_NS/$LLM_NAME}"; else echo "todo|suggested: $(suggest_profile)"; fi ;;
+  2) if [ -n "${PROFILE:-}" ]; then echo "done|$PROFILE${LLM_NS:+; language model $LLM_NS/$LLM_NAME}${AVATAR_CHOICE:+; $(avatar_summary)}"; else echo "todo|suggested: $(suggest_profile)"; fi ;;
   3) if [ "$PROJECT_EXISTS" = yes ] && [ "$ARGO_READY" = yes ] && [ -n "${STEP_3_DONE:-}" ]; then echo "done|project, Argo CD, GPU sharing (${GPU_ALLOC:-?} schedulable GPUs)";
      elif [ "$PROJECT_EXISTS" = yes ] && [ "$ARGO_READY" = yes ]; then echo "todo|project and Argo CD exist; run to verify GPU sharing and the model share"; else echo "todo|project ${PROJECT_EXISTS}, Argo CD ${ARGO_READY}"; fi ;;
   4) turn_state ;;
@@ -515,7 +541,13 @@ step2() {
     if [ -n "$LLM_NS" ]; then say "     language model: $LLM_NS/$LLM_NAME, its GPU memory share is lowered to 55% in step 3"; else say "     language model: Llama 3.1 8B (4-bit) deployed by the chart at 45%"; fi
     say "     Whisper 15%, BGE-M3 12%; no guardrail model in this demo"
   fi
-  save PROFILE "$PROFILE"; write_values_object; ok "profile $PROFILE saved ($STATE_DIR/values-object.json)"; mark 2
+  if [ "$PROFILE" = remote ]; then choose_avatar tavus tavus none || return 1
+  else
+    choose_avatar tavus tavus openspline none || return 1
+    [ "$AVATAR_CHOICE" = openspline ] && warn "OpenSpline takes one time-sliced share of a GPU, next to the models: on a busy card the video can fall below 25 frames a second"
+  fi
+  save AVATAR_CHOICE "$AVATAR_CHOICE"; unsave AVATAR_GPU
+  save PROFILE "$PROFILE"; write_values_object; ok "profile $PROFILE saved ($STATE_DIR/values-object.json), $(avatar_summary)"; mark 2
 }
 step2_namespace() {
   say "${B}Step 2: deployment profile${N} (each model from Models-as-a-Service when it has it, else served in $PROJECT on a GPU queue)"
@@ -532,22 +564,31 @@ step2_namespace() {
       src[$k]=chart; need+=("$k")
     fi
   done
-  if [ "${#need[@]}" -gt 0 ]; then
-    [ "$KSERVE_API" = yes ] || { bad "$(for k in "${need[@]}"; do printf '%s, ' "$(model_title "$k")"; done | sed 's/, $//'): not on Models-as-a-Service, and the project cannot serve models (no KServe); set REMOTE_<LLM|STT|EMB>_ENDPOINT and _MODEL"; return 1; }
+  # the avatar: OpenSpline is suggested when a queue has a whole GPU for it next to the models
+  local fits=""; local -a kinds=()
+  if [ "$KUEUE" = yes ] && [ -z "${GPU_RESOURCE:-}" ]; then
+    for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do assign_gpus "$lq" AVATAR ${need[@]+"${need[@]}"} >/dev/null && { fits=$lq; break; }; done
+  fi
+  choose_avatar "$([ -n "$fits" ] && echo openspline || echo tavus)" tavus openspline none || return 1
+  [ "$AVATAR_CHOICE" = openspline ] && kinds+=(AVATAR)
+  kinds+=(${need[@]+"${need[@]}"})
+  if [ "${#kinds[@]}" -gt 0 ]; then
+    [ "${#need[@]}" -eq 0 ] || [ "$KSERVE_API" = yes ] || { bad "$(for k in "${need[@]}"; do printf '%s, ' "$(model_title "$k")"; done | sed 's/, $//'): not on Models-as-a-Service, and the project cannot serve models (no KServe); set REMOTE_<LLM|STT|EMB>_ENDPOINT and _MODEL"; return 1; }
     if [ -n "${KUEUE_QUEUE:-}" ] && [ -n "${GPU_RESOURCE:-}" ]; then
-      q=$KUEUE_QUEUE; lines=$(for k in "${need[@]}"; do echo "$k $GPU_RESOURCE"; done)   # e.g. a queue that borrows without quota of its own
+      q=$KUEUE_QUEUE; lines=$(for k in "${kinds[@]}"; do echo "$k $GPU_RESOURCE"; done)   # e.g. a queue that borrows without quota of its own
     elif [ "$KUEUE" = yes ]; then
-      for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do lines=$(assign_gpus "$lq" "${need[@]}") && { q=$lq; break; }; done
+      for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do lines=$(assign_gpus "$lq" "${kinds[@]}") && { q=$lq; break; }; done
     else
-      lines=$(for k in "${need[@]}"; do echo "$k ${GPU_RESOURCE:-nvidia.com/gpu}"; done)   # no Kueue: plain GPU requests
+      lines=$(for k in "${kinds[@]}"; do echo "$k ${GPU_RESOURCE:-nvidia.com/gpu}"; done)   # no Kueue: plain GPU requests
       warn "no Kueue in $PROJECT: the models request ${GPU_RESOURCE:-nvidia.com/gpu} directly; a project admin cannot see whether the nodes have free GPUs"
     fi
     if [ -z "$lines" ]; then
-      bad "not enough GPU quota for $(for k in "${need[@]}"; do printf '%s, ' "$(chart_model "$k")"; done | sed 's/, $//'), which Models-as-a-Service does not offer."
-      say "     required: one GPU or MIG slice per model, 10 GB or more for Whisper and BGE-M3 (MIG 1g.18gb is enough), 24 GB or more for the language model"
+      bad "not enough GPU quota for $(for k in "${kinds[@]}"; do printf '%s, ' "$(chart_model "$k")"; done | sed 's/, $//')$([ "${#need[@]}" -gt 0 ] && echo ", which Models-as-a-Service does not offer")."
+      say "     required: one GPU or MIG slice per model, 10 GB or more for Whisper and BGE-M3 (MIG 1g.18gb is enough), 24 GB or more for the language model$([ "$AVATAR_CHOICE" = openspline ] && echo ", a whole GPU for the OpenSpline avatar")"
       say "     available: $( [ -n "$GPU_OFFERS" ] && gpu_offers | awk '{printf "%s x %s on queue %s; ", $3, $2, $1}' || echo "no queue of $PROJECT with GPU quota")"
       say "     options: book GPUs for $PROJECT (on a shared cluster: the console's GPU booking page), then run scripts/setup.sh again;"
       say "              or a remote endpoint per model: REMOTE_STT_ENDPOINT=... REMOTE_STT_MODEL=... (LLM, EMB likewise), keys in $SECRETS_FILE"
+      [ "$AVATAR_CHOICE" = openspline ] && say "              or another avatar: AVATAR_PROVIDER=tavus (or none) scripts/setup.sh --step 2"
       return 1
     fi
     while read -r k v; do gpu[$k]=$v; done <<< "$lines"
@@ -557,7 +598,7 @@ step2_namespace() {
   if [ "${TTS_GPU:-auto}" != false ] && [ "$KUEUE" = yes ] && [ -n "$GPU_OFFERS" ] && [ -z "${GPU_RESOURCE:-}" ]; then
     local with_tts="" tq
     for tq in ${q:-${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}}; do
-      with_tts=$(assign_gpus "$tq" ${need[@]+"${need[@]}"} TTS) && { q=$tq; break; }
+      with_tts=$(assign_gpus "$tq" ${kinds[@]+"${kinds[@]}"} TTS) && { q=$tq; break; }
       with_tts=""
     done
     [ -n "$with_tts" ] && while read -r k v; do gpu[$k]=$v; done <<< "$with_tts"
@@ -574,6 +615,12 @@ step2_namespace() {
   save MODEL_TTS_GPU "${gpu[TTS]:-}"
   if [ -n "${gpu[TTS]:-}" ]; then ok "text-to-speech: Kokoro on 1 x ${gpu[TTS]}${q:+ from queue $q} ($KOKORO_GPU_IMAGE)"
   else ok "text-to-speech: Kokoro on CPU, with one synthesis thread per CPU of its limit (no GPU slice left over; TTS_GPU=false keeps it there)"; fi
+  save AVATAR_CHOICE "$AVATAR_CHOICE"; save AVATAR_GPU "${gpu[AVATAR]:-}"
+  case "$AVATAR_CHOICE" in
+    openspline) ok "avatar: OpenSpline, self-hosted on 1 x ${gpu[AVATAR]}${q:+ from queue $q} (its first start installs it and downloads its weights, 10 to 20 minutes)" ;;
+    tavus)      ok "avatar: Tavus (its key in step 5)" ;;
+    none)       ok "avatar: none (voice sessions are audio-only)" ;;
+  esac
   PROFILE=namespace; save PROFILE namespace; write_values_object; ok "profile namespace saved ($STATE_DIR/values-object.json); no guardrail model"; mark 2
 }
 step3() {
@@ -881,7 +928,11 @@ step5() {
 
   # ---- Tavus ------------------------------------------------------------------------------
   say ""; say "  ${B}Tavus${N} (avatar video). Free plan: 25 conversational minutes a month, one stream."
-  while :; do
+  case "${AVATAR_CHOICE:-tavus}" in
+    openspline) ok "not needed: the avatar is OpenSpline, self-hosted (chosen in step 2)" ;;
+    none)       ok "not needed: no avatar (chosen in step 2)" ;;
+  esac
+  while [ "${AVATAR_CHOICE:-tavus}" = tavus ]; do
     [ -n "${TAVUS_API_KEY:-}" ] && ok "TAVUS_API_KEY already in the file" || need_key TAVUS_API_KEY "5f. On your laptop open https://platform.tavus.io > API Keys > Create, then paste the key" '^[A-Za-z0-9_-]{16,}$' "the key from the Tavus API Keys page" "the avatar video (voice sessions run audio-only)"
     [ -n "${TAVUS_API_KEY:-}" ] || break
     local code; code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "x-api-key: $TAVUS_API_KEY" https://tavusapi.com/v2/replicas)
@@ -973,16 +1024,20 @@ step5() {
     note "creating the secrets in $PROJECT from the file (passwords are generated)"
     NAMESPACE="$PROJECT" SECRETS_FILE="$SECRETS_FILE" "$ROOT/scripts/create-secrets.sh" | sed 's/^/  /' || return 1
   fi
-  local key slack=off docs=off avatar=off
+  local key slack=off docs=off avatar=off keys=(SLACK_BOT_TOKEN SLACK_SIGNING_SECRET GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_DOCS_FOLDER_ID)
   in_cluster() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$1}" 2>/dev/null)" ]; }
-  for key in SLACK_BOT_TOKEN SLACK_SIGNING_SECRET TAVUS_API_KEY GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_DOCS_FOLDER_ID; do
+  [ "${AVATAR_CHOICE:-tavus}" = tavus ] && keys+=(TAVUS_API_KEY)
+  for key in "${keys[@]}"; do
     if in_cluster "$key"; then ok "$key in the cluster"; else warn "$key empty in the cluster (skipped; that feature stays off)"; fi
   done
   in_cluster SLACK_BOT_TOKEN && slack=on
   in_cluster GOOGLE_SERVICE_ACCOUNT_JSON && in_cluster GOOGLE_DOCS_FOLDER_ID && docs=on
-  in_cluster TAVUS_API_KEY && avatar=on
-  ok "step 6 deploys with Slack $slack, Google Docs $docs and the Tavus avatar $avatar (they follow the keys); requests are approved in the admin portal$([ "$slack" = on ] && echo " and in Slack")"
-  [ "$avatar" = on ] || note "without a Tavus key, voice sessions are audio-only; add TAVUS_API_KEY to $SECRETS_FILE, then --step 5 and --step 6, to bring the avatar in"
+  case "${AVATAR_CHOICE:-tavus}" in
+    tavus) in_cluster TAVUS_API_KEY && avatar=Tavus ;;
+    openspline) avatar="OpenSpline (self-hosted)" ;;
+  esac
+  ok "step 6 deploys with Slack $slack, Google Docs $docs and avatar $avatar (Slack, Google Docs and Tavus follow the keys); requests are approved in the admin portal$([ "$slack" = on ] && echo " and in Slack")"
+  [ "${AVATAR_CHOICE:-tavus}" = tavus ] && [ "$avatar" = off ] && note "without a Tavus key, voice sessions are audio-only; add TAVUS_API_KEY to $SECRETS_FILE, then --step 5 and --step 6, to bring the avatar in (or AVATAR_PROVIDER=openspline scripts/setup.sh --step 2 for the self-hosted one)"
   note "admin portal password (generated, kept on re-runs): oc extract secret/assistant-admin -n $PROJECT --keys=ADMIN_PASSWORD --to=-"
   mark 5
 }
@@ -993,7 +1048,7 @@ step6_namespace() {
   local log extra=(); log=$(logfile deploy)
   [ "$TURN_SECRET" = yes ] || { extra+=(--set livekit.turn.enabled=false); note "no TURN certificate: LiveKit runs without TURN (voice on open networks only)"; }
   say "  values chart/values-demo-cluster.yaml plus $STATE_DIR/values-object.json, secrets from $SECRETS_FILE (log $log)"
-  say "  this takes 5 to 20 minutes: image pulls, and the weights of the models served in the project"
+  say "  this takes 5 to 20 minutes: image pulls, and the weights of the models served in the project$([ "${AVATAR_CHOICE:-}" = openspline ] && echo "; the OpenSpline avatar's first start up to 40")"
   [ -n "${AVOID_NODES:-}" ] && note "pods avoid the nodes $AVOID_NODES, found unable to start containers by an earlier run"
   # shellcheck disable=SC1090
   set -a; [ -f "$SECRETS_FILE" ] && . "$SECRETS_FILE"; set +a
@@ -1001,7 +1056,7 @@ step6_namespace() {
   # the saved list keeps every later install and test pod off it
   local rc=0
   env PROJECT="$PROJECT" DOMAIN="$DOMAIN" SECRETS_FILE="$SECRETS_FILE" LOG_FILE="$log" RUN_TESTS=1 MODELS= \
-    AVOID_NODES="${AVOID_NODES:-}" AVOID_NODES_FILE="$STATE_DIR/avoid-nodes" \
+    AVOID_NODES="${AVOID_NODES:-}" AVOID_NODES_FILE="$STATE_DIR/avoid-nodes" AVATAR_PROVIDER="${AVATAR_CHOICE:-}" \
     "$ROOT/scripts/deploy.sh" -f "$ROOT/chart/values-demo-cluster.yaml" -f "$STATE_DIR/values-object.json" "${extra[@]}" || rc=$?
   [ -s "$STATE_DIR/avoid-nodes" ] && save AVOID_NODES "$(tr '\n' ' ' < "$STATE_DIR/avoid-nodes" | sed 's/ *$//')"
   [ "$rc" = 0 ] && { mark 6; return 0; }
@@ -1019,7 +1074,7 @@ step6() {
   if [ "$PROFILE" = remote ]; then llm_env=(LLM_ENDPOINT="$REMOTE_LLM_ENDPOINT" LLM_MODEL="$REMOTE_LLM_MODEL"); elif [ -z "${LLM_NS:-}" ]; then llm_env=(LLM_ENDPOINT="http://llama-3-1-8b-instruct-predictor.$PROJECT.svc.cluster.local:8080/v1" LLM_MODEL="llama-3-1-8b-instruct"); fi
   # shellcheck disable=SC1090
   set -a; [ -f "$SECRETS_FILE" ] && . "$SECRETS_FILE"; set +a
-  env PROJECT="$PROJECT" SECRETS_FILE="$SECRETS_FILE" VALUES_OBJECT_FILE="$STATE_DIR/values-object.json" LLM_NAME="$LLM_NAME" LOG_FILE="$log" RUN_TESTS=1 "${llm_env[@]}" "$ROOT/scripts/deploy-argocd.sh" && { mark 6; return 0; }
+  env PROJECT="$PROJECT" SECRETS_FILE="$SECRETS_FILE" VALUES_OBJECT_FILE="$STATE_DIR/values-object.json" LLM_NAME="$LLM_NAME" LOG_FILE="$log" RUN_TESTS=1 AVATAR_PROVIDER="${AVATAR_CHOICE:-}" "${llm_env[@]}" "$ROOT/scripts/deploy-argocd.sh" && { mark 6; return 0; }
   bad "deployment reported problems; see $log, fix, and run: scripts/setup.sh --step 6"; return 1
 }
 step7() {

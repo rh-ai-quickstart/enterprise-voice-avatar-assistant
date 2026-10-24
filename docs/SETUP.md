@@ -328,6 +328,17 @@ then `oc delete pvc -l app.kubernetes.io/instance=assistant -n <project>`.
 - **Resume.** `scripts/setup.sh` again. The status board shows where it stopped and the run
   continues there. A step already done by hand is recognised (the marks come from the
   cluster) and skipped.
+- **Another laptop.** Clone, log in with `oc`, run `scripts/setup.sh`. Nothing needs copying.
+  After you confirm the target, setup rebuilds from the cluster what only the first machine
+  had:
+  - the keys missing from `~/secrets.env`, from the secrets it created then (the Google
+    service account goes back into `~/.assistant-setup/google-sa.json`, and the
+    Models-as-a-Service key comes from the models' secret);
+  - the avoided nodes, from the release's node exclusions;
+  - `docs/handoff/private/environment.md` (the cluster's internal values, kept out of git).
+
+  Only missing values are filled in; nothing on the laptop is overwritten. Step 2 asks its
+  question again (the avatar), and step 5 verifies the restored keys without asking for them.
 - **Re-run one step.** `scripts/setup.sh --step N`, then `scripts/setup.sh` to continue. The
   usual reasons: a key changed (`--step 5`, then `--step 6`), a fix landed in the repository
   (`git pull`, then `--step 6`: it refreshes the application and re-syncs), the model share

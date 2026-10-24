@@ -143,6 +143,12 @@ and Kokoro keeps its slice. The pair is not measured yet.
   personal Gmail Drive folder (no storage quota for service accounts), while the folder
   check passes. It was seen on an earlier sandbox and is not fixed.
 
+## Moving to another laptop
+No copying is needed: clone, `oc login`, `scripts/setup.sh`. Setup rebuilds `~/secrets.env`,
+the avoided nodes and `docs/handoff/private/environment.md` from the cluster. Mohamed's
+hand-written private notes, with the accounts and the history of the nodes, are also in
+`~/.assistant-setup/handoff-private-environment.md` on the first Mac.
+
 ## Not to forget
 - Every push to `main` needs Mohamed's explicit "yes, push <sha>" (see
   [working-with-mohamed.md](working-with-mohamed.md)).

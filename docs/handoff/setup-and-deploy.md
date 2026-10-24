@@ -114,6 +114,30 @@ To try step 2 without touching the real state:
 `STATE_DIR=/tmp/x SECRETS_FILE=/tmp/x/none.env scripts/setup.sh --step 2 --yes`, after copying
 `state.env` there. It only reads from the cluster.
 
+### Another laptop
+Nothing needs copying between machines. Right after the target is confirmed (in a full run
+and with `--step N`; `--status` stays read-only), `restore_local_state` rebuilds from the
+cluster what only the first machine had. It fills in only what is missing:
+- **Keys:** `~/secrets.env` gets the keys it lacks from the secrets created before:
+  - `assistant-integrations`: Slack, Tavus, Simli, the Google folder;
+  - `assistant-models`: model keys other than `none`;
+  - `assistant-n8n`: the owner's e-mail and password.
+
+  The Google service account JSON is written back to `~/.assistant-setup/google-sa.json` and
+  named in `GOOGLE_SERVICE_ACCOUNT_FILE`. `MAAS_API_KEY` is taken from the model secret when
+  `LLM_BASE_URL` or `EMBEDDINGS_BASE_URL` in `assistant-config` points at Models-as-a-Service.
+  Only key names are printed. The n8n encryption key, the passwords and the internal tokens
+  stay in the cluster, because `create-secrets.sh` keeps them anyway.
+- **Avoided nodes:** `~/.assistant-setup/avoid-nodes` is rebuilt from the `metadata.name NotIn`
+  node exclusions on the release's Deployments.
+- **Private doc:** `docs/handoff/private/environment.md` gets the API and console URLs, the
+  domain, the user and groups, the project and access, the login command, Models-as-a-Service
+  and its models, the GPU queues and booking end, the avoided nodes, and where each GPU pod
+  runs.
+
+Tested as a new laptop (empty state, no `~/secrets.env`) against TMM: ten values restored,
+the avoided node, and the doc written. A second run changed nothing.
+
 ## scripts/deploy.sh
 A Helm install for a regular user, usable on its own. It takes these variables:
 - `PROJECT`, `DOMAIN`, `RELEASE` (default `assistant`);

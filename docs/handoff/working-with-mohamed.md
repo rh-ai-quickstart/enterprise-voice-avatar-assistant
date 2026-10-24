@@ -51,7 +51,7 @@ sessions. Follow them; they are not in the code.
   `REFRESH=<secret>` for one secret, or `oc set data` for one key.
 - The OpenShift login token on TMM expires after some hours. When `oc` answers
   "Unauthorized", ask Mohamed to log in again (command in
-  [setup-and-deploy.md](setup-and-deploy.md)).
+  [environments.md](environments.md#2-the-red-hat-tmm-shared-cluster-namespace-path)).
 
 ## Preferences that shape decisions
 - **Self-hosted first.** "Ideally I prefer everything to be self-hosted." Lead with models

@@ -25,6 +25,11 @@
 # in high quality on a GPU pair when the booked quota has one free next to the models, else in
 # low quality on one GPU; AVATAR_QUALITY=low or high decides instead.
 #
+# On another laptop nothing needs copying: after you confirm the target, setup rebuilds what only
+# the first machine had from the cluster. It fills the keys missing from ~/secrets.env from the
+# secrets created before, restores the avoided nodes from the release's node exclusions, and
+# writes docs/handoff/private/environment.md (internal values, kept out of git).
+#
 # On macOS missing tools (a current bash, oc, helm, jq, ...) are installed with Homebrew,
 # which the script offers to install first.
 #
@@ -1178,6 +1183,91 @@ confirm_target() {
   save CONFIRMED_TARGET "$t"
 }
 
+# ---------------------------------------------------------------- another laptop ------------
+# What only the machine that ran setup before has is rebuilt from the cluster: the keys in
+# SECRETS_FILE (from the secrets created then), the avoided nodes (from the release's node
+# exclusions) and the internal environment notes. Only what is missing is filled in.
+RESTORE_KEYS="assistant-integrations:SLACK_BOT_TOKEN assistant-integrations:SLACK_SIGNING_SECRET
+  assistant-integrations:TAVUS_API_KEY assistant-integrations:TAVUS_FACE_ID assistant-integrations:TAVUS_PAL_ID
+  assistant-integrations:SIMLI_API_KEY assistant-integrations:SIMLI_FACE_ID assistant-integrations:GOOGLE_DOCS_FOLDER_ID
+  assistant-models:LLM_API_KEY assistant-models:STT_API_KEY assistant-models:TTS_API_KEY
+  assistant-models:EMBEDDINGS_API_KEY assistant-models:GUARDRAILS_API_KEY assistant-models:HF_TOKEN
+  assistant-n8n:N8N_OWNER_EMAIL assistant-n8n:N8N_OWNER_PASSWORD"
+cluster_secret() { oc get secret "$1" -n "$PROJECT" -o "jsonpath={.data.$2}" 2>/dev/null | base64 -d 2>/dev/null; }
+file_has() { grep -q "^$1=." "$SECRETS_FILE" 2>/dev/null; }
+file_put() { { grep -v "^$1=" "$SECRETS_FILE" || true; } > "$SECRETS_FILE.tmp"; printf '%s=%s\n' "$1" "$2" >> "$SECRETS_FILE.tmp"; mv "$SECRETS_FILE.tmp" "$SECRETS_FILE"; chmod 600 "$SECRETS_FILE"; }
+restore_secrets_file() {
+  oc get secret assistant-integrations -n "$PROJECT" >/dev/null 2>&1 || return 0   # nothing deployed yet
+  [ -f "$SECRETS_FILE" ] || { cp "$ROOT/secrets.env.example" "$SECRETS_FILE" && chmod 600 "$SECRETS_FILE"; }
+  local pair key v k url restored=()
+  for pair in $RESTORE_KEYS; do
+    key=${pair#*:}; file_has "$key" && continue
+    v=$(cluster_secret "${pair%%:*}" "$key")
+    [ -n "$v" ] && [ "$v" != none ] || continue
+    file_put "$key" "$v"; restored+=("$key")
+  done
+  # the Google service account goes back into the file the key was read from
+  if ! file_has GOOGLE_SERVICE_ACCOUNT_FILE && v=$(cluster_secret assistant-integrations GOOGLE_SERVICE_ACCOUNT_JSON) && [ -n "$v" ]; then
+    (umask 077; printf '%s\n' "$v" > "$STATE_DIR/google-sa.json")
+    file_put GOOGLE_SERVICE_ACCOUNT_FILE "$STATE_DIR/google-sa.json"; restored+=(GOOGLE_SERVICE_ACCOUNT_FILE)
+  fi
+  # the Models-as-a-Service key is the one the models served there use
+  if ! file_has MAAS_API_KEY && [ -n "${MAAS_URL:-}" ]; then
+    for k in LLM EMBEDDINGS; do
+      url=$(oc get configmap assistant-config -n "$PROJECT" -o "jsonpath={.data.${k}_BASE_URL}" 2>/dev/null)
+      [[ "$url" == "$MAAS_URL"* ]] || continue
+      v=$(cluster_secret assistant-models "${k}_API_KEY"); [ -n "$v" ] && [ "$v" != none ] || continue
+      file_put MAAS_API_KEY "$v"; restored+=(MAAS_API_KEY); break
+    done
+  fi
+  [ "${#restored[@]}" -gt 0 ] && ok "keys restored from the cluster's secrets into $SECRETS_FILE: ${restored[*]}"
+  return 0
+}
+restore_avoid_nodes() {
+  [ -s "$STATE_DIR/avoid-nodes" ] && return 0
+  local nodes
+  nodes=$(oc get deployments -n "$PROJECT" -l app.kubernetes.io/instance=assistant -o json 2>/dev/null | jq -r '[.items[].spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[]?.matchFields[]? | select(.key == "metadata.name" and .operator == "NotIn") | .values[]] | unique | .[]' 2>/dev/null)
+  [ -n "$nodes" ] || return 0
+  printf '%s\n' $nodes > "$STATE_DIR/avoid-nodes"
+  AVOID_NODES=$(tr '\n' ' ' < "$STATE_DIR/avoid-nodes" | sed 's/ *$//')
+  ok "avoided nodes restored from the release's node exclusions: $AVOID_NODES"
+}
+write_private_environment() {
+  local f="$ROOT/docs/handoff/private/environment.md" groups gpu_pods lq r u until
+  [ -s "$f" ] && return 0
+  mkdir -p "${f%/*}" || return 0
+  groups=$(oc auth whoami -o jsonpath='{.status.userInfo.groups}' 2>/dev/null | jq -r 'join(", ")' 2>/dev/null)
+  gpu_pods=$(oc get pods -n "$PROJECT" -o json 2>/dev/null | jq -r '.items[] | [.spec.containers[].resources.limits // {} | to_entries[] | select(.key | startswith("nvidia.com/")) | "\(.value) x \(.key)"] as $g | select($g | length > 0) | "| \(.metadata.name) | \(.spec.nodeName // "not scheduled") | \($g | join(", ")) |"' 2>/dev/null)
+  {
+    printf '# Internal environment values (not in git)\n\n'
+    printf 'Generated by scripts/setup.sh on %s from the cluster; delete this file and run setup again to\n' "$(date '+%Y-%m-%d %H:%M')"
+    printf 'refresh it. `.gitignore` keeps this folder out of the public repository: never commit it.\n\n'
+    printf '## Cluster\n'
+    printf -- '- API: %s\n- Console: %s\n- Apps domain: %s\n' "$(oc whoami --show-server 2>/dev/null)" "$(oc whoami --show-console 2>/dev/null)" "${DOMAIN:-unknown}"
+    printf -- '- User: %s%s\n' "$USER_NAME" "${groups:+ (groups: $groups)}"
+    printf -- '- Project: %s, %s access\n- Kubeconfig: %s\n\n' "$PROJECT" "$ACCESS" "${KUBECONFIG:-~/.kube/config}"
+    printf 'Log in from a Mac (zsh). Get a token from the console: your name, Copy login command, Display Token.\n\n'
+    printf '```bash\nexport KUBECONFIG=%s && read -rs "TOKEN?Paste the API token: " && echo && oc login --token="$TOKEN" --server=%s && unset TOKEN && oc whoami\n```\n\n' "${KUBECONFIG:-~/.kube/config}" "$(oc whoami --show-server 2>/dev/null)"
+    if [ "$ACCESS" = namespace ]; then
+      printf '## Models-as-a-Service\n- URL: %s (inference: <URL>/prelude-maas/<model>/v1)\n' "${MAAS_URL:-not found}"
+      printf -- '- Models: %s\n\n' "$(for r in $MAAS_IDS; do printf '%s ' "${r##*/}"; done)"
+      printf '## GPU queues (Kueue)\n| Queue | Resource | Units | Booked until |\n|---|---|---|---|\n'
+      while read -r lq r u until; do [ -n "$lq" ] && printf '| %s | %s | %s | %s |\n' "$lq" "$r" "$u" "$(until_text "$until")"; done < <(gpu_offers)
+      printf '\n'
+    fi
+    printf '## Nodes\n- Avoided (cannot start containers): %s\n\n' "${AVOID_NODES:-none}"
+    if [ -n "$gpu_pods" ]; then printf '| GPU pod | Node | GPUs |\n|---|---|---|\n%s\n' "$gpu_pods"; fi
+  } > "$f"
+  chmod 600 "$f"
+  ok "wrote ${f#"$ROOT"/} (internal values of this cluster, kept out of git)"
+}
+restore_local_state() {
+  [ "$LOGGED_IN" = 1 ] && [ "$PROJECT_EXISTS" = yes ] || return 0
+  restore_secrets_file
+  restore_avoid_nodes
+  write_private_environment
+}
+
 # ---------------------------------------------------------------- main ----------------------
 ensure_tool jq quiet || exit 1
 [ "$MODE" = status ] || ensure_login || { discover; show_status; exit 1; }
@@ -1185,9 +1275,10 @@ say "$(ts) discovering the cluster (a few seconds)"
 discover; show_status
 case "$MODE" in
 status) exit 0 ;;
-step) [ -n "$ONLY" ] || { echo "usage: scripts/setup.sh --step N"; exit 1; }; confirm_target; ensure_helm || exit 1; run_step "$ONLY"; rc=$?; discover; show_status; exit $rc ;;
+step) [ -n "$ONLY" ] || { echo "usage: scripts/setup.sh --step N"; exit 1; }; confirm_target; restore_local_state; ensure_helm || exit 1; run_step "$ONLY"; rc=$?; discover; show_status; exit $rc ;;
 esac
 confirm_target
+restore_local_state
 ensure_helm || exit 1   # the deployment test and the verification render the test pod with helm
 while :; do
   [ -n "$NEXT" ] || { say "  ${G}Every step is done.${N} scripts/setup.sh --step N runs one again."; exit 0; }

@@ -26,9 +26,17 @@ Last updated: 2026-10-24, with `main` at `193c128`.
 | [history.md](history.md) | What was done, in order, with commits and the reason for each |
 
 Exact internal values for the Red Hat TMM cluster (console and API URLs, the project name,
-group and subscription names) are not in this public repository. Locally they are in
-`docs/handoff/private/environment.md`, which `.gitignore` keeps out of git. Ask Mohamed for
-that file, or read them off the cluster as [environments.md](environments.md) explains.
+group and subscription names) are not in this public repository. They are in
+`docs/handoff/private/environment.md`, which `.gitignore` keeps out of git, and
+`scripts/setup.sh` writes it from the cluster on any laptop after `oc login`.
+
+**Moving to another laptop needs no copying.**
+1. Clone the repository.
+2. Log in with `oc` (the login command is in [environments.md](environments.md#2-the-red-hat-tmm-shared-cluster-namespace-path)).
+3. Run `scripts/setup.sh`.
+
+It rebuilds `~/secrets.env` from the cluster's secrets, the avoided nodes from the
+release, and the private environment notes (see [setup-and-deploy.md](setup-and-deploy.md#another-laptop)).
 
 ## For a Claude Code session
 

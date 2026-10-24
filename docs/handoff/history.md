@@ -128,7 +128,10 @@ administers one project only.
     else low. `AVATAR_QUALITY` overrides it. The chart builds the workers from the quality
     and the GPU count.
   - High on one H200 measured 1.07x real time, which is why it needs the pair.
-- **2026-10-25:** this handoff folder, and `CLAUDE.md`.
+- **2026-10-25:**
+  - this handoff folder, and `CLAUDE.md` (`d943998`);
+  - setup rebuilds what only the first machine had from the cluster, so another laptop
+    needs no copying: `~/secrets.env`, the avoided nodes, and the private environment notes.
 
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)

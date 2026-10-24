@@ -5,8 +5,8 @@ from the login's permissions. A cluster-admin gets the full path. A user who adm
 one project gets the namespace path. CI and the registry are shared by both.
 
 Exact internal values for the Red Hat TMM cluster are kept out of this public repository.
-Locally they are in `docs/handoff/private/environment.md` (gitignored), or read them off the
-cluster as shown below.
+`scripts/setup.sh` writes them to `docs/handoff/private/environment.md` (gitignored) after
+`oc login`; the commands below read the same values by hand.
 
 ## 1. RHDP sandbox clusters (cluster-admin path)
 
@@ -109,7 +109,18 @@ What the project can and cannot do:
   restarts recovered it.
 - **Login tokens expire after some hours.** `oc` then answers "Unauthorized", even mid-task.
 
-To read the internal values off the cluster when you are logged in:
+To log in from a Mac (zsh):
+1. Get a token in the console: your name at the top right, then Copy login command, then
+   Display Token. That page also shows the API server URL.
+2. Run the command below. Replace `API_URL` before pasting; `<` and `>` would be read as
+   redirections. The token stays out of the shell history:
+
+```bash
+export KUBECONFIG=~/.kube/tmm && read -rs "TOKEN?Paste the API token: " && echo && oc login --token="$TOKEN" --server=API_URL && unset TOKEN && oc whoami
+```
+
+To read the internal values off the cluster when you are logged in (setup writes them to
+the private doc too):
 ```bash
 oc whoami --show-server; oc whoami --show-console; oc project -q
 oc get localqueue -o wide

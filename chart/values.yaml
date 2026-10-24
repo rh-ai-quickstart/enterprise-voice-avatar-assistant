@@ -428,6 +428,9 @@ openspline:
   uvVersion: 0.8.17
   # low: one GPU, 512 x 512 video at 25 frames a second (high needs a GPU pair and is not wired here)
   quality: low
+  # Bits per second for the avatar video (one stream). LiveKit's default for 512 x 512 is 300000,
+  # which smears faces in front of busy backgrounds.
+  videoBitrate: 2000000
   # Volume for the install and the model weights, about 8 GB each; kept across upgrades
   storage: 30Gi
   # Faces offered in the UI (two to four; the first is the default), each with its portrait

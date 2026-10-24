@@ -2,6 +2,7 @@
 {{- $o := .Values.openspline }}
 {{- /* without an image of its own, the stock Python image runs the install kept on the volume */}}
 {{- $bin := ternary "openspline" "/data/openspline/venv/bin/openspline" (not (empty $o.image)) }}
+{{- $python := ternary "python" "/data/openspline/venv/bin/python" (not (empty $o.image)) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -143,8 +144,36 @@ spec:
         - name: openspline
           image: {{ $o.image | default $o.baseImage }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-          command: [{{ $bin | quote }}, "serve", "--host", "0.0.0.0", "--port", "7860"]
+          # OpenSpline publishes with LiveKit's defaults: 300 kbps for 512 x 512 video, which smears
+          # busy backgrounds, and no track source. The patch gives the video one stream at
+          # OPENSPLINE_VIDEO_BITRATE and marks the tracks as camera and microphone. It runs on every
+          # start and changes nothing once applied.
+          command: ["/bin/bash", "-euc"]
+          args:
+            - |
+              {{ $python }} - <<'PY'
+              import importlib.util, pathlib
+              path = pathlib.Path(importlib.util.find_spec("openspline_server.livekit").origin)
+              text = path.read_text()
+              old_audio = 'rtc.LocalAudioTrack.create_audio_track("avatar_audio", self.audio)\n'
+              old_video = 'rtc.LocalVideoTrack.create_video_track("avatar_video", self.video)\n'
+              if "SOURCE_CAMERA" in text:
+                  print("publish options already patched")
+              elif old_audio in text and old_video in text:
+                  text = text.replace(old_audio, old_audio[:-1] + ",\n            rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),\n")
+                  text = text.replace(old_video, old_video[:-1] + (
+                      ",\n            rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_CAMERA, simulcast=False,"
+                      " video_encoding=rtc.VideoEncoding(max_bitrate=int(__import__('os').environ['OPENSPLINE_VIDEO_BITRATE']),"
+                      " max_framerate=25)),\n"))
+                  path.write_text(text)
+                  print("publish options patched")
+              else:
+                  print("WARNING: publish_track calls not found; video keeps LiveKit's default bitrate")
+              PY
+              exec {{ $bin }} serve --host 0.0.0.0 --port 7860
           env:
+            - name: OPENSPLINE_VIDEO_BITRATE
+              value: {{ $o.videoBitrate | int64 | quote }}
             - name: HOME
               value: /tmp
             - name: HF_HOME

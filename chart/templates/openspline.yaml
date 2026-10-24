@@ -3,6 +3,27 @@
 {{- /* without an image of its own, the stock Python image runs the install kept on the volume */}}
 {{- $bin := ternary "openspline" "/data/openspline/venv/bin/openspline" (not (empty $o.image)) }}
 {{- $python := ternary "python" "/data/openspline/venv/bin/python" (not (empty $o.image)) }}
+{{- /* workers: one per GPU (low) or per GPU pair (high), from the GPUs in resources */}}
+{{- $gpus := 1 }}
+{{- range $k, $v := (dig "limits" (dict) $o.resources) }}{{ if hasPrefix "nvidia.com/" $k }}{{ $gpus = int $v }}{{ end }}{{ end }}
+{{- $high := eq $o.quality "high" }}
+{{- $workers := div $gpus (ternary 2 1 $high) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openspline-workers
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "openspline") | nindent 4 }}
+data:
+  # OpenSpline's worker layout: each worker serves one voice session at a time
+  workers.yaml: |
+    workers:
+    {{- range $i := until (int $workers) }}
+      - id: gpu-{{ $i }}
+        quality: {{ $o.quality }}
+        devices: {{ if $high }}[{{ mul $i 2 }}, {{ add (mul $i 2) 1 }}]{{ else }}[{{ $i }}]{{ end }}
+    {{- end }}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -50,6 +71,9 @@ spec:
       {{- include "assistant.selector" (dict "root" . "name" "openspline") | nindent 6 }}
   template:
     metadata:
+      annotations:
+        # a new worker layout (quality, GPUs) restarts the server
+        checksum/workers: {{ printf "%s/%d" $o.quality $gpus | sha256sum | trunc 16 }}
       labels:
         {{- include "assistant.componentLabels" (dict "root" . "name" "openspline") | nindent 8 }}
         {{- with $o.podLabels }}
@@ -170,7 +194,7 @@ spec:
               else:
                   print("WARNING: publish_track calls not found; video keeps LiveKit's default bitrate")
               PY
-              exec {{ $bin }} serve --host 0.0.0.0 --port 7860
+              exec {{ $bin }} serve --config /config/workers.yaml --host 0.0.0.0 --port 7860
           env:
             - name: OPENSPLINE_VIDEO_BITRATE
               value: {{ $o.videoBitrate | int64 | quote }}
@@ -212,16 +236,23 @@ spec:
               mountPath: /tmp
             - name: shm
               mountPath: /dev/shm
+            - name: workers
+              mountPath: /config
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: openspline-data
         - name: tmp
           emptyDir: {}
+        # high quality runs one process per GPU of the pair, which exchange tensors through it
         - name: shm
           emptyDir:
             medium: Memory
-            sizeLimit: 2Gi
+            sizeLimit: {{ ternary "8Gi" "2Gi" $high }}
+        - name: workers
+          configMap:
+            name: openspline-workers
 ---
 apiVersion: v1
 kind: Service

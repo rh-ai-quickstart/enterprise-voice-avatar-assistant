@@ -45,8 +45,16 @@ cannot reach a model. Renders nothing.
 {{- end }}
 {{- end }}
 {{- end }}
-{{- if and (eq .Values.voiceAgent.avatarProvider "openspline") (ne .Values.openspline.quality "low") }}
-{{- fail (printf "openspline.quality is %q; this chart runs low quality (one GPU), high needs a GPU pair" .Values.openspline.quality) }}
+{{- if eq .Values.voiceAgent.avatarProvider "openspline" }}
+{{- $q := .Values.openspline.quality }}
+{{- if not (has $q (list "low" "high")) }}
+{{- fail (printf "openspline.quality is %q; use low (one GPU per session) or high (two)" $q) }}
+{{- end }}
+{{- $gpus := 1 }}
+{{- range $k, $v := (dig "limits" (dict) .Values.openspline.resources) }}{{ if hasPrefix "nvidia.com/" $k }}{{ $gpus = int $v }}{{ end }}{{ end }}
+{{- if and (eq $q "high") (lt $gpus 2) }}
+{{- fail (printf "openspline.quality high needs two GPUs per voice session; openspline.resources has %d (set nvidia.com/gpu to 2, or quality low)" $gpus) }}
+{{- end }}
 {{- end }}
 {{- if and .Values.ragApi.requestsRequireApproval (not .Values.integrations.slack.enabled) (not .Values.admin.enabled) }}
 {{- fail "requests need an approval surface: enable Slack (integrations.slack.enabled) or the admin portal (admin.enabled), or set ragApi.requestsRequireApproval=false" }}

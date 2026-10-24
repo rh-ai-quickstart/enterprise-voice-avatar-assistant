@@ -426,7 +426,11 @@ openspline:
   # OpenSpline commit installed on first start, and the uv release that installs it
   ref: 6d53966e412a9c2946f3b777735ac04aa8879b0b
   uvVersion: 0.8.17
-  # low: one GPU, 512 x 512 video at 25 frames a second (high needs a GPU pair and is not wired here)
+  # low: the Lite model, one GPU per voice session (5x real time on an H200).
+  # high: the Pro model, finer detail, two GPUs per voice session (one H200 only just keeps up).
+  # Both render 512 x 512 at 25 frames a second. The GPUs in resources make the workers: one per
+  # GPU (low) or per pair (high), each serving one voice session at a time. scripts/setup.sh picks
+  # high when the booked quota has two whole GPUs for it (AVATAR_QUALITY overrides).
   quality: low
   # Bits per second for the avatar video (one stream). LiveKit's default for 512 x 512 is 300000,
   # which smears faces in front of busy backgrounds.
@@ -448,8 +452,9 @@ openspline:
     - id: emily
       name: Emily
       gender: female
-  # A whole GPU: real-time video needs its compute. On a Kueue-managed project, add the queue in
-  # podLabels (kueue.x-k8s.io/queue-name); scripts/setup.sh does both from the booked quota.
+  # Whole GPUs: real-time video needs their compute (two for high quality, with more memory). On a
+  # Kueue-managed project, add the queue in podLabels (kueue.x-k8s.io/queue-name); scripts/setup.sh
+  # does all of this from the booked quota.
   resources:
     requests:
       cpu: "2"

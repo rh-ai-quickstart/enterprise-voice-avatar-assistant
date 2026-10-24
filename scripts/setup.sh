@@ -20,8 +20,10 @@
 # REMOTE_STT_ENDPOINT, REMOTE_EMB_ENDPOINT (and the keys in ~/secrets.env).
 #
 # The avatar video is chosen in step 2: tavus (Tavus cloud, its key in step 5), openspline
-# (self-hosted, OpenSpline on a whole GPU of the project) or none (audio only); AVATAR_PROVIDER
-# answers the question, and a later run can switch with --step 2 then --step 6.
+# (self-hosted, OpenSpline on whole GPUs of the project) or none (audio only); AVATAR_PROVIDER
+# answers the question, and a later run can switch with --step 2 then --step 6. OpenSpline runs
+# in high quality on a GPU pair when the booked quota has one free next to the models, else in
+# low quality on one GPU; AVATAR_QUALITY=low or high decides instead.
 #
 # On macOS missing tools (a current bash, oc, helm, jq, ...) are installed with Homebrew,
 # which the script offers to install first.
@@ -371,11 +373,14 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
        n8n: {storage: "10Gi"}}' ;;
   *)
     jq -n --argjson d "$llm_deploy" '{models:{llm:{deploy:$d,args:["--max-model-len=8192","--gpu-memory-utilization=0.45","--max-num-seqs=8","--enforce-eager","--enable-auto-tool-choice","--tool-call-parser=llama3_json"]},stt:{deploy:true,args:["--gpu-memory-utilization=0.15","--max-num-seqs=8","--enforce-eager"]},embeddings:{args:["--runner=pooling","--max-model-len=8192","--gpu-memory-utilization=0.12","--max-num-seqs=8","--enforce-eager"]},guardrails:{provider:"none",deploy:false}}}' ;;
-  esac | jq --arg av "${AVATAR_CHOICE:-}" --arg ag "${AVATAR_GPU:-}" --arg q "${GPU_QUEUE:-}" '
-    # the avatar chosen in step 2; OpenSpline gets the GPU (whole card or MIG slice) assigned to it
-    def gpu($g): if $g == "" or $g == "nvidia.com/gpu" then {} else {resources: {requests: {"nvidia.com/gpu": null, ($g): "1"}, limits: {"nvidia.com/gpu": null, ($g): "1"}}} end;
+  esac | jq --arg av "${AVATAR_CHOICE:-}" --arg ag "${AVATAR_GPU:-}" --arg an "${AVATAR_GPUS:-1}" --arg al "${AVATAR_LEVEL:-low}" --arg q "${GPU_QUEUE:-}" '
+    # the avatar chosen in step 2; OpenSpline gets the GPUs assigned to it (one, or a pair for
+    # high quality, whose two processes need more memory)
+    def gpus($g; $n): if $g == "" then {} else {resources: {requests: {"nvidia.com/gpu": null, ($g): $n}, limits: {"nvidia.com/gpu": null, ($g): $n}}} end;
     (if $av == "" then . else . * {voiceAgent: {avatarProvider: $av}} end)
-    | if $av == "openspline" then . * {openspline: (gpu($ag) + (if $q != "" then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end))} else . end' > "$STATE_DIR/values-object.json"
+    | if $av == "openspline" then . * {openspline: ({quality: $al} * gpus($ag; $an)
+        * (if $al == "high" then {resources: {requests: {memory: "16Gi"}, limits: {memory: "64Gi"}}} else {} end)
+        * (if $q != "" then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end))} else . end' > "$STATE_DIR/values-object.json"
 }
 # Namespace profile, per model: REMOTE_<X>_ENDPOINT when given, else the Models-as-a-Service
 # model named MAAS_<X>_MODEL, else the chart's own model on a GPU of a Kueue queue with quota.
@@ -416,7 +421,7 @@ choose_avatar() {
     say "     type one of: $*"; [ "$YES" = 1 ] && return 1
   done
 }
-avatar_summary() { case "${AVATAR_CHOICE:-}" in openspline) echo "avatar OpenSpline${AVATAR_GPU:+ on $AVATAR_GPU}";; tavus) echo "avatar Tavus";; none) echo "no avatar";; esac; }
+avatar_summary() { case "${AVATAR_CHOICE:-}" in openspline) echo "avatar OpenSpline ${AVATAR_LEVEL:-low}${AVATAR_GPU:+ on ${AVATAR_GPUS:-1} x $AVATAR_GPU}";; tavus) echo "avatar Tavus";; none) echo "no avatar";; esac; }
 
 # ---------------------------------------------------------------- status --------------------
 STEPS=("Cluster and prerequisites" "Deployment profile" "Cluster bootstrap" "TURN certificate" "Keys and integrations" "Deploy with Argo CD" "n8n workflows" "Sample documents" "Verification")
@@ -546,7 +551,7 @@ step2() {
     choose_avatar tavus tavus openspline none || return 1
     [ "$AVATAR_CHOICE" = openspline ] && warn "OpenSpline takes one time-sliced share of a GPU, next to the models: on a busy card the video can fall below 25 frames a second"
   fi
-  save AVATAR_CHOICE "$AVATAR_CHOICE"; unsave AVATAR_GPU
+  save AVATAR_CHOICE "$AVATAR_CHOICE"; unsave AVATAR_GPU; unsave AVATAR_GPUS; unsave AVATAR_LEVEL
   save PROFILE "$PROFILE"; write_values_object; ok "profile $PROFILE saved ($STATE_DIR/values-object.json), $(avatar_summary)"; mark 2
 }
 step2_namespace() {
@@ -570,7 +575,28 @@ step2_namespace() {
     for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do assign_gpus "$lq" AVATAR ${need[@]+"${need[@]}"} >/dev/null && { fits=$lq; break; }; done
   fi
   choose_avatar "$([ -n "$fits" ] && echo openspline || echo tavus)" tavus openspline none || return 1
-  [ "$AVATAR_CHOICE" = openspline ] && kinds+=(AVATAR)
+  # OpenSpline's quality: high (the Pro model) needs a GPU pair to stay real time, low one GPU
+  if [ "$AVATAR_CHOICE" = openspline ]; then
+    case "${AVATAR_QUALITY:-auto}" in
+      low)  kinds+=(AVATAR) ;;
+      high) kinds+=(AVATAR AVATAR) ;;
+      auto)
+        # high when a queue has the pair next to the models, unless it would push Kokoro off the
+        # GPU it gets with low quality (seconds per sentence on CPU cost more than the detail gains)
+        kinds+=(AVATAR)
+        if [ "$KUEUE" = yes ] && [ -z "${GPU_RESOURCE:-}" ]; then
+          local -a tts=(); [ "${TTS_GPU:-auto}" != false ] && tts=(TTS)
+          for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do
+            if assign_gpus "$lq" AVATAR AVATAR ${need[@]+"${need[@]}"} ${tts[@]+"${tts[@]}"} >/dev/null \
+              || { ! assign_gpus "$lq" AVATAR ${need[@]+"${need[@]}"} ${tts[@]+"${tts[@]}"} >/dev/null \
+                   && assign_gpus "$lq" AVATAR AVATAR ${need[@]+"${need[@]}"} >/dev/null; }; then
+              kinds+=(AVATAR); break
+            fi
+          done
+        fi ;;
+      *) bad "AVATAR_QUALITY=$AVATAR_QUALITY: use low, high or auto"; return 1 ;;
+    esac
+  fi
   kinds+=(${need[@]+"${need[@]}"})
   if [ "${#kinds[@]}" -gt 0 ]; then
     [ "${#need[@]}" -eq 0 ] || [ "$KSERVE_API" = yes ] || { bad "$(for k in "${need[@]}"; do printf '%s, ' "$(model_title "$k")"; done | sed 's/, $//'): not on Models-as-a-Service, and the project cannot serve models (no KServe); set REMOTE_<LLM|STT|EMB>_ENDPOINT and _MODEL"; return 1; }
@@ -584,11 +610,11 @@ step2_namespace() {
     fi
     if [ -z "$lines" ]; then
       bad "not enough GPU quota for $(for k in "${kinds[@]}"; do printf '%s, ' "$(chart_model "$k")"; done | sed 's/, $//')$([ "${#need[@]}" -gt 0 ] && echo ", which Models-as-a-Service does not offer")."
-      say "     required: one GPU or MIG slice per model, 10 GB or more for Whisper and BGE-M3 (MIG 1g.18gb is enough), 24 GB or more for the language model$([ "$AVATAR_CHOICE" = openspline ] && echo ", a whole GPU for the OpenSpline avatar")"
+      say "     required: one GPU or MIG slice per model, 10 GB or more for Whisper and BGE-M3 (MIG 1g.18gb is enough), 24 GB or more for the language model$([ "$AVATAR_CHOICE" = openspline ] && echo ", a whole GPU for the OpenSpline avatar (two for AVATAR_QUALITY=high)")"
       say "     available: $( [ -n "$GPU_OFFERS" ] && gpu_offers | awk '{printf "%s x %s on queue %s; ", $3, $2, $1}' || echo "no queue of $PROJECT with GPU quota")"
       say "     options: book GPUs for $PROJECT (on a shared cluster: the console's GPU booking page), then run scripts/setup.sh again;"
       say "              or a remote endpoint per model: REMOTE_STT_ENDPOINT=... REMOTE_STT_MODEL=... (LLM, EMB likewise), keys in $SECRETS_FILE"
-      [ "$AVATAR_CHOICE" = openspline ] && say "              or another avatar: AVATAR_PROVIDER=tavus (or none) scripts/setup.sh --step 2"
+      [ "$AVATAR_CHOICE" = openspline ] && say "              or another avatar: AVATAR_PROVIDER=tavus (or none) scripts/setup.sh --step 2$([ "${AVATAR_QUALITY:-}" = high ] && echo "; or AVATAR_QUALITY=low (one GPU)")"
       return 1
     fi
     while read -r k v; do gpu[$k]=$v; done <<< "$lines"
@@ -601,8 +627,9 @@ step2_namespace() {
       with_tts=$(assign_gpus "$tq" ${kinds[@]+"${kinds[@]}"} TTS) && { q=$tq; break; }
       with_tts=""
     done
-    [ -n "$with_tts" ] && while read -r k v; do gpu[$k]=$v; done <<< "$with_tts"
+    [ -n "$with_tts" ] && { lines=$with_tts; while read -r k v; do gpu[$k]=$v; done <<< "$with_tts"; }
   fi
+  local avatar_gpus; avatar_gpus=$(grep -c '^AVATAR ' <<< "${lines:-}" || true)
   save GPU_QUEUE "$q"
   for k in LLM STT EMB; do
     save "MODEL_${k}_SRC" "${src[$k]}"; save "MODEL_${k}_URL" "${url[$k]:-}"; save "MODEL_${k}_NAME" "${name[$k]:-}"; save "MODEL_${k}_GPU" "${gpu[$k]:-}"
@@ -615,9 +642,10 @@ step2_namespace() {
   save MODEL_TTS_GPU "${gpu[TTS]:-}"
   if [ -n "${gpu[TTS]:-}" ]; then ok "text-to-speech: Kokoro on 1 x ${gpu[TTS]}${q:+ from queue $q} ($KOKORO_GPU_IMAGE)"
   else ok "text-to-speech: Kokoro on CPU, with one synthesis thread per CPU of its limit (no GPU slice left over; TTS_GPU=false keeps it there)"; fi
-  save AVATAR_CHOICE "$AVATAR_CHOICE"; save AVATAR_GPU "${gpu[AVATAR]:-}"
+  local level=low; [ "${avatar_gpus:-0}" -ge 2 ] && level=high
+  save AVATAR_CHOICE "$AVATAR_CHOICE"; save AVATAR_GPU "${gpu[AVATAR]:-}"; save AVATAR_GPUS "${avatar_gpus:-0}"; save AVATAR_LEVEL "$level"
   case "$AVATAR_CHOICE" in
-    openspline) ok "avatar: OpenSpline, self-hosted on 1 x ${gpu[AVATAR]}${q:+ from queue $q} (its first start installs it and downloads its weights, 10 to 20 minutes)" ;;
+    openspline) ok "avatar: OpenSpline in $level quality, self-hosted on $avatar_gpus x ${gpu[AVATAR]}${q:+ from queue $q} ($([ "$level" = high ] && echo "the Pro model on a GPU pair" || echo "the Lite model; two whole GPUs give high quality"); its first start installs it and downloads its weights, 10 to 20 minutes)" ;;
     tavus)      ok "avatar: Tavus (its key in step 5)" ;;
     none)       ok "avatar: none (voice sessions are audio-only)" ;;
   esac

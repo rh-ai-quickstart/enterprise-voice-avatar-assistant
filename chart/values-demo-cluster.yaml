@@ -34,16 +34,16 @@ voiceAgent:
     - id: r213e42b45b3
       name: Helen
       gender: female
-  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-voice-agent:sha-2ad0935
+  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-voice-agent:sha-072440a
 frontend:
   enabled: true
-  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-frontend:sha-2ad0935
+  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-frontend:sha-072440a
 ragApi:
   enabled: true
-  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-rag-api:sha-2ad0935
+  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-rag-api:sha-072440a
 ingestion:
   enabled: true
-  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-ingestion:sha-2ad0935
+  image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-ingestion:sha-072440a
 
 # The language model is the Llama 3.2 3B Instruct already served on the cluster
 # (llama-32-3b-instruct, a prerequisite in SETUP.md). scripts/deploy-argocd.sh finds it and

@@ -23,7 +23,9 @@ Models:
   {{ printf "%-11s" $key }} external {{ $m.endpoint }}
 {{- end }}
 {{- end }}
-  tts         {{ if .Values.models.tts.deploy }}Kokoro (in-cluster, CPU){{ else }}external {{ .Values.models.tts.endpoint }}{{ end }}
+{{- $ttsGpu := "" }}
+{{- range $k, $v := (dig "limits" (dict) .Values.models.tts.resources) }}{{ if hasPrefix "nvidia.com/" $k }}{{ $ttsGpu = $k }}{{ end }}{{ end }}
+  tts         {{ if .Values.models.tts.deploy }}Kokoro (in-cluster, {{ $ttsGpu | default "CPU" }}){{ else }}external {{ .Values.models.tts.endpoint }}{{ end }}
 
 Next steps:
   oc get pods -n {{ .Release.Namespace }}            # model pods take several minutes on first start

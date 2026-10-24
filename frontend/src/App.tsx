@@ -137,6 +137,12 @@ export default function App() {
   }, [sessionId]);
 
   const onAssistantTurn = useCallback((turn: AssistantTurn) => {
+    if (turn.kind === "greeting") {
+      // Every voice start is greeted out loud; the chat shows the same greeting once
+      const greeting: ChatMessage = { id: newId(), role: "assistant", content: turn.answer, citations: turn.citations, voice: true };
+      setMessages((m) => (m.some((x) => x.role === "assistant" && x.content === turn.answer) ? m : [...m, greeting]));
+      return;
+    }
     const entries: ChatMessage[] = [];
     if (turn.question) entries.push({ id: newId(), role: "user", content: turn.question, voice: true });
     entries.push({

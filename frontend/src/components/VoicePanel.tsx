@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   BarVisualizer,
   LiveKitRoom,
@@ -35,6 +35,14 @@ export function useAvatarTracks() {
     videoTrack: assistant.videoTrack ?? unsourced.find((t) => t.publication.kind === Track.Kind.Video),
   };
 }
+
+// The avatar frame takes the video's shape (width / height), so a square OpenSpline video fills
+// it instead of sitting between black bars; the fallback holds until the video arrives.
+const WIDE = 16 / 9;
+export function avatarAspect(dimensions: { width: number; height: number } | undefined, fallback: number): number {
+  return dimensions && dimensions.width > 0 && dimensions.height > 0 ? dimensions.width / dimensions.height : fallback;
+}
+const frameStyle = (aspect: number) => ({ "--avatar-aspect": aspect }) as CSSProperties;
 
 interface Props {
   sessionId: string;
@@ -77,6 +85,8 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
 
   // Faces the person can choose from; the agent picks the matching voice when it joins the room.
   const [faces, setFaces] = useState<VoiceFace[]>([]);
+  // OpenSpline renders a square video; other providers wide ones
+  const [defaultAspect, setDefaultAspect] = useState(WIDE);
   const [faceId, setFaceId] = useState<string>(readStoredFace);
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +96,7 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
         if (cancelled) return;
         const offered = result.faces.slice(0, MAX_FACES);
         setFaces(offered);
+        setDefaultAspect(result.provider === "openspline" ? 1 : WIDE);
         // keep the remembered face when it is still offered; otherwise fall back to the default
         setFaceId((current) => (offered.some((f) => f.id === current) ? current : (result.default ?? "")));
       })
@@ -124,7 +135,7 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
   if (!connection) {
     return (
       <div className="voice-stage">
-        <div className="avatar-frame avatar-idle">
+        <div className="avatar-frame avatar-idle" style={frameStyle(defaultAspect)}>
           <button type="button" className="mic" onClick={start} disabled={starting}>
             <span aria-hidden="true">🎙</span> {starting ? "Starting…" : "Start voice conversation"}
           </button>
@@ -167,7 +178,12 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
       onError={(e) => setError(e.message)}
       className="voice-room"
     >
-      <VoiceStage onAssistantTurn={onAssistantTurn} error={error} faceName={face?.name ?? null} />
+      <VoiceStage
+        onAssistantTurn={onAssistantTurn}
+        error={error}
+        faceName={face?.name ?? null}
+        defaultAspect={defaultAspect}
+      />
       <RoomAudioRenderer />
     </LiveKitRoom>
   );
@@ -191,12 +207,15 @@ function VoiceStage({
   onAssistantTurn,
   error,
   faceName,
+  defaultAspect,
 }: {
   onAssistantTurn: (turn: AssistantTurn) => void;
   error: string | null;
   faceName: string | null;
+  defaultAspect: number;
 }) {
   const { state, audioTrack, videoTrack } = useAvatarTracks();
+  const aspect = avatarAspect(videoTrack?.publication.dimensions, defaultAspect);
   const connectionState = useConnectionState();
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const room = useRoomContext();
@@ -228,7 +247,7 @@ function VoiceStage({
 
   return (
     <div className="voice-stage">
-      <div className="avatar-frame">
+      <div className="avatar-frame" style={frameStyle(aspect)}>
         {videoTrack ? (
           <VideoTrack trackRef={videoTrack} className="avatar-video" />
         ) : (

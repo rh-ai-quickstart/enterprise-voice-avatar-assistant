@@ -17,7 +17,7 @@ vi.mock("@livekit/components-react", () => ({
   },
 }));
 
-import { useAvatarTracks } from "./VoicePanel";
+import { avatarAspect, useAvatarTracks } from "./VoicePanel";
 
 const agent = { identity: "agent-AJ_1", kind: 4, attributes: {} };
 const worker = { identity: "openspline-1", kind: 4, attributes: { "lk.publish_on_behalf": "agent-AJ_1" } };
@@ -54,5 +54,14 @@ describe("useAvatarTracks", () => {
     lk.unsourced = [video];
     const { result } = renderHook(() => useAvatarTracks());
     expect(result.current.videoTrack).toBeUndefined();
+  });
+});
+
+describe("avatarAspect", () => {
+  it("follows the video, and the fallback until its size is known", () => {
+    expect(avatarAspect({ width: 512, height: 512 }, 16 / 9)).toBe(1);
+    expect(avatarAspect({ width: 1280, height: 720 }, 1)).toBeCloseTo(16 / 9);
+    expect(avatarAspect(undefined, 1)).toBe(1);
+    expect(avatarAspect({ width: 0, height: 0 }, 16 / 9)).toBeCloseTo(16 / 9);
   });
 });

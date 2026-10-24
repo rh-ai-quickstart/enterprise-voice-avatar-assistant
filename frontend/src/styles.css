@@ -105,7 +105,8 @@ button.cite:hover { border-color: var(--accent); }
 .voice-error { color: var(--accent); }
 .voice-room { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
 .voice-stage { display: flex; flex-direction: column; gap: 10px; }
-.avatar-frame { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 16 / 9; max-height: 62vh; background: #000; border-radius: 10px; overflow: hidden; }
+/* --avatar-aspect (width / height) follows the video; the frame narrows when 62vh caps its height */
+.avatar-frame { --avatar-aspect: 1.7778; display: flex; align-items: center; justify-content: center; width: min(100%, calc(62vh * var(--avatar-aspect))); aspect-ratio: var(--avatar-aspect); margin-inline: auto; background: #000; border-radius: 10px; overflow: hidden; }
 .avatar-frame.avatar-idle { background: var(--bg); border: 1px dashed var(--border-strong); }
 .avatar-video { width: 100%; height: 100%; object-fit: contain; }
 .visualizer { width: 60%; height: 120px; --lk-va-bar-width: 16px; --lk-va-bar-gap: 10px; --lk-fg: var(--accent); }

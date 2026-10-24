@@ -264,6 +264,8 @@ Models. Each model has a `deploy` toggle: true creates a vLLM ServingRuntime and
 | `models.tts.resources.requests.memory` | `2Gi` | Memory request. |
 | `models.tts.resources.limits.cpu` | `"4"` | CPU limit. |
 | `models.tts.resources.limits.memory` | `4Gi` | Memory limit. |
+| `models.tts.threads` | `""` | CPU threads for synthesis. Empty: the CPU limit when it is whole cores. Without a cap PyTorch starts one thread per node core and the container is throttled to seconds per sentence. |
+| `models.tts.podLabels` | `{}` | Labels added to the TTS pod, for example kueue.x-k8s.io/queue-name when it runs on a GPU (image ghcr.io/remsky/kokoro-fastapi-gpu and a GPU in resources). |
 | `models.tts.endpoint` | `""` | OpenAI-compatible base URL including /v1, used when `deploy` is false. |
 
 ### `frontend`

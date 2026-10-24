@@ -64,6 +64,8 @@ PROJECT="${PROJECT:-voice-avatar-assistant}"
 LLM_NAME="${LLM_NAME:-llama-32-3b-instruct}"
 # namespace path: the Models-as-a-Service model names (patterns) used when the service has them
 MAAS_LLM_MODEL="${MAAS_LLM_MODEL:-llama-32-3b}"; MAAS_STT_MODEL="${MAAS_STT_MODEL:-whisper.*}"; MAAS_EMB_MODEL="${MAAS_EMB_MODEL:-bge-m3}"
+# namespace path: Kokoro moves to a GPU slice the queue has left over (TTS_GPU=false keeps it on CPU)
+KOKORO_GPU_IMAGE="${KOKORO_GPU_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.2}"
 MODE=next; ONLY=""
 for a in "$@"; do case "$a" in --status) MODE=status;; --yes|-y) YES=1;; --reset) MODE=reset;; --step) MODE=step;; [0-9]*) ONLY="$a";; -h|--help) sed -n 2,29p "$0"; exit 0;; esac; done
 mkdir -p "$STATE_DIR/logs"; touch "$STATE"; chmod 700 "$STATE_DIR"
@@ -349,15 +351,18 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
     jq -n --arg q "${GPU_QUEUE:-}" \
       --arg ls "$MODEL_LLM_SRC" --arg lu "${MODEL_LLM_URL:-}" --arg ln "${MODEL_LLM_NAME:-}" --arg lg "${MODEL_LLM_GPU:-}" \
       --arg ss "$MODEL_STT_SRC" --arg su "${MODEL_STT_URL:-}" --arg sn "${MODEL_STT_NAME:-}" --arg sg "${MODEL_STT_GPU:-}" \
-      --arg es "$MODEL_EMB_SRC" --arg eu "${MODEL_EMB_URL:-}" --arg en "${MODEL_EMB_NAME:-}" --arg eg "${MODEL_EMB_GPU:-}" '
+      --arg es "$MODEL_EMB_SRC" --arg eu "${MODEL_EMB_URL:-}" --arg en "${MODEL_EMB_NAME:-}" --arg eg "${MODEL_EMB_GPU:-}" \
+      --arg tg "${MODEL_TTS_GPU:-}" --arg ti "$KOKORO_GPU_IMAGE" '
       def gpu($g): if $g == "" or $g == "nvidia.com/gpu" then {} else {resources: {requests: {"nvidia.com/gpu": null, ($g): "1"}, limits: {"nvidia.com/gpu": null, ($g): "1"}}} end;
       def model($s; $u; $n; $g; $chart): if $s == "chart" then {deploy: true} + gpu($g) + $chart else {deploy: false, endpoint: $u, servedModelName: $n} end;
       {models: ({
          llm: model($ls; $lu; $ln; $lg; {servedModelName: "llama-3.1-8b-instruct"}),
-         stt: model($ss; $su; $sn; $sg; {args: ["--gpu-memory-utilization=0.85", "--max-num-seqs=8", "--enforce-eager"]}),
-         embeddings: model($es; $eu; $en; $eg; {args: ["--runner=pooling", "--max-model-len=8192", "--gpu-memory-utilization=0.85", "--max-num-seqs=8", "--enforce-eager"]}),
+         stt: model($ss; $su; $sn; $sg; {args: ["--gpu-memory-utilization=0.85", "--max-num-seqs=8"]}),
+         embeddings: model($es; $eu; $en; $eg; {args: ["--runner=pooling", "--max-model-len=8192", "--gpu-memory-utilization=0.85", "--max-num-seqs=8"]}),
          guardrails: {provider: "none", deploy: false}}
-       + (if $q != "" and ([$ls, $ss, $es] | index("chart")) then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end)),
+       + (if $q != "" and ([$ls, $ss, $es] | index("chart")) then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end)
+       + (if $tg != "" then {tts: ({image: $ti, resources: {requests: {cpu: "1", memory: "2Gi", ($tg): "1"}, limits: {cpu: "4", memory: "6Gi", ($tg): "1"}}}
+            + (if $q != "" then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end))} else {} end)),
        n8n: {storage: "10Gi"}}' ;;
   *)
     jq -n --argjson d "$llm_deploy" '{models:{llm:{deploy:$d,args:["--max-model-len=8192","--gpu-memory-utilization=0.45","--max-num-seqs=8","--enforce-eager","--enable-auto-tool-choice","--tool-call-parser=llama3_json"]},stt:{deploy:true,args:["--gpu-memory-utilization=0.15","--max-num-seqs=8","--enforce-eager"]},embeddings:{args:["--runner=pooling","--max-model-len=8192","--gpu-memory-utilization=0.12","--max-num-seqs=8","--enforce-eager"]},guardrails:{provider:"none",deploy:false}}}' ;;
@@ -366,8 +371,8 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
 # Namespace profile, per model: REMOTE_<X>_ENDPOINT when given, else the Models-as-a-Service
 # model named MAAS_<X>_MODEL, else the chart's own model on a GPU of a Kueue queue with quota.
 # A chart model needs this much GPU memory (GB): the 8B language model 24, Whisper and BGE-M3 10.
-model_title() { case "$1" in LLM) echo "language model";; STT) echo "speech-to-text";; EMB) echo "embeddings";; esac; }
-chart_model() { case "$1" in LLM) echo "Llama 3.1 8B Instruct (4-bit)";; STT) echo "Whisper large-v3-turbo";; EMB) echo "BGE-M3";; esac; }
+model_title() { case "$1" in LLM) echo "language model";; STT) echo "speech-to-text";; EMB) echo "embeddings";; TTS) echo "text-to-speech";; esac; }
+chart_model() { case "$1" in LLM) echo "Llama 3.1 8B Instruct (4-bit)";; STT) echo "Whisper large-v3-turbo";; EMB) echo "BGE-M3";; TTS) echo "Kokoro";; esac; }
 gpu_size() { case "$1" in nvidia.com/mig-*) local s=${1##*.}; s=${s%gb}; echo "$s";; *) echo 999;; esac; }   # GB; a whole card counts as plenty
 # assign_gpus <queue> <kind...>: gives each kind the smallest resource of the queue that fits;
 # prints "<kind> <resource>" lines, or fails when the queue's quota cannot hold them all
@@ -375,7 +380,7 @@ assign_gpus() {
   local q=$1; shift; local -a res=() units=() out=(); local kind i best min lq r u
   while read -r lq r u _; do [ "$lq" = "$q" ] && { res+=("$r"); units+=("$u"); }; done < <(gpu_offers)
   for kind in "$@"; do
-    case "$kind" in LLM) min=24;; *) min=10;; esac
+    case "$kind" in LLM) min=24;; TTS) min=4;; *) min=10;; esac
     best=""
     for i in "${!res[@]}"; do
       [ "${units[$i]}" -gt 0 ] && [ "$(gpu_size "${res[$i]}")" -ge "$min" ] || continue
@@ -394,7 +399,7 @@ turn_state() {  # step 4, both paths
   elif [ -n "${TURN_SKIPPED:-}" ]; then echo "done|TURN skipped: voice works on open networks only; scripts/setup.sh --step 4 tries again"
   elif [ "$PROJECT_EXISTS" != yes ]; then echo "todo|after the bootstrap"; else echo "todo|secret missing"; fi
 }
-model_summary() { local k s out=""; for k in LLM STT EMB; do s=$(val "MODEL_${k}_SRC"); case "$s" in maas|remote) out+="$(model_title $k) $s $(val "MODEL_${k}_NAME"), ";; chart) out+="$(model_title $k) in the project ($(val "MODEL_${k}_GPU")), ";; esac; done; echo "${out%, }"; }
+model_summary() { local k s out=""; for k in LLM STT EMB; do s=$(val "MODEL_${k}_SRC"); case "$s" in maas|remote) out+="$(model_title $k) $s $(val "MODEL_${k}_NAME"), ";; chart) out+="$(model_title $k) in the project ($(val "MODEL_${k}_GPU")), ";; esac; done; [ -n "${MODEL_TTS_GPU:-}" ] && out+="text-to-speech on $MODEL_TTS_GPU, "; echo "${out%, }"; }
 step_state_namespace() {
   case "$1" in
   1) if [ "$LOGGED_IN" != 1 ]; then echo "attention|not logged in to a cluster"; elif [ "$PROJECT_ADMIN" != yes ]; then echo "attention|$USER_NAME is not an admin of project $PROJECT: run with PROJECT=<a project you administer>";
@@ -547,6 +552,16 @@ step2_namespace() {
     fi
     while read -r k v; do gpu[$k]=$v; done <<< "$lines"
   fi
+  # Kokoro on a GPU slice the queue has left over: a sentence in a fraction of a second instead of
+  # seconds on CPU. Only when it fits next to the models above (TTS_GPU=false keeps it on CPU).
+  if [ "${TTS_GPU:-auto}" != false ] && [ "$KUEUE" = yes ] && [ -n "$GPU_OFFERS" ] && [ -z "${GPU_RESOURCE:-}" ]; then
+    local with_tts="" tq
+    for tq in ${q:-${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}}; do
+      with_tts=$(assign_gpus "$tq" ${need[@]+"${need[@]}"} TTS) && { q=$tq; break; }
+      with_tts=""
+    done
+    [ -n "$with_tts" ] && while read -r k v; do gpu[$k]=$v; done <<< "$with_tts"
+  fi
   save GPU_QUEUE "$q"
   for k in LLM STT EMB; do
     save "MODEL_${k}_SRC" "${src[$k]}"; save "MODEL_${k}_URL" "${url[$k]:-}"; save "MODEL_${k}_NAME" "${name[$k]:-}"; save "MODEL_${k}_GPU" "${gpu[$k]:-}"
@@ -556,6 +571,9 @@ step2_namespace() {
       chart)  ok "$(model_title $k): $(chart_model $k) served in $PROJECT on 1 x ${gpu[$k]}${q:+ from queue $q}" ;;
     esac
   done
+  save MODEL_TTS_GPU "${gpu[TTS]:-}"
+  if [ -n "${gpu[TTS]:-}" ]; then ok "text-to-speech: Kokoro on 1 x ${gpu[TTS]}${q:+ from queue $q} ($KOKORO_GPU_IMAGE)"
+  else ok "text-to-speech: Kokoro on CPU, with one synthesis thread per CPU of its limit (no GPU slice left over; TTS_GPU=false keeps it there)"; fi
   PROFILE=namespace; save PROFILE namespace; write_values_object; ok "profile namespace saved ($STATE_DIR/values-object.json); no guardrail model"; mark 2
 }
 step3() {

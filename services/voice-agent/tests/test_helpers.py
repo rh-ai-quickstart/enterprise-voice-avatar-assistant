@@ -72,3 +72,15 @@ def test_sentence_buffer_speaks_whole_sentences_without_markers():
     buf = helpers.SentenceBuffer()
     assert buf.feed("**Yes.** It is 14 characters!\nSee the policy.") == ["Yes. ", "It is 14 characters! "]
     assert buf.flush() == "See the policy."
+
+
+def test_turn_timings_lists_the_recorded_stages_in_order():
+    assert helpers.turn_timings("user", {"transcription_delay": 0.31, "end_of_turn_delay": 0.4}) == (
+        "user end_of_turn_delay=0.40s transcription_delay=0.31s"
+    )
+    assert helpers.turn_timings("assistant", {"e2e_latency": 1.234, "llm_node_ttft": 0.6}) == (
+        "assistant llm_node_ttft=0.60s e2e_latency=1.23s"
+    )
+    assert helpers.turn_timings("assistant", {}) == ""
+    assert helpers.turn_timings("assistant", None) == ""
+    assert helpers.turn_timings("system", {"e2e_latency": 1.0}) == ""

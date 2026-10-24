@@ -128,3 +128,96 @@ def test_stream_of_a_request_carries_the_ticket(monkeypatch):
     assert len(events) == 1 and events[0]["type"] == "final"
     assert events[0]["ticket"]["ticket_ref"] == "REQ-000002"
     assert "REQ-000002" in events[0]["answer"]
+
+
+class _RecordingStream:
+    """A streamed completion that records whether it was read or closed unread."""
+
+    def __init__(self, pieces):
+        self.pieces, self.read, self.closed = pieces, False, False
+
+    def __iter__(self):
+        self.read = True
+        return iter(
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=p))]) for p in self.pieces
+        )
+
+    def close(self):
+        self.closed = True
+
+
+def _slow_intent(monkeypatch, kind: str):
+    """An intent check still running when retrieval is done, so the answer starts generating first."""
+    import threading
+
+    release = threading.Event()
+
+    def detect(text, previous=None):
+        release.wait(5)
+        return kind
+
+    monkeypatch.setattr(intent, "detect", detect)
+    return release
+
+
+def _recording_llm(monkeypatch, release, opened):
+    class FakeLLM:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    assert kwargs.get("stream") is True
+                    opened.append(_RecordingStream(PIECES))
+                    release.set()  # the intent check finishes once the answer has started
+                    return opened[-1]
+
+    monkeypatch.setattr(rag.clients, "llm", lambda: FakeLLM())
+
+
+def test_a_question_starts_generating_before_the_intent_check_returns(monkeypatch):
+    _question(monkeypatch)
+    release, opened = _slow_intent(monkeypatch, "question"), []
+    _recording_llm(monkeypatch, release, opened)
+    events = list(rag.answer_stream(rag.ChatRequest(message="How often?", mode="voice")))
+    assert len(opened) == 1 and opened[0].read  # the early stream is the one spoken, not a second one
+    assert "".join(p for kind, p in events if kind == "delta") == "".join(PIECES)
+
+
+def test_a_request_drops_the_early_answer_unread(monkeypatch):
+    from app import tickets
+
+    _question(monkeypatch)
+    release, opened = _slow_intent(monkeypatch, "request"), []
+    _recording_llm(monkeypatch, release, opened)
+    filed = rag.ChatResponse(
+        session_id="s1",
+        answer="I've logged your request REQ-000003.",
+        citations=[],
+        guardrail=rag.GuardrailInfo(provider="none"),
+        model="test",
+    )
+    monkeypatch.setattr(rag, "file_request", lambda request, session_id, info: filed)
+    monkeypatch.setattr(tickets, "intake", lambda request: (_ for _ in ()).throw(AssertionError("not used")))
+    events = list(rag.answer_stream(rag.ChatRequest(message="I need a new laptop", mode="voice")))
+    assert events == [("final", filed)]
+    assert len(opened) == 1 and opened[0].closed and not opened[0].read
+
+
+def test_an_early_start_that_fails_is_opened_again_for_a_question(monkeypatch):
+    _question(monkeypatch)
+    release, calls = _slow_intent(monkeypatch, "question"), []
+
+    class FlakyLLM:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    calls.append(1)
+                    release.set()
+                    if len(calls) == 1:
+                        raise ConnectionError("gateway not reachable yet")
+                    return _RecordingStream(PIECES)
+
+    monkeypatch.setattr(rag.clients, "llm", lambda: FlakyLLM())
+    events = list(rag.answer_stream(rag.ChatRequest(message="How often?", mode="voice")))
+    assert len(calls) == 2 and events[-1][0] == "final"

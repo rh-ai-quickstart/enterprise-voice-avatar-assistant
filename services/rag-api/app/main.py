@@ -159,12 +159,17 @@ def healthz():
     return {"status": "ok"}
 
 
+def _database_answers() -> None:
+    with clients.db() as conn:
+        conn.execute("SELECT 1")
+
+
 @app.get("/readyz")
 async def readyz():
     problems: dict[str, str] = {}
     checks = {"qdrant": lambda: clients.qdrant().get_collections()}
     if memory.enabled():
-        checks["database"] = lambda: clients.db().close()
+        checks["database"] = _database_answers
     for name, check in checks.items():
         try:
             await asyncio.to_thread(check)

@@ -19,18 +19,20 @@ voiceAgent:
   avatarProvider: tavus
   # Faces offered in the UI (Tavus stock faces; scripts/list-tavus-faces.sh lists them).
   # The voice follows the declared gender through models.tts.voices; the first entry is the default.
+  # All four run on Phoenix-4.5, the model Tavus recommends for the lowest latency (the earlier
+  # Jackie, Samantha and James were Phoenix-3).
   faces:
-    - id: r67d1c9cac37
-      name: Jackie
+    - id: r455f7299599
+      name: Gloria
       gender: female
-    - id: re6220ec0195
-      name: Raj
+    - id: rb1d65103218
+      name: Victor
       gender: male
-    - id: r873e4707689
-      name: James
+    - id: r3f4182ef554
+      name: Lucas
       gender: male
-    - id: rf6b1c8d5e9d
-      name: Samantha
+    - id: r213e42b45b3
+      name: Helen
       gender: female
   image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-voice-agent:sha-a262c76
 frontend:

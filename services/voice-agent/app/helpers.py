@@ -116,3 +116,23 @@ def citations_payload(reply: dict[str, Any], question: str | None = None, kind: 
             "ticket": reply.get("ticket"),
         }
     ).encode("utf-8")
+
+
+# Per-turn timings LiveKit records on each chat item (MetricsReport), in the order they happen
+TURN_TIMINGS = {
+    "user": ("end_of_turn_delay", "transcription_delay"),
+    "assistant": ("llm_node_ttft", "llm_node_ttfs", "tts_node_ttfb", "playback_latency", "e2e_latency"),
+}
+
+
+def turn_timings(role: str | None, metrics: Any) -> str:
+    """The recorded timings of one chat item as 'name=0.12s ...', or '' when it has none."""
+    if not metrics:
+        return ""
+    get = metrics.get if isinstance(metrics, dict) else lambda key: getattr(metrics, key, None)
+    parts = [
+        f"{key}={value:.2f}s"
+        for key in TURN_TIMINGS.get(str(role), ())
+        if isinstance(value := get(key), int | float)
+    ]
+    return f"{role} " + " ".join(parts) if parts else ""

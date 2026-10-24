@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     tts_voice_male: str = "am_michael"
     tts_api_key: str = "none"
     tts_speed: float = 1.0
+    # Audio format asked from the speech endpoint: raw PCM needs no encoding there and no
+    # decoding here (Kokoro and OpenAI both offer it); mp3, wav, opus, aac or flac otherwise
+    tts_response_format: str = "pcm"
 
     # Direct LLM, used only if the RAG API is unavailable
     llm_base_url: str = "http://localhost:8080/v1"
@@ -78,8 +81,13 @@ class Settings(BaseSettings):
     instructions: str = (
         "You are a helpful voice assistant for employees. Keep answers short and natural to listen to."
     )
+    # Seconds of silence after which the VAD reports the end of speech
+    vad_min_silence_seconds: float = 0.3
+    # End-of-turn model on the audio (LiveKit's turn-detector-v1-mini, runs inside the worker):
+    # with it the short silences above do not cut people off mid-sentence. "none" switches it off.
+    turn_detector: str = "v1-mini"
     # Seconds of silence before a user turn is considered finished
-    min_endpointing_delay: float = 0.4
+    min_endpointing_delay: float = 0.3
     # Start the answer on the interim transcript before the turn is final (saves a few hundred ms)
     preemptive_generation: bool = True
     log_level: str = "INFO"

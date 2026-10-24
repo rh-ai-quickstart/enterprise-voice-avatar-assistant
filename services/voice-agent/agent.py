@@ -16,7 +16,16 @@ import time
 import httpx
 import openai as openai_sdk
 from livekit import rtc
-from livekit.agents import Agent, AgentSession, JobContext, JobProcess, RoomOutputOptions, WorkerOptions, cli
+from livekit.agents import (
+    Agent,
+    AgentSession,
+    FlushSentinel,
+    JobContext,
+    JobProcess,
+    RoomOutputOptions,
+    WorkerOptions,
+    cli,
+)
 from livekit.plugins import openai, silero
 
 from app import avatars, faces, helpers, rag_client
@@ -49,8 +58,23 @@ def build_tts(face: faces.Face | None = None):
         http_client=async_http_client(60),
     )
     return openai.TTS(
-        model=settings.tts_model, voice=faces.voice_for(face), speed=settings.tts_speed, client=client
+        model=settings.tts_model,
+        voice=faces.voice_for(face),
+        speed=settings.tts_speed,
+        response_format=settings.tts_response_format,
+        client=client,
     )
+
+
+def turn_detector_enabled() -> bool:
+    return settings.turn_detector.lower() not in ("", "none", "off", "false")
+
+
+def build_turn_detector():
+    """LiveKit's end-of-turn model, local (the v1-mini weights ship with livekit-local-inference)."""
+    from livekit.agents.inference import TurnDetector
+
+    return TurnDetector(version=settings.turn_detector)
 
 
 def build_llm():
@@ -133,12 +157,16 @@ class Assistant(Agent):
                 for sentence in buffer.feed(payload):
                     spoken["any"] = True
                     yield sentence
+                    # each sentence goes to TTS on its own: the framework's sentence splitter would
+                    # otherwise hold it until the next one starts, which here means fully generated
+                    yield FlushSentinel()
             else:
                 reply = payload
         tail = buffer.flush()
         if tail:
             spoken["any"] = True
             yield tail
+            yield FlushSentinel()
         if reply is None:
             raise RuntimeError("the RAG API stream ended without a final message")
         if not spoken["any"]:  # a service request or a blocked message arrives as the final only
@@ -162,7 +190,16 @@ class Assistant(Agent):
 
 
 def prewarm(proc: JobProcess) -> None:
-    proc.userdata["vad"] = silero.VAD.load()
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=settings.vad_min_silence_seconds)
+    proc.userdata["turn_detector"] = False
+    if turn_detector_enabled():
+        try:  # load the model (~108 MB) here rather than on the first turn
+            from livekit.local_inference import init_eot
+
+            init_eot()
+            proc.userdata["turn_detector"] = True
+        except Exception:
+            log.exception("turn detector %s unavailable; turns end on silence alone", settings.turn_detector)
 
 
 async def entrypoint(ctx: JobContext) -> None:
@@ -181,16 +218,19 @@ async def entrypoint(ctx: JobContext) -> None:
         faces.voice_for(face),
     )
 
+    turn_handling = {
+        "endpointing": {"min_delay": settings.min_endpointing_delay},
+        "preemptive_generation": {"enabled": settings.preemptive_generation},
+    }
+    if ctx.proc.userdata.get("turn_detector"):
+        turn_handling["turn_detection"] = build_turn_detector()
     session = AgentSession(
         vad=ctx.proc.userdata["vad"],
         stt=build_stt(),
         tts=build_tts(face),
         llm=build_llm(),
         allow_interruptions=True,
-        turn_handling={
-            "endpointing": {"min_delay": settings.min_endpointing_delay},
-            "preemptive_generation": {"enabled": settings.preemptive_generation},
-        },
+        turn_handling=turn_handling,
     )
     try:
         avatar = await asyncio.wait_for(
@@ -246,6 +286,15 @@ async def entrypoint(ctx: JobContext) -> None:
                 streaming_enabled(),
             )
             turn["end_of_speech"] = None
+
+    # The framework's own per-turn timings: end of turn and transcript for the person's turn;
+    # first token, first sentence to TTS, first audio, avatar playback and end to end for the reply
+    @session.on("conversation_item_added")
+    def _on_item(ev) -> None:
+        item = getattr(ev, "item", None)
+        timings = helpers.turn_timings(getattr(item, "role", None), getattr(item, "metrics", None))
+        if timings:
+            log.info("timings (session %s): %s", session_id, timings)
 
     greeting = helpers.greeting_for(user_name, settings.greeting, settings.greeting_named)
     if greeting:

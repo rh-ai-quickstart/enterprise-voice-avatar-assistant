@@ -4,7 +4,7 @@ import logging
 import re
 import uuid
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
 from . import clients, guardrails, intent, knowledge_gaps, memory, retrieval, tickets
@@ -13,6 +13,8 @@ from .retrieval import Hit
 from .schemas import ChatRequest, ChatResponse, Citation, GuardrailInfo, RequestIntake, Ticket
 
 log = logging.getLogger("rag.chat")
+# the intent check and the user's memory run next to retrieval, on threads shared by all requests
+_PREPARE = ThreadPoolExecutor(max_workers=16, thread_name_prefix="rag-prepare")
 MARKER_RE = re.compile(r"\[(\d{1,2})\]")
 # Where a sentence ends in generated text (the voice agent splits the same way)
 SENTENCE_END_RE = re.compile(r"[.!?][*_`)\]]*\s+")
@@ -183,10 +185,12 @@ class Prepared:
     messages: list[dict[str, str]]
     max_tokens: int
     known_refs: set[str]  # requests this conversation filed (REQ- references in its history)
+    intent: Future  # "request" or "question"; awaited only where it decides something (_intent_reply)
 
 
 def _prepare(request: ChatRequest) -> ChatResponse | Prepared:
-    """Guardrail, intent and retrieval; returns a finished reply for blocked messages and requests."""
+    """Guardrail, retrieval and the model's messages, with the intent check still running; returns a
+    finished reply for blocked messages."""
     session_id = request.session_id or uuid.uuid4().hex
     memory.ensure_conversation(session_id, request.user_id, request.mode)
     info = GuardrailInfo(provider=settings.guardrails_provider)
@@ -207,21 +211,10 @@ def _prepare(request: ChatRequest) -> ChatResponse | Prepared:
 
     history = memory.history(session_id, settings.history_turns * 2)
     previous_assistant = next((m["content"] for m in reversed(history) if m.get("role") == "assistant"), None)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        intent_future = pool.submit(intent.detect, request.message, previous_assistant)
-        hits_future = pool.submit(
-            retrieval.search, retrieval_query(request.message, history), top_k=request.top_k
-        )
-        kind = intent_future.result()
-        hits = hits_future.result()
-    log.info("session=%s intent=%s", session_id, kind)
-    if kind == "request":
-        return file_request(request, session_id, info)
-
-    top_score = max((h.score for h in hits), default=0.0)
-    knowledge_gaps.record(session_id, request.message, top_score, len(hits))
-
-    user_memory = memory.get_user_memory(request.user_id) if request.user_id else {}
+    intent_future = _PREPARE.submit(intent.detect, request.message, previous_assistant)
+    memory_future = _PREPARE.submit(memory.get_user_memory, request.user_id) if request.user_id else None
+    hits = retrieval.search(retrieval_query(request.message, history), top_k=request.top_k)
+    user_memory = memory_future.result() if memory_future else {}
     messages = build_messages(request.message, hits, history, request.mode, user_memory, request.user_name)
     max_tokens = settings.voice_max_tokens if request.mode == "voice" else settings.answer_max_tokens
     known_refs = {
@@ -230,7 +223,29 @@ def _prepare(request: ChatRequest) -> ChatResponse | Prepared:
         if m.get("role") == "assistant"
         for ref in intent.TICKET_REF_RE.findall(m["content"])
     }
-    return Prepared(session_id, info, hits, messages, max_tokens, known_refs)
+    return Prepared(session_id, info, hits, messages, max_tokens, known_refs, intent_future)
+
+
+def _intent_reply(request: ChatRequest, prep: Prepared) -> ChatResponse | None:
+    """Waits for the intent check: the filed request when the message is one, else None (after
+    recording a knowledge gap when the documents had no good match)."""
+    kind = prep.intent.result()
+    log.info("session=%s intent=%s", prep.session_id, kind)
+    if kind == "request":
+        return file_request(request, prep.session_id, prep.info)
+    top_score = max((h.score for h in prep.hits), default=0.0)
+    knowledge_gaps.record(prep.session_id, request.message, top_score, len(prep.hits))
+    return None
+
+
+def _open_stream(prep: Prepared):
+    return clients.llm().chat.completions.create(
+        model=settings.llm_model,
+        messages=prep.messages,
+        temperature=settings.llm_temperature,
+        max_tokens=prep.max_tokens,
+        stream=True,
+    )
 
 
 def _finish(request: ChatRequest, prep: Prepared, text: str) -> ChatResponse:
@@ -263,6 +278,9 @@ def answer(request: ChatRequest) -> ChatResponse:
     prep = _prepare(request)
     if isinstance(prep, ChatResponse):
         return prep
+    filed = _intent_reply(request, prep)
+    if filed is not None:
+        return filed
     completion = clients.llm().chat.completions.create(
         model=settings.llm_model,
         messages=prep.messages,
@@ -284,14 +302,23 @@ def answer_stream(request: ChatRequest) -> Iterator[tuple[str, str | ChatRespons
     if isinstance(prep, ChatResponse):
         yield "final", prep
         return
+    # the answer starts generating while the intent check finishes, so the check costs the voice
+    # path no time; a request drops it unread
+    stream = None
+    if not prep.intent.done():
+        try:
+            stream = _open_stream(prep)
+        except Exception:  # noqa: BLE001 - opened again below once the intent is known
+            stream = None
+    filed = _intent_reply(request, prep)
+    if filed is not None:
+        if stream is not None:
+            getattr(stream, "close", lambda: None)()
+        yield "final", filed
+        return
+    if stream is None:
+        stream = _open_stream(prep)
     parts: list[str] = []
-    stream = clients.llm().chat.completions.create(
-        model=settings.llm_model,
-        messages=prep.messages,
-        temperature=settings.llm_temperature,
-        max_tokens=prep.max_tokens,
-        stream=True,
-    )
     # handed out a sentence at a time, each checked before it can be spoken (the voice agent speaks
     # whole sentences anyway); a false claim ends the answer with NO_CLAIM
     buffer, claimed = "", None

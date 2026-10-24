@@ -332,6 +332,12 @@ models:
       limits:
         cpu: "4"
         memory: 4Gi
+    # CPU threads for synthesis. Empty: the CPU limit when it is whole cores. Without a cap
+    # PyTorch starts one thread per node core and the container is throttled to seconds per sentence.
+    threads: ""
+    # Labels added to the TTS pod, for example kueue.x-k8s.io/queue-name when it runs on a GPU
+    # (image ghcr.io/remsky/kokoro-fastapi-gpu and a GPU in resources).
+    podLabels: {}
     endpoint: ""
 
 # ---------------------------------------------------------------------------

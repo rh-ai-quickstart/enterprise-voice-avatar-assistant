@@ -32,6 +32,19 @@ cannot reach a model. Renders nothing.
 {{- if not (has .Values.voiceAgent.avatarProvider $providers) }}
 {{- fail (printf "voiceAgent.avatarProvider is %q; use one of %s" .Values.voiceAgent.avatarProvider (join ", " $providers)) }}
 {{- end }}
+{{- if eq .Values.voiceAgent.avatarProvider "openspline" }}
+{{- if gt (len .Values.openspline.faces) 4 }}
+{{- fail (printf "openspline.faces lists %d faces; the UI offers at most 4" (len .Values.openspline.faces)) }}
+{{- end }}
+{{- range $f := .Values.openspline.faces }}
+{{- if not (regexMatch "^[A-Za-z0-9_-]+$" (toString $f.id)) }}
+{{- fail (printf "openspline.faces: id %q must be letters, digits, - or _ (it names chart/files/portraits/<id>.jpg)" (toString $f.id)) }}
+{{- end }}
+{{- if not ($.Files.Get (printf "files/portraits/%s.jpg" $f.id)) }}
+{{- fail (printf "openspline.faces: no portrait chart/files/portraits/%s.jpg for face %s" $f.id $f.id) }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if and (eq .Values.voiceAgent.avatarProvider "openspline") (ne .Values.openspline.quality "low") }}
 {{- fail (printf "openspline.quality is %q; this chart runs low quality (one GPU), high needs a GPU pair" .Values.openspline.quality) }}
 {{- end }}

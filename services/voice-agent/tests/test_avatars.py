@@ -45,14 +45,25 @@ def test_openspline_needs_no_key_and_joins_through_the_in_cluster_livekit(monkey
     monkeypatch.setattr(settings, "openspline_url", "http://openspline:7860")
     assert avatars.missing_key() is None
     assert avatars.active()
-    avatar = avatars.build("r3f4182ef554")  # a Tavus face id is ignored: OpenSpline has its portrait
+    avatar = avatars.build("r3f4182ef554")  # no portrait for that id: the bundled default
     assert avatar.provider == "openspline"
+    assert avatar.portrait == settings.openspline_portrait
     assert avatar.url == "ws://livekit:7880"
     assert avatar.client.url == "http://openspline:7860"
     assert avatar.quality == "low"
     assert Path(avatar.portrait).is_file()
     # its start() takes no livekit_url, so the public URL is never handed to it
     assert avatars.start_kwargs(avatar) == {}
+
+
+def test_openspline_portrait_follows_the_face(monkeypatch, tmp_path):
+    (tmp_path / "steve.jpg").write_bytes(b"jpeg")
+    monkeypatch.setattr(settings, "avatar_portrait_dir", str(tmp_path))
+    assert avatars.openspline_portrait("steve") == str(tmp_path / "steve.jpg")
+    assert avatars.openspline_portrait("lisa") == settings.openspline_portrait  # no file
+    assert avatars.openspline_portrait(None) == settings.openspline_portrait
+    (tmp_path.parent / "secret.jpg").write_bytes(b"no")
+    assert avatars.openspline_portrait("../secret") == settings.openspline_portrait
 
 
 def test_start_kwargs_uses_public_livekit_url(monkeypatch):

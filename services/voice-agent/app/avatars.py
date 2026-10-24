@@ -1,6 +1,8 @@
 """Avatar provider factory. Providers are imported lazily so unused ones cost nothing."""
 
 import logging
+import re
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -56,9 +58,19 @@ def tavus_kwargs(face_id: str, pal_id: str | None, api_key: str, params: Any) ->
     return kwargs
 
 
+def openspline_portrait(face_id: str | None) -> str:
+    """The portrait OpenSpline animates: <face id>.jpg from the chart's portraits when the face has
+    one, else the bundled default. The id comes from the browser, so only a plain name is looked up."""
+    if face_id and re.fullmatch(r"[A-Za-z0-9_-]+", face_id):
+        path = Path(settings.avatar_portrait_dir) / f"{face_id}.jpg"
+        if path.is_file():
+            return str(path)
+    return settings.openspline_portrait
+
+
 def build(face_id: str | None = None) -> Any | None:
     """Return an avatar session object for the configured provider, or None for audio only.
-    face_id overrides the configured Tavus face for this session (OpenSpline has its portrait)."""
+    face_id overrides the configured Tavus face for this session, or picks OpenSpline's portrait."""
     name = provider()
     if name == "none":
         return None
@@ -70,7 +82,7 @@ def build(face_id: str | None = None) -> Any | None:
 
         quality = settings.openspline_quality
         return AvatarSession(
-            settings.openspline_portrait,
+            openspline_portrait(face_id),
             quality=quality,
             client=Openspline(url=settings.openspline_url, quality=quality),
             url=settings.livekit_url,

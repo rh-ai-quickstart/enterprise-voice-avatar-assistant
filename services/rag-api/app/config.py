@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     tavus_api_key: str | None = None
     # The self-hosted avatar worker (avatar provider openspline), for the Integrations page test
     openspline_url: str = "http://openspline:7860"
+    # OpenSpline's faces: one portrait each, <face id>.jpg (the chart's ConfigMap avatar-portraits)
+    avatar_portrait_dir: str = "/portraits"
     tts_voice: str = "af_heart"
     tts_voice_female: str = "af_bella"
     tts_voice_male: str = "am_michael"

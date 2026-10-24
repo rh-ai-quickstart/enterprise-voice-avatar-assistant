@@ -65,7 +65,17 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if eq .Values.voiceAgent.avatarProvider "openspline" }}
+            - name: portraits
+              mountPath: /portraits
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if eq .Values.voiceAgent.avatarProvider "openspline" }}
+        - name: portraits
+          configMap:
+            name: avatar-portraits
+        {{- end }}
 {{- end }}

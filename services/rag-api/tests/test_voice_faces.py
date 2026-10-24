@@ -217,3 +217,48 @@ def test_poster_failure_is_remembered(monkeypatch, tmp_path):
     assert faces.poster("r67d1c9cac37") is None
     assert faces.poster("r67d1c9cac37") is None
     assert attempts == ["https://cdn/j.mp4"]  # not retried within the back-off window
+
+
+def test_openspline_faces_are_the_portraits_of_the_chart(monkeypatch, tmp_path):
+    from PIL import Image
+
+    portraits = tmp_path / "portraits"
+    portraits.mkdir()
+    for face_id in ("meera", "steve"):
+        Image.new("RGB", (512, 512), "gray").save(portraits / f"{face_id}.jpg")
+    monkeypatch.setattr(settings, "avatar_provider", "openspline")
+    monkeypatch.setattr(settings, "avatar_portrait_dir", str(portraits))
+    monkeypatch.setattr(settings, "tavus_api_key", "k")  # still in the secret: not used for these faces
+    monkeypatch.setattr(
+        faces, "_tavus_faces", lambda ids, key: (_ for _ in ()).throw(AssertionError("Tavus"))
+    )
+    monkeypatch.setattr(
+        settings,
+        "avatar_faces",
+        json.dumps(
+            [
+                {"id": "meera", "name": "Meera", "gender": "female"},
+                {"id": "lisa", "name": "Lisa", "gender": "female"},  # no portrait: not offered
+                {"id": "steve", "name": "Steve", "gender": "male"},
+                {"id": "../steve", "name": "Escape"},
+            ]
+        ),
+    )
+    monkeypatch.setattr(faces, "POSTER_DIR", tmp_path / "posters")
+    monkeypatch.setattr(settings, "tts_voice_male", "am_michael")
+    faces.reset_cache()
+
+    assert [f.id for f in faces.enriched()] == ["meera", "steve"]
+    assert faces.voice_for(faces.resolve("steve")) == "am_michael"
+    data = faces.poster("steve")
+    assert data and data[:2] == b"\xff\xd8"
+    assert Image.open(faces.poster_path("steve")).size == (faces.POSTER_SIZE, faces.POSTER_SIZE)
+    assert faces.poster("lisa") is None
+    with TestClient(app) as client:
+        body = client.get("/v1/voice/faces").json()
+        assert body["provider"] == "openspline" and body["default"] == "meera"
+        assert [f["poster_url"] for f in body["faces"]] == [
+            "/v1/voice/faces/meera/poster",
+            "/v1/voice/faces/steve/poster",
+        ]
+        assert client.get("/v1/voice/faces/meera/poster").status_code == 200

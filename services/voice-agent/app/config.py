@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     openspline_url: str = "http://openspline:7860"
     openspline_quality: str = "low"
     openspline_portrait: str = str(Path(__file__).parent / "portraits" / "default.png")
+    # The faces' portraits, <face id>.jpg (the chart mounts its ConfigMap avatar-portraits here);
+    # a face without one falls back to openspline_portrait
+    avatar_portrait_dir: str = "/portraits"
 
     # Extra CA bundle trusted for in-cluster endpoints served over TLS (OpenShift service CA)
     service_ca_file: str | None = None

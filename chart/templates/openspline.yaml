@@ -3,6 +3,18 @@
 {{- /* without an image of its own, the stock Python image runs the install kept on the volume */}}
 {{- $bin := ternary "openspline" "/data/openspline/venv/bin/openspline" (not (empty $o.image)) }}
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: avatar-portraits
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "openspline") | nindent 4 }}
+# The faces' portraits (chart/files/portraits), mounted at /portraits in the voice agent and the RAG API
+binaryData:
+  {{- range $path, $_ := .Files.Glob "files/portraits/*.jpg" }}
+  {{ base $path }}: {{ $.Files.Get $path | b64enc }}
+  {{- end }}
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: openspline-data

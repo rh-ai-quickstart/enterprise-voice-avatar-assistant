@@ -399,7 +399,8 @@ voiceAgent:
   # Extra environment for the worker; explicit entries win over the config map and secrets,
   # so non-secret provider settings such as TAVUS_FACE_ID can be pinned here.
   extraEnv: {}
-  # Up to four faces the person can choose in the UI before a voice session (Tavus). Each entry
+  # Up to four faces the person can choose in the UI before a voice session (Tavus; OpenSpline's
+  # are openspline.faces). Each entry
   # has id (the Tavus face id), name (shown in the UI; taken from Tavus when empty) and gender
   # (female | male, which selects the voice from models.tts.voices) or voice (pins a TTS voice).
   # The first entry is the default; an empty list means the single face in TAVUS_FACE_ID.
@@ -429,6 +430,21 @@ openspline:
   quality: low
   # Volume for the install and the model weights, about 8 GB each; kept across upgrades
   storage: 30Gi
+  # Faces offered in the UI (two to four; the first is the default), each with its portrait
+  # chart/files/portraits/<id>.jpg. gender picks the voice from models.tts.voices; voice pins one.
+  faces:
+    - id: meera
+      name: Meera
+      gender: female
+    - id: lisa
+      name: Lisa
+      gender: female
+    - id: steve
+      name: Steve
+      gender: male
+    - id: emily
+      name: Emily
+      gender: female
   # A whole GPU: real-time video needs its compute. On a Kueue-managed project, add the queue in
   # podLabels (kueue.x-k8s.io/queue-name); scripts/setup.sh does both from the booked quota.
   resources:

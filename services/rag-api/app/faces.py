@@ -4,7 +4,8 @@ The catalog comes from the chart (AVATAR_FACES, a JSON list of {id, name?, gende
 Tavus publishes no gender for its faces, so the operator declares it once per face; the voice
 follows from it (TTS_VOICE_FEMALE / TTS_VOICE_MALE) unless the face pins a voice. Names and
 thumbnails missing from the catalog are filled in from the Tavus API when a key is available.
-The voice agent applies the same catalog when it joins the room.
+OpenSpline's faces are portraits from the chart (<id>.jpg in AVATAR_PORTRAIT_DIR), which are also
+their pictures in the picker. The voice agent applies the same catalog when it joins the room.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 import time
@@ -100,9 +102,21 @@ def avatar_provider() -> str:
     return provider if not key or os.environ.get(key, "").strip() else "none"
 
 
+def portrait_path(face_id: str) -> Path | None:
+    """OpenSpline's portrait for a face, when the chart has one (only plain names are looked up)."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", face_id or ""):
+        return None
+    path = Path(settings.avatar_portrait_dir) / f"{face_id}.jpg"
+    return path if path.is_file() else None
+
+
 def catalog() -> list[Face]:
-    """Declared faces (Tavus only). Without a list, the single configured face is offered by id."""
-    if avatar_provider() != "tavus":
+    """Declared faces: Tavus faces (without a list, the single configured face is offered by id),
+    or OpenSpline faces that have their portrait."""
+    provider = avatar_provider()
+    if provider == "openspline":
+        return [face for face in parse(settings.avatar_faces) if portrait_path(face.id)]
+    if provider != "tavus":
         return []
     faces = parse(settings.avatar_faces)
     if not faces and settings.tavus_face_id:
@@ -166,7 +180,7 @@ def _merge(face: Face, detail: dict | None) -> Face:
 def enriched() -> list[Face]:
     """The catalog with names and thumbnails from Tavus, cached; the plain catalog if Tavus is unreachable."""
     faces = catalog()
-    if not faces or not settings.tavus_api_key:
+    if not faces or not settings.tavus_api_key or avatar_provider() != "tavus":
         return faces
     key = tuple(face.id for face in faces)
     now = time.monotonic()
@@ -200,7 +214,7 @@ def poster_path(face_id: str) -> Path:
 
 
 def poster_url(face: Face) -> str | None:
-    return f"/v1/voice/faces/{face.id}/poster" if face.thumbnail_url else None
+    return f"/v1/voice/faces/{face.id}/poster" if face.thumbnail_url or portrait_path(face.id) else None
 
 
 def _download(url: str, target: Path) -> None:
@@ -217,7 +231,6 @@ def _download(url: str, target: Path) -> None:
 def _extract_frame(video: Path, target: Path, at_seconds: float = POSTER_AT_SECONDS) -> None:
     """Write a square JPEG of one frame (about `at_seconds` in) to target."""
     import av
-    from PIL import Image
 
     image = None
     with av.open(str(video)) as container:
@@ -231,6 +244,13 @@ def _extract_frame(video: Path, target: Path, at_seconds: float = POSTER_AT_SECO
             break
     if image is None:
         raise ValueError("no video frame decoded")
+    _save_poster(image, target)
+
+
+def _save_poster(image, target: Path) -> None:
+    """Write image as the square JPEG poster at target."""
+    from PIL import Image
+
     width, height = image.size
     side = min(width, height)
     left, top = (width - side) // 2, (height - side) // 3  # faces sit above the middle of portrait clips
@@ -244,10 +264,21 @@ def _extract_frame(video: Path, target: Path, at_seconds: float = POSTER_AT_SECO
 def poster(face_id: str) -> bytes | None:
     """JPEG poster for a face, generated on first use and cached on disk; None when unavailable."""
     face = next((f for f in enriched() if f.id == face_id), None)
-    if face is None or not face.thumbnail_url:
+    portrait = portrait_path(face_id) if face else None
+    if face is None or not (face.thumbnail_url or portrait):
         return None
     path = poster_path(face_id)
     if path.exists():
+        return path.read_bytes()
+    if portrait:
+        from PIL import Image
+
+        try:
+            with Image.open(portrait) as image:
+                _save_poster(image, path)
+        except Exception as exc:  # noqa: BLE001 - a missing poster only costs the picture
+            log.warning("no poster for face %s: %s", face_id, exc)
+            return None
         return path.read_bytes()
     with _poster_lock:
         if path.exists():
@@ -270,5 +301,5 @@ def poster(face_id: str) -> bytes | None:
 def warm_posters() -> None:
     """Generate every poster once so the first page load does not wait for downloads."""
     for face in enriched():
-        if face.thumbnail_url:
+        if face.thumbnail_url or portrait_path(face.id):
             poster(face.id)

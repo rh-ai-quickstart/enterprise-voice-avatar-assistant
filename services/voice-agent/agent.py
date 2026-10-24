@@ -26,6 +26,7 @@ from livekit.agents import (
     StopResponse,
     WorkerOptions,
     cli,
+    stt,
 )
 from livekit.plugins import openai, silero
 
@@ -95,9 +96,21 @@ class Assistant(Agent):
         self._user_id = user_id
         self._user_name = user_name
 
+    async def stt_node(self, audio, model_settings):
+        """Noise never becomes words: Whisper turns short sounds and silence into "-", "Oh." or
+        stock phrases. Dropped here, they neither start a turn nor interrupt the assistant (with
+        an avatar only words interrupt, see entrypoint)."""
+        async for event in Agent.default.stt_node(self, audio, model_settings):
+            if event.type == stt.SpeechEventType.FINAL_TRANSCRIPT and event.alternatives:
+                text = event.alternatives[0].text
+                if helpers.is_noise_transcript(text):
+                    log.info("session=%s ignoring noise transcript %r", self._session_id, text[:80])
+                    continue
+            yield event
+
     async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
-        """Noise is not a question: Whisper turns short sounds and silence into "-", "Oh." or stock
-        phrases, which would get an answer, a chat bubble and a knowledge gap each."""
+        """Noise is not a question (the same check as stt_node, for a turn put together from
+        several transcripts): it would get an answer, a chat bubble and a knowledge gap each."""
         text = getattr(new_message, "text_content", None) or ""
         if helpers.is_noise_transcript(text):
             log.info("session=%s ignoring noise transcript %r", self._session_id, text[:80])
@@ -239,12 +252,19 @@ async def entrypoint(ctx: JobContext) -> None:
     }
     if ctx.proc.userdata.get("turn_detector"):
         turn_handling["turn_detection"] = build_turn_detector()
+    if avatars.active():
+        # An avatar's stream cannot pause, so LiveKit cannot hold the answer at a sound and resume
+        # it when no words follow (resume_false_interruption): any noise would cut the answer off.
+        # Words interrupt instead, and noise never becomes words (Assistant.stt_node).
+        turn_handling["interruption"] = {
+            "min_words": settings.avatar_interruption_min_words,
+            "resume_false_interruption": False,
+        }
     session = AgentSession(
         vad=ctx.proc.userdata["vad"],
         stt=build_stt(),
         tts=build_tts(face),
         llm=build_llm(),
-        allow_interruptions=True,
         turn_handling=turn_handling,
     )
     try:

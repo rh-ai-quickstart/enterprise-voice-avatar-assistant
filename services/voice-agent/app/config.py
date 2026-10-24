@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     avatar_provider: str = "none"
     # Give up on the avatar and answer audio-only if the provider has not joined within this time
     avatar_start_timeout_seconds: float = 25.0
+    # With an avatar, words transcribed while it speaks that interrupt it: its stream cannot pause
+    # and resume, so a sound alone must not stop it
+    avatar_interruption_min_words: int = 1
     simli_api_key: str | None = None
     simli_face_id: str | None = None
     tavus_api_key: str | None = None

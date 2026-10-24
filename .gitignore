@@ -43,3 +43,6 @@ chart/charts/
 # Playwright
 frontend/test-results/
 frontend/playwright-report/
+
+# internal environment values for the handoff docs; never commit
+docs/handoff/private/

@@ -7,15 +7,34 @@ import {
   useConnectionState,
   useDataChannel,
   useLocalParticipant,
+  useParticipantTracks,
+  useRemoteParticipants,
   useRoomContext,
   useVoiceAssistant,
 } from "@livekit/components-react";
-import { ConnectionState, LogLevel, setLogLevel } from "livekit-client";
+import { ConnectionState, LogLevel, ParticipantKind, Track, setLogLevel } from "livekit-client";
 import * as api from "../lib/api";
 import type { AssistantTurn, VoiceFace, VoiceToken } from "../types";
 
 // Open the page with ?debug=1 to get verbose LiveKit client logs (ICE candidates, TURN, reconnects).
 if (new URLSearchParams(window.location.search).has("debug")) setLogLevel(LogLevel.debug);
+
+// The agent's state and the avatar's tracks. useVoiceAssistant takes only camera and microphone
+// tracks, and OpenSpline publishes the avatar's without a source (LiveKit reports them as
+// unknown): those of the avatar worker, which publishes on the agent's behalf, are taken too.
+export function useAvatarTracks() {
+  const assistant = useVoiceAssistant();
+  const agent = assistant.agent;
+  const worker = useRemoteParticipants().find(
+    (p) => p.kind === ParticipantKind.AGENT && !!agent && p.attributes["lk.publish_on_behalf"] === agent.identity,
+  );
+  const unsourced = useParticipantTracks([Track.Source.Unknown], worker?.identity);
+  return {
+    ...assistant,
+    audioTrack: assistant.audioTrack ?? unsourced.find((t) => t.publication.kind === Track.Kind.Audio),
+    videoTrack: assistant.videoTrack ?? unsourced.find((t) => t.publication.kind === Track.Kind.Video),
+  };
+}
 
 interface Props {
   sessionId: string;
@@ -177,7 +196,7 @@ function VoiceStage({
   error: string | null;
   faceName: string | null;
 }) {
-  const { state, audioTrack, videoTrack } = useVoiceAssistant();
+  const { state, audioTrack, videoTrack } = useAvatarTracks();
   const connectionState = useConnectionState();
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const room = useRoomContext();

@@ -99,6 +99,10 @@ def test_noise_transcripts_are_recognised():
         "Thank you.",
         "Thanks for watching!",
         "That's not good, I don't think we can watch it, I don't think we can watch it.",
+        "I love you, I love you.",
+        "- Oh, really?",
+        "Oh, really?",
+        "Thank you, thank you.",
     ]:
         assert helpers.is_noise_transcript(noise), noise
     for question in [
@@ -109,5 +113,7 @@ def test_noise_transcripts_are_recognised():
         "I need a new laptop, mine no longer boots",
         "no, no",
         "thank you, how do I reset my password?",
+        "Really? How many days?",
+        "What is the expense limit, the limit for travel?",
     ]:
         assert not helpers.is_noise_transcript(question), question

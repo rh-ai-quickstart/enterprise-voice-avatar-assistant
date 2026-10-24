@@ -107,7 +107,10 @@ class Assistant(Agent):
         """Replace the LLM step with a call to the RAG API so voice and text share one answer path.
         With streaming, speech starts on the first complete sentence while the rest is generated."""
         text = helpers.last_user_text(chat_ctx)
-        if not text:
+        # Preemptive generation runs this before on_user_turn_completed can stop a noise turn, and
+        # LiveKit does not cancel it then: noise must not reach the RAG API (an answer, a chat
+        # bubble and a stored turn each)
+        if not text or helpers.is_noise_transcript(text):
             return
         started = time.monotonic()
         if streaming_enabled():

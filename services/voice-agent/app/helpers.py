@@ -155,7 +155,10 @@ NOISE_WORDS = {
     "oh",
     "ok",
     "okay",
+    "really",
     "so",
+    "sorry",
+    "thanks",
     "the",
     "uh",
     "uhm",
@@ -167,9 +170,15 @@ NOISE_WORDS = {
 }
 NOISE_PHRASES = {
     "bye bye",
+    "i love you",
+    "oh my god",
+    "oh no",
+    "oh really",
+    "oh yeah",
     "please subscribe",
     "thank you",
     "thank you for watching",
+    "thank you so much",
     "thank you very much",
     "thanks for watching",
     "you you",
@@ -178,7 +187,8 @@ NOISE_PHRASES = {
 
 def is_noise_transcript(text: str) -> bool:
     """True for a transcript that is no request to the assistant: no words, a lone filler, a
-    phrase Whisper invents for silence, or a clause of four words or more repeated word for word."""
+    phrase Whisper invents for silence, a short line in subtitle style ("- Oh, really?"), or a
+    clause of two words or more repeated word for word ("I love you, I love you.")."""
     words = re.findall(r"[a-z0-9']+", text.lower())
     if not words:
         return True
@@ -186,6 +196,8 @@ def is_noise_transcript(text: str) -> bool:
         return True
     if " ".join(words) in NOISE_PHRASES:
         return True
+    if text.lstrip().startswith("-") and len(words) <= 3:
+        return True
     clauses = [" ".join(re.findall(r"[a-z0-9']+", c)) for c in re.split(r"[,.!?;]+", text.lower())]
     clauses = [c for c in clauses if c]
-    return any(a == b and len(a.split()) >= 4 for a, b in pairwise(clauses))
+    return any(a == b and len(a.split()) >= 2 for a, b in pairwise(clauses))

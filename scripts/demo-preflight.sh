@@ -25,6 +25,19 @@ oc get pods -n "$NS" --field-selector=status.phase!=Running,status.phase!=Succee
 APP=$(oc get applications.argoproj.io -A -o jsonpath="{range .items[?(@.spec.destination.namespace==\"$NS\")]}{.metadata.namespace}/{.metadata.name} sync={.status.sync.status} health={.status.health.status}{'\n'}{end}" 2>/dev/null)
 [ -n "$APP" ] && { echo "=== argo cd ==="; echo "  $APP"; }
 
+# The services create their tables at start; one that started before PostgreSQL answered
+# (images before the retry) runs without them: no requests, no memory, no activity feed
+if oc get deploy/postgres -n "$NS" >/dev/null 2>&1; then
+  echo "=== database tables ==="
+  if missing=$(oc exec -i deploy/postgres -n "$NS" -- bash -c 'psql -U "$POSTGRESQL_USER" -d "$POSTGRESQL_DATABASE" -At' 2>/dev/null <<'SQL'
+SELECT string_agg(t, ' ') FROM unnest(ARRAY['tickets', 'conversations', 'messages', 'activity_events', 'documents', 'ingestion_jobs']) AS t WHERE to_regclass(t) IS NULL;
+SQL
+  ); then
+    if [ -z "$missing" ]; then echo "  the RAG API and ingestion tables exist"
+    else echo "  missing: $missing (a service started before PostgreSQL answered: oc rollout restart deployment/rag-api deployment/ingestion -n $NS)"; rc=1; fi
+  else echo "  cannot query PostgreSQL (oc exec deploy/postgres -n $NS)"; rc=1; fi
+fi
+
 echo "=== connectivity test pod ==="
 "$ROOT/scripts/test-services.sh" "$@" || rc=1
 

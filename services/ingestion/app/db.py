@@ -45,17 +45,20 @@ def _connect():
     return psycopg.connect(settings.database_url, connect_timeout=5)
 
 
-def init_schema() -> None:
+def init_schema() -> bool:
+    """Creates the tables. False when the database cannot be reached (the caller retries)."""
     if not enabled():
         log.info("DATABASE_URL not set; documents and jobs are kept in memory only")
-        return
+        return True
     try:
         with _connect() as conn:
             conn.execute(SCHEMA)
             conn.commit()
         log.info("database schema ready")
+        return True
     except Exception as exc:  # noqa: BLE001
-        log.warning("database unavailable, continuing without persistence: %s", exc)
+        log.warning("database unavailable, continuing without persistence until it answers: %s", exc)
+        return False
 
 
 def record_job(job: Any) -> None:

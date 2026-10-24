@@ -109,13 +109,26 @@ async def lifespan(_: FastAPI):
         log.warning(
             "admin portal enabled but ADMIN_PASSWORD or ADMIN_SESSION_SECRET is empty: sign-in answers 503"
         )
-    await asyncio.to_thread(memory.init_schema)
+    # PostgreSQL may start after this pod (or move to another node): without the tables, requests
+    # cannot be filed and memory is off, so a failed first attempt is retried until it answers
+    schema = None if await asyncio.to_thread(memory.init_schema) else asyncio.create_task(_retry_schema())
     if settings.admin_enabled and memory.enabled():
         stream.hub.start(asyncio.get_running_loop())
     if faces.catalog() and settings.tavus_api_key:
         threading.Thread(target=faces.warm_posters, name="face-posters", daemon=True).start()
     yield
+    if schema:
+        schema.cancel()
     await asyncio.to_thread(stream.hub.stop)
+
+
+async def _retry_schema() -> None:
+    delay = 2.0
+    while True:
+        await asyncio.sleep(delay)
+        if await asyncio.to_thread(memory.init_schema):
+            return
+        delay = min(delay * 2, 30.0)
 
 
 app = FastAPI(title="Enterprise voice avatar assistant - RAG API", version="0.1.0", lifespan=lifespan)

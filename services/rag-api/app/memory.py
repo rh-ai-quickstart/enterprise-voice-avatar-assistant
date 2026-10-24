@@ -22,10 +22,11 @@ def enabled() -> bool:
     return bool(settings.database_url)
 
 
-def init_schema() -> None:
+def init_schema() -> bool:
+    """Creates or updates the tables. False when the database cannot be reached (the caller retries)."""
     if not enabled():
         log.info("DATABASE_URL not set; running without memory, tickets, and document records")
-        return
+        return True
     try:
         with clients.db() as conn:
             # One replica at a time: the files recreate a trigger, which concurrent starts would race on
@@ -34,8 +35,10 @@ def init_schema() -> None:
                 conn.execute(path.read_text())
             conn.commit()
         log.info("database schema ready")
+        return True
     except Exception as exc:  # noqa: BLE001
-        log.warning("database unavailable, continuing without persistence: %s", exc)
+        log.warning("database unavailable, continuing without persistence until it answers: %s", exc)
+        return False
 
 
 def _run(query: str, params: tuple = (), fetch: bool = False):

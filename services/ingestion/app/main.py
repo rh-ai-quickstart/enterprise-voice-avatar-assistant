@@ -60,13 +60,25 @@ async def lifespan(_: FastAPI):
         log.warning(
             "INTERNAL_API_TOKEN is empty: the write routes answer 503 until it is set (secret assistant-admin)"
         )
-    await asyncio.to_thread(db.init_schema)
+    # PostgreSQL may start after this pod: a failed first attempt is retried until it answers
+    schema = None if await asyncio.to_thread(db.init_schema) else asyncio.create_task(_retry_schema())
     buckets = asyncio.create_task(_ensure_buckets())
     yield
     buckets.cancel()
+    if schema:
+        schema.cancel()
 
 
 app = FastAPI(title="Enterprise voice avatar assistant - ingestion", version="0.1.0", lifespan=lifespan)
+
+
+async def _retry_schema() -> None:
+    delay = 2.0
+    while True:
+        await asyncio.sleep(delay)
+        if await asyncio.to_thread(db.init_schema):
+            return
+        delay = min(delay * 2, 30.0)
 
 
 async def _ensure_buckets() -> None:

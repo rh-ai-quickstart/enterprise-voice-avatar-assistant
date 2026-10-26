@@ -1,7 +1,8 @@
 # Status and to-do list
 
 As of 2026-10-26 evening (Mohamed's local time is UTC+4). The latest work on `main` is the
-avatar switch (several avatars in the UI) with the OpenSpline sync fix, described below. It
+avatar switch (several avatars in the UI) with the OpenSpline sync fix, described below, and
+Beyond Presence as a third avatar. It
 changes the RAG API, the voice agent and the frontend, so CI builds new images and commits
 their promotion to `main`; deploying it takes `git pull`, `scripts/setup.sh --step 2` and
 `--step 6`. Until then the cluster runs images `sha-571acbf` with the chart of `b5dd698`.
@@ -95,10 +96,11 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
 
 ## To do, in priority order
 
-### 1. Deploy the avatar switch and confirm the sync fix
+### 1. Deploy the avatar switch with Beyond Presence, and confirm the sync fix
 - **Wait** for CI to build the images and commit their promotion to `main`.
-- **Run:** `git pull`, then `scripts/setup.sh --step 2` (answer `openspline,tavus`), then
-  `--step 6`, then hard-refresh the page. Step 6 restarts the OpenSpline worker; its log
+- **Run:** `git pull`, then `scripts/setup.sh --step 2` (answer `openspline,tavus,bey`), then
+  `--step 5` (it asks for the Beyond Presence key, hidden), then `--step 6`, then hard-refresh
+  the page. Step 6 restarts the OpenSpline worker; its log
   should say "publish options updated: simulcast from OPENSPLINE_VIDEO_SIMULCAST".
 - **Check:**
   - the lips follow the voice again with OpenSpline; if not, read the troubleshooting entry
@@ -106,20 +108,23 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
   - the Avatar switch shows OpenSpline and Tavus, each with its faces, and the choice is
     remembered after a reload;
   - a Tavus session works (the free plan has 25 minutes a month and one stream);
+  - a Beyond Presence session works with Nelly, Jerome and Laura, and each one's voice fits
+    (their genders in `chart/values-demo-cluster.yaml` were guessed from the names); the admin
+    portal's Integrations test confirms the avatar ids;
+  - after the move to LiveKit Agents 1.8.9 (for the Beyond Presence plugin): noise still gets no
+    answer, words still interrupt the avatar, and end of speech to first audio stays 1 to 2 s;
   - Emily is still sharp at 1 Mbps;
-  - the frame is square for OpenSpline and wide for Tavus;
+  - the frame is square for OpenSpline and wide for Tavus and Beyond Presence;
   - the greeting appears once, a long answer plays to the end, and "wait, I meant laptops"
     still interrupts.
 - **If anything cuts off:** read the voice agent log (runbook in
   [setup-and-deploy.md](setup-and-deploy.md)); each session logs `avatar=<provider>`.
 
-### 2. Turn on Claude on pull requests
-`.github/workflows/claude.yaml` answers "@claude" in pull requests and issues (see
-[development.md](../development.md#claude-on-pull-requests)). It does nothing until the
-repository has the secret `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`), which Mohamed adds
-as the repository admin. Then try `@claude review this PR` on a pull request. If the run fails
-with an action that is not allowed, the organization's Actions policy has to allow
-`anthropics/claude-code-action`.
+### 2. Finish PR #12 (demo script)
+PR #12 updates `docs/demo-script.md` for the avatar switch. `@claude review this PR` on it gave
+five small suggestions (the switch disappears with one avatar left; split the long bullet;
+clearer step 4; faces change with the avatar; OpenSpline serves one session at a time). Apply
+them, add Beyond Presence, and merge with Mohamed's go.
 
 ### 3. A self-hosted HD avatar (research track)
 Mohamed wants professional, high-resolution avatars, self-hosted first. No open model renders
@@ -170,9 +175,6 @@ and Kokoro keeps its slice. The pair is not measured yet.
 - **Hedra is gone from LiveKit Agents** (removed 2026-09-02). Drop it from
   `services/voice-agent/app/avatars.py`, the RAG API's `AVATAR_KEYS` and the chart's
   `validate.yaml`.
-- **Beyond Presence as a hosted third avatar**, if one is wanted quickly (see
-  [avatar-research.md](avatar-research.md)): `livekit-plugins-bey` needs
-  `livekit-agents>=1.8.9`, so the voice agent's lock moves from 1.8.0.
 - **Setup status after a profile change.** The status board shows step 6 as done even after
   step 2 changed the profile (for example a new avatar). It should say "profile changed: run
   --step 6". Compare a hash of `values-object.json` saved at the last step 6.

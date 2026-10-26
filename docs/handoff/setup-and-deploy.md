@@ -42,8 +42,8 @@ with `oc project <name>`.
      matching `MAAS_<X>_MODEL`; else the chart serves it on the smallest GPU or MIG slice of
      a queue that fits (`assign_gpus`: LLM needs 24 GB, Whisper and BGE-M3 10 GB, Kokoro
      4 GB, the avatar a whole card).
-   - **The avatar question:** tavus, openspline, several (`openspline,tavus`: the UI offers
-     each, the first preselected) or none. The suggestion is `openspline,tavus` when a whole
+   - **The avatar question:** tavus, bey, openspline, several (`openspline,tavus,bey`: the UI
+     offers each, the first preselected) or none. The suggestion is `openspline,tavus` when a whole
      GPU is free. `AVATAR_CHOICE` in `state.env` holds the answer; `avatar_has`,
      `avatar_list` and `avatar_default` read it. With several, the overlay gets
      `voiceAgent.avatarProviders`, and step 6 passes the list to `deploy.sh` as

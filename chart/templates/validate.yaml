@@ -17,18 +17,21 @@ cannot reach a model. Renders nothing.
 {{- if and (ne $g.provider "none") (ne $g.provider "trustyai") (not $g.deploy) (not $g.endpoint) }}
 {{- fail (printf "models.guardrails.provider is %s with deploy false but models.guardrails.endpoint is empty; set the endpoint or deploy the model" $g.provider) }}
 {{- end }}
-{{- if gt (len .Values.voiceAgent.faces) 4 }}
-{{- fail (printf "voiceAgent.faces lists %d faces; the UI offers at most 4" (len .Values.voiceAgent.faces)) }}
+{{- range $key := list "faces" "beyFaces" }}
+{{- $list := index $.Values.voiceAgent $key | default list }}
+{{- if gt (len $list) 4 }}
+{{- fail (printf "voiceAgent.%s lists %d faces; the UI offers at most 4" $key (len $list)) }}
 {{- end }}
-{{- range $f := .Values.voiceAgent.faces }}
+{{- range $f := $list }}
 {{- if not $f.id }}
-{{- fail "voiceAgent.faces: every entry needs an id (the Tavus face id, for example r67d1c9cac37)" }}
+{{- fail (printf "voiceAgent.%s: every entry needs an id (the Tavus face id or the Beyond Presence avatar id)" $key) }}
 {{- end }}
 {{- if and $f.gender (not (has $f.gender (list "female" "male"))) }}
-{{- fail (printf "voiceAgent.faces[%s].gender is %q; use female or male, or set voice instead" $f.id $f.gender) }}
+{{- fail (printf "voiceAgent.%s[%s].gender is %q; use female or male, or set voice instead" $key $f.id $f.gender) }}
 {{- end }}
 {{- end }}
-{{- $providers := list "none" "openspline" "tavus" "simli" "hedra" }}
+{{- end }}
+{{- $providers := list "none" "openspline" "tavus" "bey" "simli" "hedra" }}
 {{- if not (has .Values.voiceAgent.avatarProvider $providers) }}
 {{- fail (printf "voiceAgent.avatarProvider is %q; use one of %s" .Values.voiceAgent.avatarProvider (join ", " $providers)) }}
 {{- end }}

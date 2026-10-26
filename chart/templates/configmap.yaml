@@ -53,7 +53,9 @@ data:
   AVATAR_PROVIDER: {{ $default | quote }}
   AVATAR_FACES_OPENSPLINE: {{ .Values.openspline.faces | default list | toJson | quote }}
   AVATAR_FACES_TAVUS: {{ .Values.voiceAgent.faces | default list | toJson | quote }}
-  {{- $faces := ternary .Values.openspline.faces .Values.voiceAgent.faces (eq $default "openspline") }}
+  AVATAR_FACES_BEY: {{ .Values.voiceAgent.beyFaces | default list | toJson | quote }}
+  {{- $faces := .Values.voiceAgent.faces }}
+  {{- if eq $default "openspline" }}{{ $faces = .Values.openspline.faces }}{{ else if eq $default "bey" }}{{ $faces = .Values.voiceAgent.beyFaces }}{{ end }}
   AVATAR_FACES: {{ $faces | default list | toJson | quote }}
   # The self-hosted avatar worker (openspline among the avatars); the RAG API tests it, the voice agent uses it
   OPENSPLINE_URL: "http://openspline:7860"

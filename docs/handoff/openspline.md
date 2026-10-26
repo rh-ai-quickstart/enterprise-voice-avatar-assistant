@@ -168,8 +168,8 @@ oc exec $P -c openspline -- env HOME=/tmp OPENSPLINE_MODEL_DIR=/data/models/avat
   frame inside OpenSpline's render loop: a fork, and a risk of flicker.
 - **One session per worker.** More GPUs mean more workers; setup could ask for them
   (`AVATAR_SESSIONS`, to do).
-- **The SDK pins** livekit-agents 1.8.3; the voice agent runs 1.8.0, and the data stream
-  protocol matches.
+- **The SDK pins** livekit-agents 1.8.3; the voice agent runs 1.8.9 (since Beyond Presence; 1.8.0
+  before), and the data stream protocol matches.
 - **Licenses:**
   - OpenSpline: MIT;
   - the SoulX-FlashHead weights: "other" (see the model card on Hugging Face);

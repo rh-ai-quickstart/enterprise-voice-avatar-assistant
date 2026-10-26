@@ -214,3 +214,27 @@ def test_avatar_status_and_test_cover_every_provider(monkeypatch):
         ("openspline: GPU worker", True),
         ("tavus: key", False),
     ]
+
+
+def test_beyond_presence_test_finds_the_configured_avatars(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_providers", "bey")
+    monkeypatch.setenv("BEY_API_KEY", "k")
+    monkeypatch.setattr(
+        faces, "catalog", lambda provider=None: [SimpleNamespace(id="a1"), SimpleNamespace(id="a9")]
+    )
+    pages = {"data": [{"id": "a1", "name": "Office Anna"}, {"id": "a2", "name": "Ege"}], "has_more": False}
+    http = FakeHttp({"https://api.bey.dev/v1/avatars": (200, pages)})
+    monkeypatch.setattr(integrations, "_http", lambda: http)
+    checks = integrations._test_avatar()
+    assert [(c["name"], c["ok"], c["detail"]) for c in checks] == [
+        ("key", True, "2 avatars available"),
+        ("face a1", True, "Office Anna"),
+        ("face a9", False, "not found with this key"),
+    ]
+    assert http.calls[0][1] == {"x-api-key": "k"}
+    monkeypatch.setattr(
+        integrations, "_http", lambda: FakeHttp({"https://api.bey.dev/v1/avatars": (401, {})})
+    )
+    assert integrations._test_avatar() == [
+        {"name": "key", "ok": False, "detail": "Beyond Presence answers 401"}
+    ]

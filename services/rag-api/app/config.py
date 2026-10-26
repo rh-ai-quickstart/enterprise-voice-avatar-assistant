@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     avatar_faces: str = "[]"
     avatar_faces_openspline: str = ""
     avatar_faces_tavus: str = ""
+    avatar_faces_bey: str = ""
     tavus_face_id: str | None = None
     tavus_api_key: str | None = None
     # The self-hosted avatar worker (avatar provider openspline), for the Integrations page test

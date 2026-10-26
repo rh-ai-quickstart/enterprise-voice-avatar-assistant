@@ -34,6 +34,19 @@ voiceAgent:
     - id: r213e42b45b3
       name: Helen
       gender: female
+  # Beyond Presence stock avatars, offered when bey is among the avatars and BEY_API_KEY is in the
+  # integrations secret (scripts/list-bey-avatars.sh lists every avatar the key can use). The
+  # genders follow the names; check them in Bey Studio (https://bey.studio/avatars).
+  beyFaces:
+    - id: 694c83e2-8895-4a98-bd16-56332ca3f449
+      name: Nelly
+      gender: female
+    - id: b63ba4e6-d346-45d0-ad28-5ddffaac0bd0_v2
+      name: Jerome
+      gender: male
+    - id: 7c9ca52f-d4f7-46e1-a4b8-0c8655857cc3
+      name: Laura
+      gender: female
   image: quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-voice-agent:sha-d2dd3c4
 frontend:
   enabled: true

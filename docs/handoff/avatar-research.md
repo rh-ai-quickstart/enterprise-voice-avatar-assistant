@@ -13,7 +13,9 @@ decided, and the plan for the self-hosted track.
 - **The third avatar is a self-hosted research track**, not a hosted vendor. Mohamed chose it
   over Beyond Presence, Anam and bitHuman. No new account and no new key, but no
   demo-ready result soon either.
-- **Beyond Presence stays the hosted option** if a third avatar is needed quickly (see below).
+- **Later the same day, Mohamed asked for Beyond Presence too.** It is now offered in the UI
+  next to OpenSpline and Tavus (avatar provider `bey`, faces in `voiceAgent.beyFaces`), while the
+  self-hosted track stays the long-term plan.
 
 ## What the search found (late October 2026)
 Every latency, resolution and quality figure below is the vendor's or the paper's own; none was
@@ -49,8 +51,8 @@ cap); Ditto (bundles InsightFace detectors, whose commercial terms need checking
   audio (speech-to-video), €0.09 to €0.18 a minute, EU company with SOC 2 and GDPR. The only
   vendor advertising on-premises deployment, though its FAQ calls the offer cloud-based (ask
   sales). Nine stock avatars. Plugin `livekit-plugins-bey` 1.8.9, which needs
-  `livekit-agents>=1.8.9`; the voice agent's lock has 1.8.0, and the OpenSpline client (0.1.1)
-  does not pin livekit-agents, so the upgrade looks clear.
+  `livekit-agents>=1.8.9`; the voice agent moved from 1.8.0 to 1.8.9 for it (the OpenSpline client
+  0.1.1 does not pin livekit-agents).
 - **Anam** (1152x768, about 150 to 180 ms, $0.11 to $0.16) and **HeyGen LiveAvatar** (720p,
   1080p on request) are the other serious ones.
 - **Gone or changed:** Hedra was removed from LiveKit Agents on 2026-09-02 (our `avatars.py`

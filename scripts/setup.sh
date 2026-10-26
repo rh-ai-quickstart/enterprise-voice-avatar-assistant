@@ -19,9 +19,10 @@
 # model endpoints instead, run it with PROFILE=remote and REMOTE_LLM_ENDPOINT, REMOTE_LLM_MODEL,
 # REMOTE_STT_ENDPOINT, REMOTE_EMB_ENDPOINT (and the keys in ~/secrets.env).
 #
-# The avatar video is chosen in step 2: tavus (Tavus cloud, its key in step 5), openspline
-# (self-hosted, OpenSpline on whole GPUs of the project), both (openspline,tavus: the person picks
-# one in the UI, the first preselected) or none (audio only); AVATAR_PROVIDER answers the question,
+# The avatar video is chosen in step 2: tavus (Tavus cloud, its key in step 5), bey (Beyond
+# Presence cloud, its key in step 5), openspline (self-hosted, OpenSpline on whole GPUs of the
+# project), several (openspline,tavus,bey: the person picks one in the UI, the first preselected)
+# or none (audio only); AVATAR_PROVIDER answers the question,
 # and a later run can switch with --step 2 then --step 6. OpenSpline runs
 # in high quality on a GPU pair when the booked quota has one free next to the models, else in
 # low quality on one GPU; AVATAR_QUALITY=low or high decides instead.
@@ -434,6 +435,7 @@ choose_avatar() {
   [ -n "${AVATAR_CHOICE:-}" ] && avatar_valid "$AVATAR_CHOICE" "$@" && def=$AVATAR_CHOICE
   say "  avatar video, one or more of these (comma-separated: the UI then offers each, the first preselected):"
   [[ " $* " == *" tavus "* ]] && say "     tavus       Tavus cloud: its key in step 5; the free plan has 25 minutes a month and one stream"
+  [[ " $* " == *" bey "* ]] && say "     bey         Beyond Presence cloud: 1080p, animates the assistant's own voice; its key in step 5, billed per minute"
   [[ " $* " == *" openspline "* ]] && say "     openspline  self-hosted: OpenSpline on a whole GPU of $PROJECT; its first start takes 10 to 20 minutes"
   say "     none        audio only"
   while :; do
@@ -575,9 +577,9 @@ step2() {
     if [ -n "$LLM_NS" ]; then say "     language model: $LLM_NS/$LLM_NAME, its GPU memory share is lowered to 55% in step 3"; else say "     language model: Llama 3.1 8B (4-bit) deployed by the chart at 45%"; fi
     say "     Whisper 15%, BGE-M3 12%; no guardrail model in this demo"
   fi
-  if [ "$PROFILE" = remote ]; then choose_avatar tavus tavus none || return 1
+  if [ "$PROFILE" = remote ]; then choose_avatar tavus tavus bey none || return 1
   else
-    choose_avatar tavus tavus openspline none || return 1
+    choose_avatar tavus tavus bey openspline none || return 1
     avatar_has openspline && warn "OpenSpline takes one time-sliced share of a GPU, next to the models: on a busy card the video can fall below 25 frames a second"
   fi
   save AVATAR_CHOICE "$AVATAR_CHOICE"; unsave AVATAR_GPU; unsave AVATAR_GPUS; unsave AVATAR_LEVEL
@@ -603,7 +605,7 @@ step2_namespace() {
   if [ "$KUEUE" = yes ] && [ -z "${GPU_RESOURCE:-}" ]; then
     for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do assign_gpus "$lq" AVATAR ${need[@]+"${need[@]}"} >/dev/null && { fits=$lq; break; }; done
   fi
-  choose_avatar "$([ -n "$fits" ] && echo openspline,tavus || echo tavus)" tavus openspline none || return 1
+  choose_avatar "$([ -n "$fits" ] && echo openspline,tavus || echo tavus)" tavus bey openspline none || return 1
   # OpenSpline's quality: high (the Pro model) needs a GPU pair to stay real time, low one GPU
   if avatar_has openspline; then
     case "${AVATAR_QUALITY:-auto}" in
@@ -678,6 +680,7 @@ step2_namespace() {
     case "$av" in
       openspline) ok "avatar: OpenSpline in $level quality, self-hosted on $avatar_gpus x ${gpu[AVATAR]}${q:+ from queue $q} ($([ "$level" = high ] && echo "the Pro model on a GPU pair" || echo "the Lite model; two whole GPUs give high quality"); its first start installs it and downloads its weights, 10 to 20 minutes)" ;;
       tavus)      ok "avatar: Tavus (its key in step 5)" ;;
+      bey)        ok "avatar: Beyond Presence (its key in step 5; the faces are voiceAgent.beyFaces)" ;;
     esac
   done
   if [ -z "$(avatar_list)" ]; then ok "avatar: none (voice sessions are audio-only)"
@@ -1000,6 +1003,17 @@ step5() {
     case "$code" in 200) ok "Tavus accepts the key"; break;; 401|403) say "     ${Y}Tavus rejects that key${N} (HTTP $code); paste it again, or type Skip"; put TAVUS_API_KEY ""; unset TAVUS_API_KEY;; *) warn "Tavus not reachable from here (HTTP $code); keeping the key unverified"; break;; esac
   done
 
+  # ---- Beyond Presence --------------------------------------------------------------------
+  if avatar_has bey; then
+    say ""; say "  ${B}Beyond Presence${N} (avatar video at 1080p, from the assistant's own voice). Billed per minute of video."
+    while :; do
+      [ -n "${BEY_API_KEY:-}" ] && ok "BEY_API_KEY already in the file" || need_key BEY_API_KEY "5i. On your laptop open https://bey.studio > API Keys > Create, then paste the key" '^[^[:space:]]{16,}$' "the key from the Beyond Presence Studio" "the Beyond Presence avatar (left out of the UI)"
+      [ -n "${BEY_API_KEY:-}" ] || break
+      local bcode; bcode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "x-api-key: $BEY_API_KEY" https://api.bey.dev/v1/auth/verify)
+      case "$bcode" in 2??) ok "Beyond Presence accepts the key"; break;; 401|403) say "     ${Y}Beyond Presence rejects that key${N} (HTTP $bcode); paste it again, or type Skip"; put BEY_API_KEY ""; unset BEY_API_KEY;; *) warn "Beyond Presence not reachable from here (HTTP $bcode); keeping the key unverified"; break;; esac
+    done
+  fi
+
   # ---- Google ----------------------------------------------------------------------------
   say ""; say "  ${B}Google Docs${N} (transcript archival). A service account writes the documents: no OAuth client, no redirect URL, no sign-in."
   local sa_file="$STATE_DIR/google-sa.json"
@@ -1088,6 +1102,7 @@ step5() {
   local key slack=off docs=off avatar=off keys=(SLACK_BOT_TOKEN SLACK_SIGNING_SECRET GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_DOCS_FOLDER_ID)
   in_cluster() { [ -n "$(oc get secret assistant-integrations -n "$PROJECT" -o jsonpath="{.data.$1}" 2>/dev/null)" ]; }
   [ "$want_tavus" = 1 ] && keys+=(TAVUS_API_KEY)
+  avatar_has bey && keys+=(BEY_API_KEY)
   for key in "${keys[@]}"; do
     if in_cluster "$key"; then ok "$key in the cluster"; else warn "$key empty in the cluster (skipped; that feature stays off)"; fi
   done
@@ -1097,6 +1112,7 @@ step5() {
   for av in $( [ "$want_tavus" = 1 ] && [ -z "${AVATAR_CHOICE:-}" ] && echo tavus || avatar_list ); do
     case "$av" in
       tavus) in_cluster TAVUS_API_KEY && offered+=(Tavus) ;;
+      bey) in_cluster BEY_API_KEY && offered+=("Beyond Presence") ;;
       openspline) offered+=("OpenSpline (self-hosted)") ;;
     esac
   done
@@ -1224,6 +1240,7 @@ confirm_target() {
 # exclusions) and the internal environment notes. Only what is missing is filled in.
 RESTORE_KEYS="assistant-integrations:SLACK_BOT_TOKEN assistant-integrations:SLACK_SIGNING_SECRET
   assistant-integrations:TAVUS_API_KEY assistant-integrations:TAVUS_FACE_ID assistant-integrations:TAVUS_PAL_ID
+  assistant-integrations:BEY_API_KEY
   assistant-integrations:SIMLI_API_KEY assistant-integrations:SIMLI_FACE_ID assistant-integrations:GOOGLE_DOCS_FOLDER_ID
   assistant-models:LLM_API_KEY assistant-models:STT_API_KEY assistant-models:TTS_API_KEY
   assistant-models:EMBEDDINGS_API_KEY assistant-models:GUARDRAILS_API_KEY assistant-models:HF_TOKEN

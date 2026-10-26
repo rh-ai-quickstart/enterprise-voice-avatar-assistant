@@ -35,7 +35,13 @@ MAX_FACES = 4  # the UI offers at most four faces
 FACE_ATTRIBUTE = "avatar_face"  # LiveKit participant attribute carrying the chosen face
 PROVIDER_ATTRIBUTE = "avatar_provider"  # and the one carrying the chosen avatar provider
 # How the UI names each provider, and which ones run in the cluster
-PROVIDER_NAMES = {"openspline": "OpenSpline", "tavus": "Tavus", "simli": "Simli", "hedra": "Hedra"}
+PROVIDER_NAMES = {
+    "openspline": "OpenSpline",
+    "tavus": "Tavus",
+    "bey": "Beyond Presence",
+    "simli": "Simli",
+    "hedra": "Hedra",
+}
 SELF_HOSTED = {"openspline"}
 CACHE_SECONDS = 3600.0
 RETRY_SECONDS = 300.0
@@ -92,7 +98,12 @@ def parse(raw: str) -> list[Face]:
 
 
 # The key each avatar provider cannot start without; the voice agent checks the same ones
-AVATAR_KEYS = {"tavus": "TAVUS_API_KEY", "simli": "SIMLI_API_KEY", "hedra": "HEDRA_API_KEY"}
+AVATAR_KEYS = {
+    "tavus": "TAVUS_API_KEY",
+    "bey": "BEY_API_KEY",
+    "simli": "SIMLI_API_KEY",
+    "hedra": "HEDRA_API_KEY",
+}
 
 
 def configured_providers() -> list[str]:
@@ -147,12 +158,15 @@ def portrait_path(face_id: str) -> Path | None:
 
 def catalog(provider: str | None = None) -> list[Face]:
     """Declared faces of a provider in effect (the default one if not named): Tavus faces (without
-    a list, the single configured face is offered by id), or OpenSpline faces that have their portrait."""
+    a list, the single configured face is offered by id), OpenSpline faces that have their portrait,
+    or Beyond Presence avatars (without a list, the plugin's stock avatar, so no choice)."""
     provider = provider or avatar_provider()
     if provider not in providers():
         return []
     if provider == "openspline":
         return [face for face in parse(_faces_setting(provider)) if portrait_path(face.id)]
+    if provider == "bey":
+        return parse(_faces_setting(provider))
     if provider != "tavus":
         return []
     faces = parse(_faces_setting(provider))

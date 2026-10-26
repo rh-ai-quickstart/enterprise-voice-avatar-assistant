@@ -107,7 +107,7 @@ Environment variables, provided by the Helm chart's config map and secrets. See
 | `DATABASE_URL` | PostgreSQL; without it memory and tickets are disabled |
 | `LIVEKIT_PUBLIC_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | voice tokens |
 | `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_DOCS_FOLDER_ID` | transcript documents in Google Drive (both empty: no document, archival still re-ingests) |
-| `AVATAR_PROVIDERS` (or `AVATAR_PROVIDER`), `AVATAR_FACES_OPENSPLINE`, `AVATAR_FACES_TAVUS`, `AVATAR_FACES`, `TAVUS_FACE_ID`, `TAVUS_API_KEY`, `TTS_VOICE`, `TTS_VOICE_FEMALE`, `TTS_VOICE_MALE` | avatars and faces served to the UI; a provider without its key is left out |
+| `AVATAR_PROVIDERS` (or `AVATAR_PROVIDER`), `AVATAR_FACES_OPENSPLINE`, `AVATAR_FACES_TAVUS`, `AVATAR_FACES_BEY`, `AVATAR_FACES`, `TAVUS_FACE_ID`, `TAVUS_API_KEY`, `BEY_API_KEY`, `TTS_VOICE`, `TTS_VOICE_FEMALE`, `TTS_VOICE_MALE` | avatars and faces served to the UI; a provider without its key is left out |
 | `INGESTION_URL`, `N8N_URL` | neighbours used by classification and request intake |
 | `INTERNAL_API_TOKEN` | bearer token for the internal routes, also sent to the ingestion service; empty disables the check (local development only) |
 | `ADMIN_ENABLED`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, `ADMIN_SESSION_HOURS` | admin portal sign-in; an empty password makes sign-in answer 503; changing the password or the secret signs everyone out |

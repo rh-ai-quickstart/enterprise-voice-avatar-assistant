@@ -351,3 +351,25 @@ def test_a_provider_without_its_key_is_not_offered(monkeypatch, tmp_path):
     # the default without its key: the next provider becomes the default
     monkeypatch.setattr(settings, "avatar_providers", "tavus,openspline")
     assert faces.avatar_provider() == "openspline" and faces.default_id() == "meera"
+
+
+def test_beyond_presence_is_offered_with_its_key(monkeypatch, tmp_path):
+    _both(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "avatar_providers", "openspline,tavus,bey")
+    monkeypatch.delenv("BEY_API_KEY", raising=False)
+    assert faces.providers() == ["openspline", "tavus"]  # no key yet
+    monkeypatch.setenv("BEY_API_KEY", "k")
+    monkeypatch.setattr(
+        settings, "avatar_faces_bey", json.dumps([{"id": "a1", "name": "Anna", "gender": "female"}])
+    )
+    assert faces.providers() == ["openspline", "tavus", "bey"]
+    with TestClient(app) as client:
+        bey = client.get("/v1/voice/faces").json()["providers"][2]
+        assert (bey["name"], bey["self_hosted"], bey["default"]) == ("Beyond Presence", False, "a1")
+        assert bey["faces"][0]["voice"] == "af_bella" and bey["faces"][0]["poster_url"] is None
+        token = client.get(
+            "/v1/voice/token", params={"session_id": "abc", "provider": "bey", "face_id": "a1"}
+        ).json()
+        assert _claims(token["token"])["attributes"] == {"avatar_provider": "bey", "avatar_face": "a1"}
+    monkeypatch.setattr(settings, "avatar_faces_bey", "")
+    assert faces.catalog("bey") == []  # no list: the stock avatar, no face to choose

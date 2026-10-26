@@ -178,6 +178,7 @@ None of these are in git. Never ask for or print their secrets.
 |---|---|---|
 | Slack | Workspace for the fictional "Example Corp", app "Enterprise Assistant", channels `#assistant-ingestion`, `-documents`, `-approvals`, `-tickets`, `-knowledge-gaps`. Interactivity URL: the n8n Route plus `/webhook/slack-interactions` (Socket Mode off) | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` in `~/secrets.env` and the `assistant-integrations` secret; the n8n Slack credential |
 | Google | A Cloud project under Mohamed's account. A service account writes transcripts to a shared Drive folder (no OAuth client) | `GOOGLE_SERVICE_ACCOUNT_FILE` (the JSON key, kept as `~/.assistant-setup/google-sa.json`), `GOOGLE_DOCS_FOLDER_ID` |
+| Beyond Presence | An account in the Beyond Presence Studio (https://bey.studio), billed per minute of video. Stock avatars Nelly, Jerome and Laura in `chart/values-demo-cluster.yaml` | `BEY_API_KEY` in `~/secrets.env` and the `assistant-integrations` secret |
 | Tavus | Personal free plan: 25 conversational minutes a month, one concurrent stream. Faces in `chart/values-demo-cluster.yaml` (Phoenix-4.5: Gloria, Victor, Lucas, Helen) | `TAVUS_API_KEY` |
 | Models-as-a-Service (TMM) | An API key per cluster, created by setup step 5 | `MAAS_API_KEY` |
 | n8n | Owner account and API key, per cluster, created by the `n8n-setup` Job | `assistant-n8n` secret (back it up: losing `N8N_ENCRYPTION_KEY` makes stored credentials unreadable) |

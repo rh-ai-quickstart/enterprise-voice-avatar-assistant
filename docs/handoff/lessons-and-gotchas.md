@@ -16,7 +16,7 @@ Everything here cost time at least once. Each entry says what happens and what t
   login without it (the console's copied `oc login`, for example) wrote `~/.kube/config`, and
   the other kept an expired token. Since 2026-10-26 there is one file: `~/.kube/config` holds
   the TMM context with the project current, and `~/.kube/tmm` is a link to it, so a login
-  either way updates the same file.
+  either way updates the same file (checked: `oc` writes through the link, which stays a link).
 - **BSD `sed -i` needs an argument** (`sed -i '' ...`); GNU sed does not. Prefer Python for
   in-place edits in scripts that run on both.
 - **A new Mac has no `uv`.** The Python checks in CLAUDE.md need it: `brew install uv`.

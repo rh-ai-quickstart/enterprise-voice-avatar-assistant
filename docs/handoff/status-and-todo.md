@@ -204,7 +204,7 @@ and Kokoro keeps its slice. The pair is not measured yet.
 - **Setup status after a profile change.** The status board shows step 6 as done even after
   step 2 changed the profile (for example a new avatar). It should say "profile changed: run
   --step 6". Compare a hash of `values-object.json` saved at the last step 6.
-- **No current project in a new kubeconfig.** After `oc login` into a new `~/.kube/tmm`,
+- **No current project in a new kubeconfig.** After `oc login` into a new kubeconfig,
   `oc project -q` answered "no project has been set". With no project saved by an earlier
   run either, setup keeps its default project
   `voice-avatar-assistant`, which the user does not administer, and step 1 stops. The

@@ -124,6 +124,10 @@ Everything here cost time at least once. Each entry says what happens and what t
   lighter to send a slow viewer. On TMM every browser comes through TURN over TCP, and after
   `b5dd698` (2 Mbps, simulcast off) the lips lagged the voice while OpenSpline itself kept up.
   That is the likely cause; confirm it after the fix is deployed.
+- **Ask how the desync looks before patching.** Which comes first (voice or lips), when (every
+  answer, drifting, after interruptions), and headphones or speakers. "Voice first, mostly after
+  interruptions, with headphones" ruled out echo and the network and pointed at OpenSpline's
+  motion carried over from the interrupted answer.
 - **When the avatar seems slow, measure each hop before guessing.** `playback_latency` in the
   voice agent log, `denoise per step` in OpenSpline's log, and `"connectionType"` in LiveKit's
   log told apart the GPU, the agent and the network within minutes.

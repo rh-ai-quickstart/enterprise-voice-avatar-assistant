@@ -174,6 +174,14 @@ spec:
           # microphone. It runs on every start; the values are read when the worker publishes, so it
           # changes nothing once applied. A file patched by an earlier chart, with simulcast fixed
           # off, is updated.
+          # A second patch puts the face back in the portrait's pose after each answer when
+          # OPENSPLINE_RESET_POSE_EACH_ANSWER is true. OpenSpline keeps the face's motion from one
+          # answer to the next, even across an interruption, so a new answer began from a face
+          # caught mid-word and the lips trailed the voice. When an answer ends or is interrupted,
+          # the worker is prepared again with the portrait (as when a session starts) while the
+          # session's inference loop is idle, so the next answer does not wait for it (about 0.2 s);
+          # if that answer's audio comes first, the reset runs before it. A failed reset is logged
+          # and the pose kept. The log prints how long each reset took.
           command: ["/bin/bash", "-euc"]
           args:
             - |
@@ -199,6 +207,56 @@ spec:
                   print("publish options patched")
               else:
                   print("WARNING: publish_track calls not found; video keeps LiveKit's default bitrate")
+              path = pathlib.Path(importlib.util.find_spec("openspline_server.session").origin)
+              text = path.read_text()
+              enabled = '__import__("os").environ.get("OPENSPLINE_RESET_POSE_EACH_ANSWER") == "true"'
+              anchors = {
+                  "method": "    async def interrupt(self):\n",
+                  "interrupted": '        self.emit({"type": "interrupted"})\n',
+                  "turn_end": '                        self.emit({"type": "turn_end", "target_samples": self.timeline.submitted})\n',
+                  "idle": "                except asyncio.TimeoutError:\n                    await self._idle()\n",
+                  "first_audio": "                        if self.converter is None:\n                            self.converter = (\n",
+              }
+              reset = (
+                  "    async def _reset_pose(self):\n"
+                  "        # chart patch: back to the portrait's pose after each answer, before the next one\n"
+                  "        self._pose_due = False\n"
+                  "        started = time.monotonic()\n"
+                  "        try:\n"
+                  "            await self.worker.call(\"prepare\", str(self.image), 0)\n"
+                  "        except Exception as exc:\n"
+                  "            print(f\"[pose] reset failed, keeping the current pose: {type(exc).__name__}\", flush=True)\n"
+                  "            return\n"
+                  "        self.history.fill(0)\n"
+                  "        self.timeline.clear_idle()\n"
+                  "        self.timeline.frame = self.timeline.portrait\n"
+                  "        print(f\"[pose] reset to the portrait in {time.monotonic() - started:.3f}s\", flush=True)\n\n"
+              )
+              due = "self._pose_due = " + enabled
+              markers = ("async def _reset_pose", due, 'getattr(self, "_pose_due", False)')
+              if all(m in text for m in markers):
+                  print("pose reset already patched")
+              elif any(m in text for m in markers):
+                  print("WARNING: pose reset partly patched; answers keep the previous pose")
+              elif all(text.count(a) == 1 for a in anchors.values()):
+                  text = text.replace(anchors["method"], reset + anchors["method"])
+                  text = text.replace(anchors["interrupted"], anchors["interrupted"] + "        " + due + "\n")
+                  text = text.replace(anchors["turn_end"], anchors["turn_end"] + "                        " + due + "\n")
+                  text = text.replace(anchors["idle"], (
+                      "                except asyncio.TimeoutError:\n"
+                      "                    if getattr(self, \"_pose_due\", False):\n"
+                      "                        await self._reset_pose()\n"
+                      "                        continue\n"
+                      "                    await self._idle()\n"))
+                  text = text.replace(anchors["first_audio"], (
+                      "                        if self.converter is None:\n"
+                      "                            if getattr(self, \"_pose_due\", False):\n"
+                      "                                await self._reset_pose()\n"
+                      "                            self.converter = (\n"))
+                  path.write_text(text)
+                  print("pose reset patched")
+              else:
+                  print("WARNING: session code not as expected; answers keep the previous pose")
               PY
               exec {{ $bin }} serve --config /config/workers.yaml --host 0.0.0.0 --port 7860
           env:
@@ -206,6 +264,8 @@ spec:
               value: {{ $o.videoBitrate | int64 | quote }}
             - name: OPENSPLINE_VIDEO_SIMULCAST
               value: {{ $o.simulcast | toString | quote }}
+            - name: OPENSPLINE_RESET_POSE_EACH_ANSWER
+              value: {{ $o.resetPoseEachAnswer | toString | quote }}
             - name: HOME
               value: /tmp
             - name: HF_HOME

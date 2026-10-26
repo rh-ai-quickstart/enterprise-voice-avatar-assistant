@@ -159,7 +159,9 @@ administers one project only.
     (`CLAUDE_CODE_OAUTH_TOKEN`); on PR #12 Claude answered `@claude review this PR` within
     seconds, as `github-actions[bot]`. Pushing a workflow file needed the `workflow` scope on
     the `gh` login (`gh auth refresh --scopes workflow`).
-  - Beyond Presence as a third avatar (`bey`): the LiveKit plugin, its key in setup step 5 and
+  - PR #12: the demo script for the avatar switch, with the five suggestions of its `@claude`
+    review, squash-merged as `11f1532`.
+  - Beyond Presence as a third avatar (`bey`, PR #13): the LiveKit plugin, its key in setup step 5 and
     the integrations secret, three stock avatars in `voiceAgent.beyFaces`,
     `scripts/list-bey-avatars.sh`, and a live check on the Integrations page. The voice agent
     moved to LiveKit Agents 1.8.9 for the plugin (the `openai` SDK to 3.x with it).

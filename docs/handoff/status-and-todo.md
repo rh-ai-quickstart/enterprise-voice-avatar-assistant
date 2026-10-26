@@ -1,8 +1,9 @@
 # Status and to-do list
 
-As of 2026-10-24 evening (Mohamed's local time is UTC+4). `main` is at `193c128`. The images
-are promoted to `sha-571acbf` in `chart/values-demo-cluster.yaml`. The later commits
-`b5dd698` and `193c128` change only the chart and scripts, so they need no new image.
+As of 2026-10-26 (Mohamed's local time is UTC+4). The last code commit on `main` is
+`77a3215`. The images are promoted to `sha-571acbf` in `chart/values-demo-cluster.yaml`. The
+later commits (`b5dd698`, `193c128`, `d943998`, `77a3215`) change only the chart, scripts and
+docs, so they need no new image.
 
 ## Where it runs
 
@@ -26,6 +27,27 @@ current daily slot and moves forward each day while the booking lasts. When the 
 ends, Kueue stops the GPU pods: Whisper, Kokoro and OpenSpline. Voice then stops; text chat
 keeps working on Models-as-a-Service.
 
+On 2026-10-25 at 01:07 the queue showed that quota with the label at Mon 26 Oct 00:00, the end
+of that daily slot. On 2026-10-26 the login token had expired, so nobody has checked since
+whether the booking carried on. Before anything else, log in and run
+`scripts/setup.sh --status` and `oc get workloads.kueue.x-k8s.io`.
+
+## Last verified (2026-10-25, from a second Mac)
+
+`scripts/setup.sh` on a new laptop, with the demo already deployed. It restored the local
+state from the cluster and ran steps 1, 2, 3, 5, 7 and 9 without redeploying (details in
+[setup-and-deploy.md](setup-and-deploy.md#another-laptop)). Step 9's preflight passed at
+01:12 local:
+- Whisper Ready, every pod running, the database tables present;
+- the OpenSpline worker loaded and free;
+- all 11 connectivity checks OK, including the chat completion on Models-as-a-Service;
+- the public API proxy refuses internal routes, and the admin portal answers;
+- all 7 n8n workflows active and all 7 webhooks registered;
+- 10 documents indexed and 5 inbox files classified (step 8).
+
+Step 2 came to the same layout as the running release: OpenSpline low on the whole H200,
+Whisper and Kokoro on the two MIG slices. Nothing in the browser was tested that night.
+
 ## Last confirmed deploy
 
 The voice agent ran `sha-5e063c2` after `scripts/setup.sh --step 6` at 23:03 local. Every
@@ -35,7 +57,8 @@ connectivity check passed. The browser was confirmed working for:
 - answers no longer cut off by noise.
 
 Pushed afterwards, not yet confirmed in the browser (they need `git pull` and `--step 6`
-if Mohamed has not run it since):
+if Mohamed has not run it since; the run on 2026-10-25 skipped step 6, so it did not deploy
+them):
 - `571acbf`: square avatar frame; the greeting appears once in the chat;
 - `b5dd698`: OpenSpline video at 2 Mbps in one stream (Emily was a smear at 300 kbps);
 - `193c128`: OpenSpline quality chosen from the GPUs. It stays low with today's booking.
@@ -109,6 +132,17 @@ and Kokoro keeps its slice. The pair is not measured yet.
 - **Setup status after a profile change.** The status board shows step 6 as done even after
   step 2 changed the profile (for example a new avatar). It should say "profile changed: run
   --step 6". Compare a hash of `values-object.json` saved at the last step 6.
+- **No current project in a new kubeconfig.** After `oc login` into a new `~/.kube/tmm`,
+  `oc project -q` answered "no project has been set". With no project saved by an earlier
+  run either, setup keeps its default project
+  `voice-avatar-assistant`, which the user does not administer, and step 1 stops. The
+  workaround is `oc project user-<name>` (or `PROJECT=user-<name>`). Setup could take the
+  project when the user administers exactly one.
+- **Step 5e on another laptop.** Step 5 asks "Was the app created just now from the
+  manifest above?" again, because its answer lives only in the local `state.env`. Answering
+  yes, as Mohamed did, skips the check of the Slack Interactivity URL. Setup could skip the
+  question when the Slack keys were restored from the cluster for the same n8n host, or
+  word it for an app made earlier.
 - **Low quality on a MIG slice.** It might free the whole H200: a 3g.71gb slice has about 3/7
   of the compute, and low runs at 5.2x on the whole card. Not tested.
   `KUEUE_QUEUE=reserved GPU_RESOURCE=nvidia.com/mig-3g.71gb` only works for every model at
@@ -144,9 +178,11 @@ and Kokoro keeps its slice. The pair is not measured yet.
   check passes. It was seen on an earlier sandbox and is not fixed.
 
 ## Moving to another laptop
-No copying is needed: clone, `oc login`, `scripts/setup.sh`. Setup rebuilds `~/secrets.env`,
-the avoided nodes and `docs/handoff/private/environment.md` from the cluster. Mohamed's
-hand-written private notes, with the accounts and the history of the nodes, are also in
+No copying is needed: clone, `oc login`, `oc project user-<name>`, `scripts/setup.sh`. Setup
+rebuilds `~/secrets.env`, the avoided nodes and `docs/handoff/private/environment.md` from the
+cluster. It worked on a second Mac on 2026-10-25 (see
+[setup-and-deploy.md](setup-and-deploy.md#another-laptop)). Mohamed's hand-written private
+notes, with the accounts and the history of the nodes, are only in
 `~/.assistant-setup/handoff-private-environment.md` on the first Mac.
 
 ## Not to forget

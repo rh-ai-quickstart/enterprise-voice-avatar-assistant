@@ -9,7 +9,7 @@ complements the user documentation (the [README](../../README.md), [SETUP.md](..
 [demo-script.md](../demo-script.md)), which stays the reference for how things work. This
 folder records where things stand and why they are the way they are.
 
-Last updated: 2026-10-24, with `main` at `193c128`.
+Last updated: 2026-10-26, with the last code commit on `main` at `77a3215`.
 
 ## Reading order
 
@@ -31,9 +31,12 @@ group and subscription names) are not in this public repository. They are in
 `scripts/setup.sh` writes it from the cluster on any laptop after `oc login`.
 
 **Moving to another laptop needs no copying.**
-1. Clone the repository.
-2. Log in with `oc` (the login command is in [environments.md](environments.md#2-the-red-hat-tmm-shared-cluster-namespace-path)).
-3. Run `scripts/setup.sh`.
+1. Clone the repository. On a Mac with Homebrew, `brew install openshift-cli` gives `oc` for
+   the login; setup installs the other tools itself.
+2. Log in with `oc`, then set the project with `oc project user-<name>`: a new kubeconfig
+   has none (the commands are in [environments.md](environments.md#2-the-red-hat-tmm-shared-cluster-namespace-path)).
+3. Run `scripts/setup.sh`. With a healthy demo already deployed it redeploys nothing; it
+   checks and verifies.
 
 It rebuilds `~/secrets.env` from the cluster's secrets, the avoided nodes from the
 release, and the private environment notes (see [setup-and-deploy.md](setup-and-deploy.md#another-laptop)).

@@ -131,7 +131,16 @@ administers one project only.
 - **2026-10-25:**
   - this handoff folder, and `CLAUDE.md` (`d943998`);
   - setup rebuilds what only the first machine had from the cluster, so another laptop
-    needs no copying: `~/secrets.env`, the avoided nodes, and the private environment notes.
+    needs no copying: `~/secrets.env`, the avoided nodes, and the private environment notes
+    (`77a3215`);
+  - verified on a real second Mac with the demo already deployed: Homebrew `oc`, login,
+    `oc project` (a new kubeconfig had none), then a full `scripts/setup.sh`. It restored ten
+    keys, the avoided node and the private doc, ran steps 1, 2, 3, 5, 7 and 9 without
+    redeploying, and the preflight passed. Two rough edges went into the to-do list: no
+    current project in a new kubeconfig, and question 5e asked again.
+- **2026-10-26:** the handoff notes brought up to date with the second-laptop run. The
+  login token had expired, so the state of the GPU booking after the 26 Oct 00:00 slot end
+  is not checked.
 
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)

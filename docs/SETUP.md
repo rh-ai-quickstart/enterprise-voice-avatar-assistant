@@ -292,7 +292,9 @@ export KUBECONFIG=~/.kube/<cluster> && oc login --server=https://api.<cluster do
 git clone https://github.com/rh-ai-quickstart/enterprise-voice-avatar-assistant.git && cd enterprise-voice-avatar-assistant && scripts/setup.sh
 ```
 
-The project is the current one (`oc project`), or `PROJECT=<name>`. Before the first change
+The project is the current one (`oc project`), or `PROJECT=<name>`. A new kubeconfig can have
+no current project after `oc login` (`oc project -q` answers "no project has been set"); run
+`oc project <name>` once, or pass `PROJECT`. Before the first change
 the script asks to confirm the cluster, the user and the project. The steps, where they
 differ from the cluster path:
 
@@ -328,7 +330,8 @@ then `oc delete pvc -l app.kubernetes.io/instance=assistant -n <project>`.
 - **Resume.** `scripts/setup.sh` again. The status board shows where it stopped and the run
   continues there. A step already done by hand is recognised (the marks come from the
   cluster) and skipped.
-- **Another laptop.** Clone, log in with `oc`, run `scripts/setup.sh`. Nothing needs copying.
+- **Another laptop.** Clone, log in with `oc` (and `oc project <name>` if the new kubeconfig
+  has no current project), run `scripts/setup.sh`. Nothing needs copying.
   After you confirm the target, setup rebuilds from the cluster what only the first machine
   had:
   - the keys missing from `~/secrets.env`, from the secrets it created then (the Google
@@ -339,6 +342,8 @@ then `oc delete pvc -l app.kubernetes.io/instance=assistant -n <project>`.
 
   Only missing values are filled in; nothing on the laptop is overwritten. Step 2 asks its
   question again (the avatar), and step 5 verifies the restored keys without asking for them.
+  It does ask the Slack question 5e again ("Was the app created just now from the
+  manifest?"): for an app made earlier, answer no and check the request URL it shows.
 - **Re-run one step.** `scripts/setup.sh --step N`, then `scripts/setup.sh` to continue. The
   usual reasons: a key changed (`--step 5`, then `--step 6`), a fix landed in the repository
   (`git pull`, then `--step 6`: it refreshes the application and re-syncs), the model share

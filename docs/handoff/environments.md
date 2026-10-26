@@ -119,6 +119,14 @@ To log in from a Mac (zsh):
 export KUBECONFIG=~/.kube/tmm && read -rs "TOKEN?Paste the API token: " && echo && oc login --token="$TOKEN" --server=API_URL && unset TOKEN && oc whoami
 ```
 
+3. A new kubeconfig may have no current project after that: `oc project -q` answers "no
+   project has been set", and setup would not find the project. Set it once (replace
+   `PROJECT_NAME` with `user-<name>`); the kubeconfig keeps it:
+
+```bash
+export KUBECONFIG=~/.kube/tmm && oc project PROJECT_NAME
+```
+
 To read the internal values off the cluster when you are logged in (setup writes them to
 the private doc too):
 ```bash

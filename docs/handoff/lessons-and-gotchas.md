@@ -16,6 +16,8 @@ Everything here cost time at least once. Each entry says what happens and what t
   `export KUBECONFIG=~/.kube/tmm`.
 - **BSD `sed -i` needs an argument** (`sed -i '' ...`); GNU sed does not. Prefer Python for
   in-place edits in scripts that run on both.
+- **macOS's `openssl` is LibreSSL.** Setup wants OpenSSL, so step 1 installs `openssl@3` with
+  Homebrew on a new Mac. That is expected.
 
 ## OpenShift and Kubernetes
 - **A node with broken container storage looks empty, so the scheduler favours it.**
@@ -32,6 +34,13 @@ Everything here cost time at least once. Each entry says what happens and what t
 - **Kueue.** Pods without `kueue.x-k8s.io/queue-name` go to queue `default`, which has no
   GPUs. A GPU pod waits in `SchedulingGated` or Pending with a reason in
   `oc get workloads`. When the booking ends, the GPU pods are evicted.
+- **"Booked until" is the end of the day's slot, not of the booking.** Setup prints the
+  ClusterQueue's `rhai-tmm.dev/until` label, which moves forward each day while the booking
+  lasts. Do not tell Mohamed his booking ends at that time; check the queue again after it
+  passes, or look at the console's GPU Booking page.
+- **A new kubeconfig has no current project after `oc login` on TMM** ("no project has been
+  set"). On a new laptop, setup then falls back to its default project name and step 1
+  stops with "not an admin". Run `oc project user-<name>` once after the first login.
 - **IBM VPC block volumes have a 10 GB minimum.** A 5Gi PVC fails to provision.
 - **Service-link environment variables break LiveKit** (`LIVEKIT_PORT` and so on). Keep
   `enableServiceLinks: false`.

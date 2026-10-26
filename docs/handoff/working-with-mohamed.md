@@ -20,6 +20,12 @@ sessions. Follow them; they are not in the code.
 ## Commands for Mohamed to run
 - **One step per message.** Give one pasteable command, wait for the output, then the
   next. Mohamed pastes outputs back and steers scope as things go.
+- **Unless he asks for the whole list.** "Give me all commands" means every step at once,
+  numbered, each one a pasteable line. He still runs them one at a time and pastes the
+  output back.
+- **Explain a prompt before he answers it.** Before a confirmation or a question from
+  setup, he asks what Yes and No would each do. Answer from the code (what runs, what is
+  skipped, what changes on the cluster), not from memory.
 - **One line by default.** Use a script only when a line would be unwieldy (manifests,
   multi-line Python). Prefer the repo's scripts (`scripts/setup.sh --step N`,
   `scripts/demo-preflight.sh`, `scripts/test-services.sh`) over ad hoc code.

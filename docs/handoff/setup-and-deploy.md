@@ -28,7 +28,9 @@ arrays, `${var@Q}`.
 - **namespace:** anything less: the TMM cluster, Helm.
 
 `ACCESS=namespace` forces the namespace path; `PROJECT` picks the project, defaulting to the
-current one when you administer it.
+current one when you administer it. With no project saved by an earlier run and no current
+project (a new kubeconfig after `oc login`), it stays at `voice-avatar-assistant`; set one
+with `oc project <name>`.
 
 ### Steps on the namespace path
 1. **Access and prerequisites.** Tools; admin rights in the project (`can-i` on
@@ -137,6 +139,31 @@ cluster what only the first machine had. It fills in only what is missing:
 
 Tested as a new laptop (empty state, no `~/secrets.env`) against TMM: ten values restored,
 the avoided node, and the doc written. A second run changed nothing.
+
+**On a real second Mac** (2026-10-25, demo already deployed on TMM):
+- Homebrew was installed already. `brew install openshift-cli helm jq bash`, then the
+  `oc login` from [environments.md](environments.md#2-the-red-hat-tmm-shared-cluster-namespace-path)
+  into a new `~/.kube/tmm`.
+- **The new kubeconfig had no current project** (`oc project -q`: "no project has been
+  set"). Without one, setup keeps its default project `voice-avatar-assistant`, which the
+  user does not administer, so step 1 would stop with "not an admin". `oc project
+  user-<name>` fixed it; `PROJECT=user-<name>` works too.
+- The status board showed steps 4, 6 and 8 done, because those are read from the cluster.
+  Steps 1, 2, 3, 5, 7 and 9 showed as to do, because their marks live in the local
+  `state.env`.
+- After the confirmation, the full run restored ten keys, the avoided node and the private
+  doc. It then ran steps 1, 2, 3, 5, 7 and 9 and skipped the rest, so nothing was
+  redeployed. It took about eight minutes, prompts included.
+- Step 1 installed `openssl@3` with Homebrew: the `openssl` that macOS ships is LibreSSL,
+  and setup wants OpenSSL.
+- Step 2 suggested `openspline` and came to the same layout as the running release, so
+  `--step 6` was not needed.
+- Step 5 asked only question 5e (is the Slack app new from the manifest?). It is worded for
+  a first run. With an app made earlier, answer no: setup then shows the Interactivity URL
+  to check. Answering yes skips that check. Step 5 then rewrote `assistant-integrations`,
+  `assistant-models` and `assistant-n8n` from the restored file, with the same values and
+  the passwords kept.
+- Step 9's preflight passed.
 
 ## scripts/deploy.sh
 A Helm install for a regular user, usable on its own. It takes these variables:

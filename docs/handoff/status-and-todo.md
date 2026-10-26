@@ -27,9 +27,9 @@ current daily slot and moves forward each day while the booking lasts. When the 
 ends, Kueue stops the GPU pods: Whisper, Kokoro and OpenSpline. Voice then stops; text chat
 keeps working on Models-as-a-Service.
 
-On 2026-10-25 at 01:07 the queue showed that quota with the label at Mon 26 Oct 00:00, the end
-of that daily slot. On 2026-10-26 the login token had expired, so nobody has checked since
-whether the booking carried on. Before anything else, log in and run
+On 2026-10-25 the label was Mon 26 Oct 00:00. On 2026-10-26 at 14:00 it had moved to Tue 27
+Oct 00:00, every workload was admitted, and Whisper, Kokoro and OpenSpline had run for 38 to
+46 hours without a break: the booking carries on from day to day. Check it with
 `scripts/setup.sh --status` and `oc get workloads.kueue.x-k8s.io`.
 
 ## Last verified (2026-10-25, from a second Mac)

@@ -107,6 +107,12 @@ What the project can and cannot do:
   start (see [openspline.md](openspline.md)).
 - **A stall.** Another worker stalled for about two minutes once (probes timed out); kubelet
   restarts recovered it.
+- **A DNS failure.** On 2026-10-25, n8n on a third CPU worker logged `getaddrinfo EAI_AGAIN
+  postgres`, stopped answering its liveness probe and was restarted. No pod on another node
+  saw a DNS error. That node is watched, not avoided; add it to the avoid list if it happens
+  again. To check the nodes from the project, use `oc get pods -o wide`, the restart counts
+  and reasons (`lastState.terminated`), and `oc logs --previous`. Events last only about an
+  hour.
 - **Login tokens expire after some hours.** `oc` then answers "Unauthorized", even mid-task.
 
 To log in from a Mac (zsh):

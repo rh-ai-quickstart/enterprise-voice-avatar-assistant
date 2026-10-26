@@ -13,7 +13,9 @@ Everything here cost time at least once. Each entry says what happens and what t
   itself under Homebrew's bash 5. Other scripts that need bash 4 are run by setup through
   that bash.
 - **A Mac shell may point at another cluster.** Every command block starts with
-  `export KUBECONFIG=~/.kube/tmm`.
+  `export KUBECONFIG=~/.kube/tmm`. A login in a tab without it (the console's copied
+  `oc login`, for example) writes `~/.kube/config` instead, and `~/.kube/tmm` keeps the
+  expired token. Log in again with the export, or copy the file over.
 - **BSD `sed -i` needs an argument** (`sed -i '' ...`); GNU sed does not. Prefer Python for
   in-place edits in scripts that run on both.
 - **macOS's `openssl` is LibreSSL.** Setup wants OpenSSL, so step 1 installs `openssl@3` with
@@ -36,8 +38,9 @@ Everything here cost time at least once. Each entry says what happens and what t
   `oc get workloads`. When the booking ends, the GPU pods are evicted.
 - **"Booked until" is the end of the day's slot, not of the booking.** Setup prints the
   ClusterQueue's `rhai-tmm.dev/until` label, which moves forward each day while the booking
-  lasts. Do not tell Mohamed his booking ends at that time; check the queue again after it
-  passes, or look at the console's GPU Booking page.
+  lasts (seen on 2026-10-26: it moved a day and the GPU pods kept running). Do not tell
+  Mohamed his booking ends at that time; check the queue again after it passes, or look at
+  the console's GPU Booking page.
 - **A new kubeconfig has no current project after `oc login` on TMM** ("no project has been
   set"). On a new laptop, setup then falls back to its default project name and step 1
   stops with "not an admin". Run `oc project user-<name>` once after the first login.

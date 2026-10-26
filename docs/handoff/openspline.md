@@ -100,14 +100,19 @@ on purpose ("resetting to the portrait here causes a visible jump"). A new answe
 from a face caught mid-word, and the lips trailed the voice, worst after an interruption
 (Mohamed, 2026-10-26: voice first, lips late, mostly after interruptions, with headphones).
 
-A second snippet in the start command adds `Session._reset_pose()` to `session.py`: before the
-first audio of each answer (where the session creates its audio converter), it calls the worker's
-`prepare` with the portrait, as `Session.start()` does, clears the audio history and shows the
-portrait. It runs inside the session's one inference loop, so it never overlaps a GPU call.
+A second snippet in the start command adds `Session._reset_pose()` to `session.py`. It calls the
+worker's `prepare` with the portrait, as `Session.start()` does, clears the audio history and
+shows the portrait. When an answer ends (`turn_end`) or is interrupted, a reset becomes due; the
+session's one inference loop runs it when it is next idle, so it never overlaps a GPU call and
+the next answer does not wait for it. If that answer's first audio comes before the loop was idle,
+the reset runs then. A failure is logged (`[pose] reset failed`) and the pose kept.
 `openspline.resetPoseEachAnswer` (`OPENSPLINE_RESET_POSE_EACH_ANSWER`) switches it, and each reset
-logs `[pose] reset to the portrait in <seconds>`; `scripts/voice-timings.sh` lists them. The face
-snaps to its resting pose before each answer, which Mohamed asked for. The cost is the portrait's
-encoding per answer, to be measured.
+logs `[pose] reset to the portrait in <seconds>`; `scripts/voice-timings.sh` lists them.
+
+The cost: OpenSpline's benchmark in the pod measured `prepare_seconds` 0.19 (cold, the first after
+loading) and a first chunk of 0.37 s after it, against 0.20 s for the others. Done at the start of
+each answer that would have added 0.2 to 0.35 s; after the answer it costs nothing on the voice's
+path. The face goes back to rest after each answer, which Mohamed asked for.
 
 **Between answers the face goes still.** OpenSpline's idle feeds near-silence (amplitude 1e-5) to
 the model, which renders a calm, almost motionless face. Mohamed wants it never to look frozen.

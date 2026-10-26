@@ -5,7 +5,9 @@
 #     audio, transcription, the language model's first token, the speech's first audio, the
 #     avatar's playback delay); noise dropped; avatar start failures;
 #   - OpenSpline: its render time per chunk of video (0.96 s of speech each), the slow ones, and
-#     how long each reset to the portrait's pose took;
+#     how long each reset to the portrait's pose took. It reads OpenSpline's "[generate] <step>:
+#     <seconds>" lines, a chunk ending at "color correction"; if that format changes it reports
+#     no chunk;
 #   - LiveKit: how each browser reached it (directly, or relayed through TURN).
 #
 #   NS=<project> scripts/voice-timings.sh              the last 30 minutes
@@ -31,7 +33,7 @@ if oc get deploy/openspline -n "$NS" >/dev/null 2>&1; then
       else print "  no chunk rendered (no OpenSpline session in this window)"
       printf "%s", slow
     }'
-  oc logs deploy/openspline -n "$NS" -c openspline 2>/dev/null | grep -E 'publish options|pose reset' | sed 's/^/  start: /' | head -4
+  oc logs deploy/openspline -n "$NS" -c openspline 2>/dev/null | grep -E 'publish options|pose reset' | sed 's/^/  start: /' | head -4 || true
 fi
 
 echo

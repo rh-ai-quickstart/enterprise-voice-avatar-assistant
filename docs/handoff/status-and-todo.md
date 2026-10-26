@@ -75,12 +75,18 @@ Revision 11 (15:49 local) deployed the switch with the sync fix: OpenSpline's lo
 chunk in 0.18 s on average (0.26 s at most). Mohamed then reported, with headphones on:
 - **Lips late, voice first, mostly after interruptions.** OpenSpline keeps the face's motion from
   the interrupted answer, so the new one starts from a face caught mid-word. The fix:
-  `openspline.resetPoseEachAnswer`, which starts every answer from the portrait's pose (see
-  [openspline.md](openspline.md#the-patch-for-each-answers-pose)). To measure: the reset's cost
-  per answer, in the `[pose]` log lines.
-- **Strong jitter and jerkiness at the beginning.** Not yet clear whether of each answer or of
-  each session. Ask. If it is the session's first seconds, the cause may be simulcast: LiveKit
-  can start a viewer on the small layer and step up.
+  `openspline.resetPoseEachAnswer`, which puts the face back in the portrait's pose after each
+  answer or interruption, while it is idle (see
+  [openspline.md](openspline.md#the-patch-for-each-answers-pose)). The reset takes about 0.2 s,
+  off the voice's path.
+- **Strong jitter and jerkiness in the first seconds of each voice session** (not of each
+  answer). OpenSpline renders a chunk in 0.18 s on average and 0.26 s at most, so the GPU keeps
+  up. Likely cause: simulcast, since LiveKit can start a viewer on the small layer over TURN and
+  step up, with a key frame per step. Tavus streams HD over the same relay without trouble, so
+  the relay may never have been too slow for one 2 Mbps stream. To try: a session with
+  simulcast on, then one with `openspline.simulcast=false` at 1 Mbps; keep whichever starts
+  smoothly. `chrome://webrtc-internals` shows the video's height and frame rate over the first
+  seconds.
 - **The face freezes to a calm pose between answers.** It should never look frozen; to do (see
   openspline.md).
 - **Phantom "user" turns** ("some concepts.", "Take care."). With headphones they cannot be the

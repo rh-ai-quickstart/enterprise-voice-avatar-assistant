@@ -47,6 +47,8 @@ secrets:
   models: assistant-models
   integrations: assistant-integrations
   admin: assistant-admin
+  # TCP_TURN_SECRET, shared by LiveKit and the TURN server of livekit.tcpTurn (scripts/create-secrets.sh)
+  turn: assistant-turn
 
 # External integrations the deployment uses. Off, the admin portal is where requests are approved
 # and where the notices appear; on with its keys missing from the integrations secret, the portal
@@ -199,6 +201,36 @@ livekit:
       - 10.0.0.0/8
       - 172.16.0.0/12
       - 192.168.0.0/16
+  # A second TURN server, coturn, behind a cloud TCP load balancer: plain TCP on `port`, so a client
+  # needs neither the router's TLS host name (SNI) nor UDP. Cloud avatars that run LiveKit's native
+  # SDK (Beyond Presence) cannot use the TURN server behind the Route, and where the cloud offers no
+  # UDP load balancer (the TMM cluster) this is their way in. LiveKit announces it next to the TURN
+  # server above; it relays over UDP to LiveKit inside the cluster, only to private addresses, with
+  # credentials LiveKit issues per participant. It creates a load balancer with a public address,
+  # billed by the cloud account. publicHost is the balancer's host name, which exists only once the
+  # cloud has created it: scripts/deploy.sh reads it from Service livekit-tcp-turn and sets it, and
+  # LiveKit announces the server from then on.
+  tcpTurn:
+    enabled: false
+    image: docker.io/coturn/coturn:4.18.0
+    port: 443
+    publicHost: ""
+    # Annotations for the load balancer Service (cloud-specific options)
+    annotations: {}
+    # How long LiveKit's ICE agent waits before it accepts a relayed path (pion's default is 2s, in
+    # case a direct one turns up). Beyond Presence gives up joining after 4 seconds, and 2s of it went
+    # to this wait; 1s still lets a direct UDP path (srflx, 0.5s) win where there is one (Tavus).
+    relayAcceptanceMinWait: 1s
+    # UDP ports the TURN server relays from, inside its pod
+    relayPortMin: 49152
+    relayPortMax: 49251
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: "1"
+        memory: 256Mi
   resources:
     requests:
       cpu: 500m

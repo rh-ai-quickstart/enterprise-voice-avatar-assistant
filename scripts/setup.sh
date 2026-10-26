@@ -24,6 +24,9 @@
 # project), several (openspline,tavus,bey: the person picks one in the UI, the first preselected)
 # or none (audio only); AVATAR_PROVIDER answers the question,
 # and a later run can switch with --step 2 then --step 6. OpenSpline runs
+# Beyond Presence among them also gets a TURN server on a TCP load balancer (livekit.tcpTurn: its
+# agents run LiveKit's native SDK, which cannot use the TURN server behind the Route); TCP_TURN=false
+# leaves it out, TCP_TURN=true adds it for any avatar.
 # in high quality on a GPU pair when the booked quota has one free next to the models, else in
 # low quality on one GPU; AVATAR_QUALITY=low or high decides instead.
 #
@@ -380,7 +383,7 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
        n8n: {storage: "10Gi"}}' ;;
   *)
     jq -n --argjson d "$llm_deploy" '{models:{llm:{deploy:$d,args:["--max-model-len=8192","--gpu-memory-utilization=0.45","--max-num-seqs=8","--enforce-eager","--enable-auto-tool-choice","--tool-call-parser=llama3_json"]},stt:{deploy:true,args:["--gpu-memory-utilization=0.15","--max-num-seqs=8","--enforce-eager"]},embeddings:{args:["--runner=pooling","--max-model-len=8192","--gpu-memory-utilization=0.12","--max-num-seqs=8","--enforce-eager"]},guardrails:{provider:"none",deploy:false}}}' ;;
-  esac | jq --arg av "${AVATAR_CHOICE:-}" --arg ag "${AVATAR_GPU:-}" --arg an "${AVATAR_GPUS:-1}" --arg al "${AVATAR_LEVEL:-low}" --arg q "${GPU_QUEUE:-}" '
+  esac | jq --arg av "${AVATAR_CHOICE:-}" --arg ag "${AVATAR_GPU:-}" --arg an "${AVATAR_GPUS:-1}" --arg al "${AVATAR_LEVEL:-low}" --arg q "${GPU_QUEUE:-}" --arg tt "$(tcp_turn && echo true || echo false)" '
     # the avatar chosen in step 2; OpenSpline gets the GPUs assigned to it (one, or a pair for
     # high quality, whose two processes need more memory)
     def gpus($g; $n): if $g == "" then {} else {resources: {requests: {"nvidia.com/gpu": null, ($g): $n}, limits: {"nvidia.com/gpu": null, ($g): $n}}} end;
@@ -388,6 +391,8 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
     ($av | split(",") | map(select(. != "" and . != "none"))) as $list
     | (if $av == "" then . else . * {voiceAgent: {avatarProvider: ($list[0] // "none")}} end)
     | (if ($list | length) > 1 then . * {voiceAgent: {avatarProviders: $list}} else . end)
+    # a TURN server on a TCP load balancer for cloud avatars on the native LiveKit SDK (Beyond Presence)
+    | (if $tt == "true" then . * {livekit: {tcpTurn: {enabled: true}}} else . end)
     | if ($list | index("openspline")) != null then . * {openspline: ({quality: $al} * gpus($ag; $an)
         * (if $al == "high" then {resources: {requests: {memory: "16Gi"}, limits: {memory: "64Gi"}}} else {} end)
         * (if $q != "" then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end))} else . end' > "$STATE_DIR/values-object.json"
@@ -421,6 +426,9 @@ assign_gpus() {
 avatar_list() { local p; for p in ${AVATAR_CHOICE//,/ }; do [ "$p" = none ] || echo "$p"; done; }
 avatar_has() { [[ ",${AVATAR_CHOICE:-}," == *",$1,"* ]]; }
 avatar_default() { echo "${AVATAR_CHOICE%%,*}"; }
+# tcp_turn: whether the deployment gets the TURN server on a TCP load balancer (TCP_TURN, else when
+# Beyond Presence is among the avatars)
+tcp_turn() { case "${TCP_TURN:-auto}" in true) return 0;; false) return 1;; *) avatar_has bey;; esac; }
 # avatar_valid <list> <allowed...>: the list (comma-separated) names allowed avatars, and none only alone
 avatar_valid() {
   local list=$1 p; shift
@@ -680,7 +688,8 @@ step2_namespace() {
     case "$av" in
       openspline) ok "avatar: OpenSpline in $level quality, self-hosted on $avatar_gpus x ${gpu[AVATAR]}${q:+ from queue $q} ($([ "$level" = high ] && echo "the Pro model on a GPU pair" || echo "the Lite model; two whole GPUs give high quality"); its first start installs it and downloads its weights, 10 to 20 minutes)" ;;
       tavus)      ok "avatar: Tavus (its key in step 5)" ;;
-      bey)        ok "avatar: Beyond Presence (its key in step 5; the faces are voiceAgent.beyFaces)" ;;
+      bey)        ok "avatar: Beyond Presence (its key in step 5; the faces are voiceAgent.beyFaces)"
+                  tcp_turn && note "Beyond Presence reaches LiveKit through a TURN server on a TCP load balancer (livekit.tcpTurn): a cloud load balancer with a public address, billed by the cloud account; TCP_TURN=false leaves it out" ;;
     esac
   done
   if [ -z "$(avatar_list)" ]; then ok "avatar: none (voice sessions are audio-only)"

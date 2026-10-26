@@ -97,6 +97,15 @@ What the project can and cannot do:
   `livekit-turn-<project>.<apps domain>`. The certificate came in about a minute.
 - On failure, setup continues without TURN: voice then works on open networks only.
 
+**Load balancers on TMM** (probed 2026-10-26):
+- **UDP is refused** by the cloud: "is a UDP load balancer. Only TCP is supported". So LiveKit's
+  media cannot get a public UDP address here.
+- **TCP works:** an IBM VPC load balancer got its host name (`*.lb.appdomain.cloud`) in about 35 s,
+  resolvable in public DNS a few minutes later (a laptop's resolver may cache the first "not
+  found" for a while: ask `dig @8.8.8.8`). The project has no quota against `LoadBalancer`
+  Services. It is billed per hour on the cluster's cloud account.
+- **The use:** `livekit.tcpTurn`, a TURN server on TCP 443, so Beyond Presence's agents can join.
+
 **Known cluster problems** (node names are in the private file):
 - **A CPU worker with broken container storage.** Every pod sandbox there fails with
   `creating overlay mount ... input/output error`, and the scheduler favours it because it

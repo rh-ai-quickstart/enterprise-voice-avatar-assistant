@@ -161,6 +161,11 @@ administers one project only.
     the `gh` login (`gh auth refresh --scopes workflow`).
   - PR #13 merged as `756396d`; its images are `sha-756396d` (`b2db8ef`). PR #14 (the pose
     reset after each answer, `scripts/voice-timings.sh`) merged as `3eb41bd`.
+  - Beyond Presence came up audio-only: its agent (LiveKit's native SDK, behind Google's NAT)
+    could not reach LiveKit, and gathered no relay through the TURN server behind the Route.
+    Load balancer probes: UDP refused on TMM, TCP created in 35 s. The fix, `livekit.tcpTurn`:
+    coturn on a TCP load balancer, announced by LiveKit, relaying to its private addresses;
+    tested live, Bey's agent joined by TURN with audio and video.
   - One kubeconfig on the Mac: `~/.kube/tmm` merged into `~/.kube/config` (the project's context
     current) and replaced by a link to it, so commands need no `export KUBECONFIG`. Backups of
     both files are next to them, dated 2026-10-26.

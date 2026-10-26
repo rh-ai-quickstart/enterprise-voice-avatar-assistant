@@ -68,6 +68,22 @@ read-only, on the cluster:
   (`openspline.videoBitrate`, `openspline.simulcast`). The patch on OpenSpline's volume reads
   simulcast from the environment now and rewrites the old patch, which fixed it off.
 
+## Beyond Presence: audio only, then fixed (2026-10-26 evening)
+
+Bey's API answered "Connection timed out after 4 seconds": its agent (LiveKit's Python SDK
+1.0.23, in Google Cloud behind NAT) could not join the room. It offered only private and NAT'd
+addresses, LiveKit's checks got no answer (two NATs), and it gathered no relay through the TURN
+server behind the Route. A test client with the same SDK from the Mac could not connect at all,
+relay-only or any route: the Route sends TLS by SNI, and the native SDK got no relay through it,
+while browsers do. Tavus works only because direct UDP to LiveKit's NAT-mapped address reaches it.
+
+Probes: the cloud refuses UDP load balancers on TMM and creates TCP ones in about 35 s. The fix is
+`livekit.tcpTurn`: coturn on a TCP load balancer (443, plain TCP), announced by LiveKit as an
+extra TURN server, with `relay_acceptance_min_wait` 1s. Live test from the branch (Helm revisions
+14 to 18): the same SDK joins relay-only in 2.8 s (20 s timeouts before), and a Beyond Presence
+session started in 2.15 s, its agent `"connectionType": "turn"` with audio and video. Not yet
+checked after it: a Tavus and an OpenSpline session in the browser, and Bey from the browser.
+
 ## Lip sync and phantom turns, after the switch (2026-10-26 evening)
 
 Revision 11 (15:49 local) deployed the switch with the sync fix: OpenSpline's log says
@@ -135,7 +151,9 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
   - the Avatar switch shows OpenSpline and Tavus, each with its faces, and the choice is
     remembered after a reload;
   - a Tavus session works (the free plan has 25 minutes a month and one stream);
-  - a Beyond Presence session works with Nelly, Jerome and Laura, and each one's voice fits
+  - a Beyond Presence session shows video (it joins through `livekit.tcpTurn`; `oc logs
+    deploy/livekit | grep bey-avatar-agent` says `"connectionType": "turn"`), with Nelly, Jerome
+    and Laura, and each one's voice fits
     (their genders in `chart/values-demo-cluster.yaml` were guessed from the names); the admin
     portal's Integrations test confirms the avatar ids; end of speech to first audio stays
     within 1 to 2 s; and after "End voice" the session shows as ended in Bey Studio (Beyond

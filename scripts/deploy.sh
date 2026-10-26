@@ -20,6 +20,8 @@
 #                            comma-separated (openspline,tavus), are all offered in the UI, the
 #                            first preselected; one without its key is left out there
 #     LOG_FILE=<path>        also write everything printed to this file
+#     (livekit.tcpTurn in the values: the host name of its load balancer is read from the cluster
+#     and set, in a second upgrade the first time, when the cloud has just created it)
 #     AVOID_NODES="<node> ..." nodes to keep every pod off (global.avoidNodes); nodes found unable to
 #                            start containers while waiting are added, and AVOID_NODES_FILE keeps the list
 #   Extra arguments go to helm, for example: scripts/deploy.sh -f my-values.yaml
@@ -115,12 +117,18 @@ avoid_bad_nodes() {
 }
 AVOID_ARGS=(); [ -n "$AVOID_NODES" ] && AVOID_ARGS=(--set "global.avoidNodes={$(echo $AVOID_NODES | tr ' ' ',')}") && echo "  pods avoid the nodes $AVOID_NODES (global.avoidNodes)"
 
+# The TURN server on a TCP load balancer (livekit.tcpTurn): LiveKit announces it by the balancer's
+# host name, which exists only once the cloud has created it; after the first install it is known
+turn_lb_host() { oc get svc livekit-tcp-turn -n "$PROJECT" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true; }
+TURN_HOST=$(turn_lb_host)
+TURN_ARGS=(); [ -n "$TURN_HOST" ] && TURN_ARGS=(--set "livekit.tcpTurn.publicHost=$TURN_HOST")
+
 say "Installing the chart"
 # The n8n-setup hook Job runs inside the install and needs n8n up first (volume, image pull),
 # which can take longer than Helm's default five minutes. Helm runs in the background so stuck
 # pods on a broken node are dealt with while it waits.
 helm upgrade --install "$RELEASE" "$ROOT/chart" --namespace "$PROJECT" --timeout "${HELM_TIMEOUT:-20m}" --set "global.domain=$DOMAIN" \
-  --set "integrations.slack.enabled=$SLACK_ON" --set "integrations.googleDocs.enabled=$DOCS_ON" ${AVATAR_ARGS[@]+"${AVATAR_ARGS[@]}"} ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} ${AVOID_ARGS[@]+"${AVOID_ARGS[@]}"} "$@" &
+  --set "integrations.slack.enabled=$SLACK_ON" --set "integrations.googleDocs.enabled=$DOCS_ON" ${AVATAR_ARGS[@]+"${AVATAR_ARGS[@]}"} ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} ${AVOID_ARGS[@]+"${AVOID_ARGS[@]}"} ${TURN_ARGS[@]+"${TURN_ARGS[@]}"} "$@" &
 helm_pid=$!
 i=0; while kill -0 "$helm_pid" 2>/dev/null; do sleep 5; i=$((i + 1)); [ $((i % 4)) -eq 0 ] && avoid_bad_nodes; done
 if ! wait "$helm_pid"; then
@@ -130,6 +138,18 @@ if ! wait "$helm_pid"; then
 fi
 
 FAILED=0
+if [ -z "$TURN_HOST" ] && [ "$(helm get values "$RELEASE" -n "$PROJECT" -a -o json 2>/dev/null | jq -r '.livekit.tcpTurn.enabled // false')" = true ]; then
+  say "TURN server on a TCP load balancer: waiting for the cloud to give it a host name"
+  for i in $(seq 1 30); do TURN_HOST=$(turn_lb_host); [ -n "$TURN_HOST" ] && break; sleep 10; done
+  if [ -n "$TURN_HOST" ]; then
+    echo "  $TURN_HOST (its DNS name can take a few minutes to resolve everywhere)"
+    if helm upgrade "$RELEASE" "$ROOT/chart" --namespace "$PROJECT" --reuse-values --set "livekit.tcpTurn.publicHost=$TURN_HOST" >/dev/null; then
+      echo "  LiveKit announces it from now on (restarted with it)"
+    else echo "  FAIL could not set livekit.tcpTurn.publicHost=$TURN_HOST"; FAILED=$((FAILED + 1)); fi
+  else
+    echo "  FAIL no host name after 5 minutes: oc describe svc livekit-tcp-turn -n $PROJECT (does the cloud refuse load balancers?)"; FAILED=$((FAILED + 1))
+  fi
+fi
 not_ready() { oc get pods -n "$PROJECT" --no-headers 2>/dev/null | grep -v -E 'Running|Completed' || true; }
 # Kueue (where it manages the project): workloads not admitted yet, with the reason (no quota, booking ended, ...)
 queued() { oc get workloads.kueue.x-k8s.io -n "$PROJECT" -o json 2>/dev/null | jq -r '.items[]? | select([.status.conditions[]? | select(.type=="Admitted" and .status=="True")] | length == 0) | "  queued by Kueue: \(.metadata.name): \([.status.conditions[]?.message] | last // "waiting for admission")"' 2>/dev/null || true; }

@@ -107,6 +107,18 @@ They sign in and out, file a request in the chat and approve it in the portal (w
 
 CI runs all of this on every push and pull request (`.github/workflows/ci.yaml`). Against a running deployment, `NS=<project> scripts/demo-preflight.sh -f <values file>` checks models, the test pod and the n8n webhooks; `scripts/check-index.sh` lists what is indexed; `scripts/n8n-executions.sh` shows workflow runs with node errors; `scripts/eval-requests.sh` runs sample requests and questions through the cluster's language model, with the deployed RAG API code and with the checkout's.
 
+## Claude on pull requests
+
+Write `@claude` in a pull request comment, a review or a review comment, or in a new issue, and Claude Code answers there through `.github/workflows/claude.yaml`: `@claude review this PR` gives a review, `@claude why does this test fail?` an explanation, and `@claude fix the typo in line 12` pushes a commit to the pull request's branch (never to `main`, and it never merges). It reads `CLAUDE.md` for the project's rules and the checks to run. Only people with write access to the repository can trigger it; since the repository is public, the workflow does not even start for anyone else.
+
+It needs one repository secret (Settings > Secrets and variables > Actions, repository admin): `ANTHROPIC_API_KEY`, an API key from the Claude Console, billed per use, or `CLAUDE_CODE_OAUTH_TOKEN`, printed by `claude setup-token` for a Claude Pro or Max plan. From a terminal, with the key kept out of the shell history:
+
+```bash
+read -rs "KEY?Paste the API key: " && echo && printf '%s' "$KEY" | gh secret set ANTHROPIC_API_KEY --repo rh-ai-quickstart/enterprise-voice-avatar-assistant && unset KEY
+```
+
+The workflow uses its own `GITHUB_TOKEN`, so no GitHub App is needed and the answers come from `github-actions[bot]`. With the Claude GitHub App installed on the repository (https://github.com/apps/claude, an organization owner approves it), remove the `github_token` input and they come from `claude[bot]`. GitHub runs comment-triggered workflows from the default branch, so a change to `claude.yaml` takes effect once it is on `main`.
+
 ## Images
 
 `.github/workflows/build-images.yaml` builds the four images on every push to `main` that touches a service, pushes them tagged `sha-<7 chars>` and `latest`, and commits the new tags into `chart/values-demo-cluster.yaml`, which Argo CD rolls out on the demo cluster. To build one locally:

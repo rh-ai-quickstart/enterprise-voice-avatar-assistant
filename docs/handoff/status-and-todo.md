@@ -113,13 +113,21 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
 - **If anything cuts off:** read the voice agent log (runbook in
   [setup-and-deploy.md](setup-and-deploy.md)); each session logs `avatar=<provider>`.
 
-### 2. A self-hosted HD avatar (research track)
+### 2. Turn on Claude on pull requests
+`.github/workflows/claude.yaml` answers "@claude" in pull requests and issues (see
+[development.md](../development.md#claude-on-pull-requests)). It does nothing until the
+repository has the secret `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`), which Mohamed adds
+as the repository admin. Then try `@claude review this PR` on a pull request. If the run fails
+with an action that is not allowed, the organization's Actions policy has to allow
+`anthropics/claude-code-action`.
+
+### 3. A self-hosted HD avatar (research track)
 Mohamed wants professional, high-resolution avatars, self-hosted first. No open model renders
 HD in real time on one H200 yet. The plan, the candidates and the sources are in
 [avatar-research.md](avatar-research.md). It needs HD presenter footage and another whole H200,
 both Mohamed's to provide.
 
-### 3. Sharper portraits (waiting on Mohamed)
+### 4. Sharper portraits (waiting on Mohamed)
 The four faces are single frames of OpenSpline's 240x240 example GIFs, enlarged to 512x512.
 That is the main reason the avatar looks soft. OpenSpline renders exactly what it gets.
 
@@ -145,7 +153,7 @@ Processing, once the files are on the Mac:
 - New people instead of the four: edit `openspline.faces` in `chart/values.yaml` (id, name,
   gender). There are four at most, and the first is the default.
 
-### 4. Measure high quality on a GPU pair
+### 5. Measure high quality on a GPU pair
 `193c128` makes setup choose high quality when two whole GPUs are free next to the models
 and Kokoro keeps its slice. The pair is not measured yet.
 - Book a second whole H200, then run `scripts/setup.sh --step 2`. It should report
@@ -158,7 +166,7 @@ and Kokoro keeps its slice. The pair is not measured yet.
 - Try it in the browser. The high weights (Model_Pro, VAE_Wan) are already on the volume
   `openspline-data`, downloaded for the single-GPU benchmark.
 
-### 5. Smaller follow-ups
+### 6. Smaller follow-ups
 - **Hedra is gone from LiveKit Agents** (removed 2026-09-02). Drop it from
   `services/voice-agent/app/avatars.py`, the RAG API's `AVATAR_KEYS` and the chart's
   `validate.yaml`.

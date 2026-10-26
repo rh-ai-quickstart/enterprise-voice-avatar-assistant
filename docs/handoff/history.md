@@ -153,7 +153,9 @@ administers one project only.
     hosted third vendor.
   - Several avatars in the UI: `voiceAgent.avatarProviders`, an Avatar switch above the faces,
     the provider in the token, per-session providers in the voice agent, setup step 2
-    accepting `openspline,tavus`.
+    accepting `openspline,tavus` (`d2dd3c4`).
+  - Claude on pull requests: `.github/workflows/claude.yaml` answers "@claude", with the
+    workflow's `GITHUB_TOKEN` instead of a GitHub App. It waits for the API key secret.
 
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)

@@ -149,6 +149,13 @@ oc get clusterqueue -o jsonpath='{range .items[*]}{.metadata.name} until={.metad
   - frontend: tests, build, and the nginx `/api` allowlist test;
   - n8n workflow tests;
   - Playwright end to end against a compose stack with fakes (`frontend/e2e`).
+- **`claude.yaml` on "@claude"** in a pull request comment, review or review comment, or a new
+  issue: Claude Code answers there (a review, an explanation, or a fix pushed to the PR's
+  branch). Only people with write access trigger it. It runs with the workflow's
+  `GITHUB_TOKEN`, so no GitHub App is installed and its comments come from
+  `github-actions[bot]`; installing the Claude GitHub App and removing the `github_token` input
+  would make them `claude[bot]`. It needs the repository secret `ANTHROPIC_API_KEY` or
+  `CLAUDE_CODE_OAUTH_TOKEN`. Details in [development.md](../development.md#claude-on-pull-requests).
 - **`build-images.yaml` on pushes to `main` touching `services/**` or `frontend/**`:**
   - builds the four images and pushes them to `quay.io/rh-ai-quickstart/enterprise-voice-avatar-assistant-<service>`,
     tagged `sha-<7>` and `latest`;
@@ -158,8 +165,10 @@ oc get clusterqueue -o jsonpath='{range .items[*]}{.metadata.name} until={.metad
 - **Access:**
   - Quay credentials are the repository secrets `QUAY_USERNAME` and `QUAY_PASSWORD` (a robot
     account with write access to the four repositories).
-  - Mohamed has push access to the org repository, but no admin. Repository secrets, package
-    visibility, topics and branch protection need an org admin (Sander can help).
+  - Mohamed is the repository's admin: repository secrets, package visibility, topics and
+    branch protection are his to change. On 2026-10-26 the GitHub account `gh` was logged in
+    with on the second Mac showed write access only (not admin), so if a `gh secret set` or a
+    settings change is refused, use the account that holds the admin rights, in the browser.
 - **GHCR is no longer used.** Images moved to quay.io on 2026-09-09.
 
 ## External accounts
@@ -173,6 +182,7 @@ None of these are in git. Never ask for or print their secrets.
 | Models-as-a-Service (TMM) | An API key per cluster, created by setup step 5 | `MAAS_API_KEY` |
 | n8n | Owner account and API key, per cluster, created by the `n8n-setup` Job | `assistant-n8n` secret (back it up: losing `N8N_ENCRYPTION_KEY` makes stored credentials unreadable) |
 | quay.io | Four public repositories under `rh-ai-quickstart`, a robot account for CI | GitHub repository secrets |
+| Claude on pull requests | An Anthropic API key (Claude Console), or an OAuth token from `claude setup-token` on a Pro or Max plan, for `.github/workflows/claude.yaml` | GitHub repository secret `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
 | OpenSpline | No account. Self-hosted; the weights come from Hugging Face without a token | none |
 
 `secrets.env.example` lists every key the scripts read.

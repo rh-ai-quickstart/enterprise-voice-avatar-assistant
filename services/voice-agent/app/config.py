@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     llm_model: str = "llama-3.1-8b-instruct"
     llm_api_key: str = "none"
 
-    # Avatar: none | openspline | simli | tavus | hedra
+    # Avatar: none | openspline | simli | tavus | bey | hedra
     avatar_provider: str = "none"
     # The avatars the browser can choose from, comma-separated, the first being the default; empty
     # means avatar_provider alone. The choice arrives as the participant attribute "avatar_provider".
@@ -70,10 +70,14 @@ class Settings(BaseSettings):
     avatar_faces: str = "[]"
     avatar_faces_openspline: str = ""
     avatar_faces_tavus: str = ""
+    avatar_faces_bey: str = ""
     tavus_pal_id: str | None = None  # optional; the plugin's stock PAL is used when empty
     # Older Tavus names (replica -> face, persona -> PAL); still accepted
     tavus_replica_id: str | None = None
     tavus_persona_id: str | None = None
+    # Beyond Presence: animates the agent's own speech (Kokoro) at 1080p in its cloud
+    bey_api_key: str | None = None
+    bey_avatar_id: str | None = None  # default avatar when no face is chosen; else the plugin's stock one
     hedra_api_key: str | None = None
     hedra_avatar_image: str | None = None
     # OpenSpline, the self-hosted avatar (the chart's openspline worker on a GPU): no key, it joins

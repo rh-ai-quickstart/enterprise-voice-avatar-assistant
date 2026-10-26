@@ -153,3 +153,21 @@ def test_build_and_start_take_the_session_provider(monkeypatch):
     assert not avatars.active("tavus") and avatars.active("openspline")
     monkeypatch.setattr(avatars, "_warned", set())
     assert asyncio.run(avatars.start(None, None, name="tavus")) is None  # no key: audio only
+
+
+def test_beyond_presence_takes_the_session_face_and_its_key(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_providers", "openspline,bey")
+    monkeypatch.setattr(settings, "bey_api_key", None)
+    monkeypatch.setattr(settings, "bey_avatar_id", None)
+    assert avatars.available() == ["openspline"]  # no key: left out
+    with pytest.raises(RuntimeError, match="BEY_API_KEY is required for avatar provider 'bey'"):
+        avatars.build(None, "bey")
+    monkeypatch.setattr(settings, "bey_api_key", "k")
+    assert avatars.available() == ["openspline", "bey"] and avatars.choose("bey") == "bey"
+    avatar = avatars.build("a-face", "bey")
+    assert avatar.provider == "bey" and avatar._avatar_id == "a-face"
+    monkeypatch.setattr(settings, "bey_avatar_id", "configured")
+    assert avatars.build(None, "bey")._avatar_id == "configured"
+    # it joins through the public LiveKit URL, as Tavus does
+    monkeypatch.setattr(settings, "livekit_public_url", "wss://livekit.example.com")
+    assert avatars.start_kwargs(avatar) == {"livekit_url": "wss://livekit.example.com"}

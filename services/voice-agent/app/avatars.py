@@ -16,12 +16,12 @@ from .config import settings
 
 log = logging.getLogger("voice-agent.avatar")
 
-PROVIDERS = ("none", "openspline", "simli", "tavus", "hedra")
+PROVIDERS = ("none", "openspline", "simli", "tavus", "bey", "hedra")
 PROVIDER_ATTRIBUTE = "avatar_provider"  # LiveKit participant attribute carrying the chosen provider
 TAVUS_API_URL = "https://tavusapi.com/v2"
 # The key each provider cannot start without; the RAG API checks the same ones before offering faces.
 # OpenSpline runs in the cluster and needs none.
-KEYS = {"simli": "simli_api_key", "tavus": "tavus_api_key", "hedra": "hedra_api_key"}
+KEYS = {"simli": "simli_api_key", "tavus": "tavus_api_key", "bey": "bey_api_key", "hedra": "hedra_api_key"}
 _warned: set[str] = set()
 
 
@@ -154,6 +154,15 @@ def build(face_id: str | None = None, name: str | None = None) -> Any | None:
         api_key = _require(settings.tavus_api_key, "TAVUS_API_KEY", name)
         params = inspect.signature(tavus.AvatarSession.__init__).parameters
         return tavus.AvatarSession(**tavus_kwargs(face, pal_id, api_key, params))
+    if name == "bey":
+        # Beyond Presence: its avatar joins the room through the public LiveKit URL (start_kwargs)
+        # and is sent the agent's speech, like Tavus
+        from livekit.plugins import bey
+
+        return bey.AvatarSession(
+            avatar_id=face_id or settings.bey_avatar_id,
+            api_key=_require(settings.bey_api_key, "BEY_API_KEY", name),
+        )
     if name == "hedra":
         from livekit.plugins import hedra
 

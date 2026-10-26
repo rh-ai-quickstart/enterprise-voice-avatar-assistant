@@ -111,6 +111,7 @@ make_secret assistant-integrations \
   --from-literal=TAVUS_API_KEY="${TAVUS_API_KEY:-}" \
   --from-literal=TAVUS_FACE_ID="${TAVUS_FACE_ID:-}" \
   --from-literal=TAVUS_PAL_ID="${TAVUS_PAL_ID:-}" \
+  --from-literal=BEY_API_KEY="${BEY_API_KEY:-}" \
   --from-literal=GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON:-}" \
   --from-literal=GOOGLE_DOCS_FOLDER_ID="${GOOGLE_DOCS_FOLDER_ID:-}"
 

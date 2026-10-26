@@ -92,7 +92,7 @@ scenarios with Slack on and off.
 
 ## Avatar providers
 `voiceAgent.avatarProvider` picks one: `none`, `openspline` (self-hosted, no key), `tavus`,
-`simli` or `hedra` (cloud, by key). `voiceAgent.avatarProviders` offers several, the first
+`bey` (Beyond Presence), `simli` or `hedra` (cloud, by key). `voiceAgent.avatarProviders` offers several, the first
 preselected, and replaces it.
 - **Per session:** the UI shows an Avatar switch above the faces when two or more are offered.
   The browser asks the RAG API for a token with `provider` and `face_id`; the token carries
@@ -100,9 +100,11 @@ preselected, and replaces it.
   starts that provider for the session (`avatars.choose`, `faces.select`). A provider that is
   not offered, or lacks its key, falls back to the default.
 - **Config:** the chart writes `AVATAR_PROVIDERS` (the list), `AVATAR_PROVIDER` (its first),
-  and each provider's faces as `AVATAR_FACES_OPENSPLINE` and `AVATAR_FACES_TAVUS`.
-- **Faces:** for Tavus they come from `voiceAgent.faces`; for OpenSpline from
-  `openspline.faces`, with portraits in `chart/files/portraits`.
+  and each provider's faces as `AVATAR_FACES_OPENSPLINE`, `AVATAR_FACES_TAVUS` and
+  `AVATAR_FACES_BEY`.
+- **Faces:** for Tavus they come from `voiceAgent.faces`; for Beyond Presence from
+  `voiceAgent.beyFaces`; for OpenSpline from `openspline.faces`, with portraits in
+  `chart/files/portraits`.
 - **Voice:** the face's gender picks the Kokoro voice (`models.tts.voices`), unless the face
   pins one.
 - **Missing key:** a cloud provider without its key counts as `none`, and the deploy

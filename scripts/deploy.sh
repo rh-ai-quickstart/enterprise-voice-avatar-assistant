@@ -15,7 +15,7 @@
 #     WAIT=0                 do not wait for pods and models
 #     RUN_TESTS=1            run the connectivity test pod at the end (helm test's pod, via scripts/test-services.sh)
 #     HELM_TIMEOUT=20m       how long helm waits for the n8n-setup hook Job
-#     AVATAR_PROVIDER=<name> openspline (the self-hosted worker on a GPU), tavus, simli, hedra or none;
+#     AVATAR_PROVIDER=<name> openspline (the self-hosted worker on a GPU), tavus, bey, simli, hedra or none;
 #                            default: the values file, or none without TAVUS_API_KEY. Several,
 #                            comma-separated (openspline,tavus), are all offered in the UI, the
 #                            first preselected; one without its key is left out there

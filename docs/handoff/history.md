@@ -155,7 +155,16 @@ administers one project only.
     the provider in the token, per-session providers in the voice agent, setup step 2
     accepting `openspline,tavus` (`d2dd3c4`).
   - Claude on pull requests: `.github/workflows/claude.yaml` answers "@claude", with the
-    workflow's `GITHUB_TOKEN` instead of a GitHub App. It waits for the API key secret.
+    workflow's `GITHUB_TOKEN` instead of a GitHub App (`d56a08b`). Mohamed added the secret
+    (`CLAUDE_CODE_OAUTH_TOKEN`); on PR #12 Claude answered `@claude review this PR` within
+    seconds, as `github-actions[bot]`. Pushing a workflow file needed the `workflow` scope on
+    the `gh` login (`gh auth refresh --scopes workflow`).
+  - PR #12: the demo script for the avatar switch, with the five suggestions of its `@claude`
+    review, squash-merged as `11f1532`.
+  - Beyond Presence as a third avatar (`bey`, PR #13): the LiveKit plugin, its key in setup step 5 and
+    the integrations secret, three stock avatars in `voiceAgent.beyFaces`,
+    `scripts/list-bey-avatars.sh`, and a live check on the Integrations page. The voice agent
+    moved to LiveKit Agents 1.8.9 for the plugin (the `openai` SDK to 3.x with it).
 
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)

@@ -42,6 +42,7 @@ LABELS = {
     "guardrails": "Guardrails",
 }
 AVATAR_KEYS = faces.AVATAR_KEYS
+BEY_API_URL = "https://api.bey.dev/v1"
 
 
 def _env(name: str) -> str:
@@ -251,6 +252,8 @@ def _test_avatar_provider(provider: str) -> list[dict[str, Any]]:
         return [_check("provider", provider == "none", f"unknown provider {provider}")]
     if not _env(key):
         return [_check("key", False, f"{key} is empty")]
+    if provider == "bey":
+        return _test_bey(_env(key))
     if provider != "tavus":
         return [_check("key", True, f"{key} is set (no live test for {provider})")]
     ids = [f.id for f in faces.catalog("tavus")] or (
@@ -265,6 +268,31 @@ def _test_avatar_provider(provider: str) -> list[dict[str, Any]]:
             i in found,
             (found[i].get("face_name") or "found") if i in found else "not found with this key",
         )
+        for i in ids
+    ]
+
+
+def _test_bey(key: str) -> list[dict[str, Any]]:
+    """Beyond Presence: the key lists the avatars (stock and trained ones), and every configured
+    face is among them."""
+    names: dict[str, str] = {}
+    params: dict[str, Any] = {"limit": 50}
+    with _http() as http:
+        for _ in range(10):
+            response = http.get(f"{BEY_API_URL}/avatars", params=params, headers={"x-api-key": key})
+            if response.status_code >= 400:
+                return [_check("key", False, f"Beyond Presence answers {response.status_code}")]
+            body = response.json()
+            names.update({a["id"]: a.get("name") or "" for a in body.get("data", []) if a.get("id")})
+            if not body.get("has_more") or not body.get("next_cursor"):
+                break
+            params = {"limit": 50, "cursor": body["next_cursor"]}
+    checks = [_check("key", True, f"{len(names)} avatars available")]
+    ids = [f.id for f in faces.catalog("bey")]
+    if not ids:
+        return [*checks, _check("faces", True, "none configured: the plugin's stock avatar")]
+    return checks + [
+        _check(f"face {i}", i in names, (names[i] or "found") if i in names else "not found with this key")
         for i in ids
     ]
 

@@ -411,6 +411,10 @@ voiceAgent:
   # The first entry is the default; an empty list means the single face in TAVUS_FACE_ID.
   # scripts/list-tavus-faces.sh prints the stock faces with their ids.
   faces: []
+  # The same for Beyond Presence (avatar provider bey): up to four avatar ids with name and gender.
+  # An empty list means the plugin's stock avatar, with no choice. scripts/list-bey-avatars.sh
+  # prints the avatars the key can use.
+  beyFaces: []
   resources:
     requests:
       cpu: 500m

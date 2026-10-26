@@ -119,10 +119,11 @@ To log in from a Mac (zsh):
 1. Get a token in the console: your name at the top right, then Copy login command, then
    Display Token. That page also shows the API server URL.
 2. Run the command below. Replace `API_URL` before pasting; `<` and `>` would be read as
-   redirections. The token stays out of the shell history:
+   redirections. The token stays out of the shell history, and the login goes into the default
+   kubeconfig, `~/.kube/config` (`~/.kube/tmm` on Mohamed's Mac is a link to it):
 
 ```bash
-export KUBECONFIG=~/.kube/tmm && read -rs "TOKEN?Paste the API token: " && echo && oc login --token="$TOKEN" --server=API_URL && unset TOKEN && oc whoami
+read -rs "TOKEN?Paste the API token: " && echo && oc login --token="$TOKEN" --server=API_URL && unset TOKEN && oc whoami
 ```
 
 3. A new kubeconfig may have no current project after that: `oc project -q` answers "no
@@ -130,7 +131,7 @@ export KUBECONFIG=~/.kube/tmm && read -rs "TOKEN?Paste the API token: " && echo 
    `PROJECT_NAME` with `user-<name>`); the kubeconfig keeps it:
 
 ```bash
-export KUBECONFIG=~/.kube/tmm && oc project PROJECT_NAME
+oc project PROJECT_NAME
 ```
 
 To read the internal values off the cluster when you are logged in (setup writes them to

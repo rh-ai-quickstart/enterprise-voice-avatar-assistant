@@ -36,15 +36,17 @@ sessions. Follow them; they are not in the code.
     after a URL, even inside quotes, which leaves a `for>` prompt. End the line with the URL,
     or follow it with a space and `&&`. Avoid `for ...; do ...; done` loops with a URL inside.
   - zsh does not split `$var` into words. Use arrays, or `bash -c`.
-- **Start Mac commands with `export KUBECONFIG=~/.kube/tmm`.** Another terminal tab may point
-  at another cluster. Run `oc whoami` before anything that sends the token
+- **The Mac's default kubeconfig is the TMM cluster.** Since 2026-10-26 `~/.kube/config` has the
+  TMM context with his project current, and `~/.kube/tmm` is a link to it, so commands need no
+  `export KUBECONFIG` (Mohamed asked for that). If another cluster is ever added to the file,
+  switch with `oc config use-context`. Run `oc whoami` before anything that sends the token
   (`oc whoami -t`).
 - Mohamed runs setup from the main checkout: `~/redhat-code/enterprise-voice-avatar-assistant`.
   zsh aliases: `cd-enterprise-voice-avatar-assistant` goes there, and
   `cld-enterprise-voice-avatar-assistant` goes there and starts Claude Code. `cd-redhat-code`
   and `cld-redhat-code` do the same for the parent folder. The usual cycle after a push is:
   ```bash
-  cd ~/redhat-code/enterprise-voice-avatar-assistant && git pull && export KUBECONFIG=~/.kube/tmm && scripts/setup.sh --step 6
+  cd ~/redhat-code/enterprise-voice-avatar-assistant && git pull && scripts/setup.sh --step 6
   ```
 - Prefer polling loops (`until ...; do sleep 10; done`) over fixed sleeps.
 

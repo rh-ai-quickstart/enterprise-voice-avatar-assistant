@@ -12,10 +12,11 @@ Everything here cost time at least once. Each entry says what happens and what t
 - **macOS ships bash 3.2:** no associative arrays and no `${var@Q}`. setup.sh re-executes
   itself under Homebrew's bash 5. Other scripts that need bash 4 are run by setup through
   that bash.
-- **A Mac shell may point at another cluster.** Every command block starts with
-  `export KUBECONFIG=~/.kube/tmm`. A login in a tab without it (the console's copied
-  `oc login`, for example) writes `~/.kube/config` instead, and `~/.kube/tmm` keeps the
-  expired token. Log in again with the export, or copy the file over.
+- **Two kubeconfig files drift apart.** A login with `KUBECONFIG=~/.kube/tmm` wrote one file, a
+  login without it (the console's copied `oc login`, for example) wrote `~/.kube/config`, and
+  the other kept an expired token. Since 2026-10-26 there is one file: `~/.kube/config` holds
+  the TMM context with the project current, and `~/.kube/tmm` is a link to it, so a login
+  either way updates the same file.
 - **BSD `sed -i` needs an argument** (`sed -i '' ...`); GNU sed does not. Prefer Python for
   in-place edits in scripts that run on both.
 - **A new Mac has no `uv`.** The Python checks in CLAUDE.md need it: `brew install uv`.

@@ -7,8 +7,14 @@ sessions. Follow them; they are not in the code.
 ## Approvals
 - **Every push to `main` needs an explicit go**, in the form "Yes, push <sha> to main".
   Commit locally, show what changed, ask, then push only that commit. An approval covers
-  that push only. The repository has no PR requirement and no auto-merge. Recent work went
-  straight to `main` at Mohamed's request; earlier features went through PRs (#6 to #11).
+  that push only. The repository has no PR requirement and no auto-merge.
+- **Since 2026-10-26 work goes through pull requests reviewed by Claude** (#12 onwards).
+  Open the PR from a branch (a separate `git worktree`, so his checkout stays untouched while he
+  runs setup), comment `@claude review this PR`, address every point of the review with a
+  commit and a reply that answers each one, and wait for CI. When Mohamed asks to merge, merge
+  once the comments are addressed and CI is green: squash, with the PR number in the subject
+  (`... (#14)`), as #6 to #11 were. A merge to `main` is a push to `main`: it needs his go for
+  that PR. Earlier, some work went straight to `main` at his request.
 - Before pushing, `git fetch` and rebase on `origin/main`. CI's promote commits
   (`ci: deploy images sha-<7> ...`) land on `main` after every image build.
 - Actions that are hard to undo or that reach outside: ask first, every time. That covers

@@ -24,11 +24,11 @@
 # project), several (openspline,tavus,bey: the person picks one in the UI, the first preselected)
 # or none (audio only); AVATAR_PROVIDER answers the question,
 # and a later run can switch with --step 2 then --step 6. OpenSpline runs
-# Beyond Presence among them also gets a TURN server on a TCP load balancer (livekit.tcpTurn: its
-# agents run LiveKit's native SDK, which cannot use the TURN server behind the Route); TCP_TURN=false
-# leaves it out, TCP_TURN=true adds it for any avatar.
 # in high quality on a GPU pair when the booked quota has one free next to the models, else in
 # low quality on one GPU; AVATAR_QUALITY=low or high decides instead.
+# Beyond Presence among the avatars also gets a TURN server on a TCP load balancer
+# (livekit.tcpTurn: its agents run LiveKit's native SDK, which cannot use the TURN server behind
+# the Route); TCP_TURN=false leaves it out, TCP_TURN=true adds it for any avatar.
 #
 # On another laptop nothing needs copying: after you confirm the target, setup rebuilds what only
 # the first machine had from the cluster. It fills the keys missing from ~/secrets.env from the

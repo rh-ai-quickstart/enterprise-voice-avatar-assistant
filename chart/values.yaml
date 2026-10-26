@@ -212,7 +212,7 @@ livekit:
   # LiveKit announces the server from then on.
   tcpTurn:
     enabled: false
-    image: docker.io/coturn/coturn:4.18.0
+    image: docker.io/coturn/coturn:4.18.0@sha256:bbefd3e1fdfdc0d58770fe01b581fd8b00d9f3a5580d00acb77cf719a6bc78e3
     port: 443
     publicHost: ""
     # Annotations for the load balancer Service (cloud-specific options)

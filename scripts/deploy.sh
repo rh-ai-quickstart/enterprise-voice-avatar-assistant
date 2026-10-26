@@ -119,7 +119,8 @@ AVOID_ARGS=(); [ -n "$AVOID_NODES" ] && AVOID_ARGS=(--set "global.avoidNodes={$(
 
 # The TURN server on a TCP load balancer (livekit.tcpTurn): LiveKit announces it by the balancer's
 # host name, which exists only once the cloud has created it; after the first install it is known
-turn_lb_host() { oc get svc livekit-tcp-turn -n "$PROJECT" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true; }
+# (a host name on IBM Cloud; an IP on clouds that publish one instead)
+turn_lb_host() { oc get svc livekit-tcp-turn -n "$PROJECT" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true; }
 TURN_HOST=$(turn_lb_host)
 TURN_ARGS=(); [ -n "$TURN_HOST" ] && TURN_ARGS=(--set "livekit.tcpTurn.publicHost=$TURN_HOST")
 

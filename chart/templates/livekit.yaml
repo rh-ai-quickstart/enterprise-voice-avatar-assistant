@@ -66,10 +66,11 @@ spec:
           image: {{ .Values.livekit.image }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           {{- if $tcpTurn }}
-          # the TURN secret stays out of the ConfigMap: put it into a copy of the config at start
+          # the TURN secret stays out of the ConfigMap: put it into a copy of the config at start (a
+          # literal replacement, so any character in the secret is safe)
           command: ["/bin/sh", "-ec"]
           args:
-            - sed "s|__TCP_TURN_SECRET__|$TCP_TURN_SECRET|" /etc/livekit/config.yaml > /tmp/config.yaml && exec /livekit-server --config /tmp/config.yaml
+            - awk '{ i = index($0, "__TCP_TURN_SECRET__"); if (i) $0 = substr($0, 1, i - 1) ENVIRON["TCP_TURN_SECRET"] substr($0, i + 19) } 1' /etc/livekit/config.yaml > /tmp/config.yaml && exec /livekit-server --config /tmp/config.yaml
           {{- else }}
           args:
             - --config

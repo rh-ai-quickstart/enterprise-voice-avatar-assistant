@@ -4,7 +4,8 @@
 coturn behind a cloud TCP load balancer (see livekit.tcpTurn in values.yaml): clients reach it over
 plain TCP, and it relays over UDP to LiveKit inside the cluster. Credentials are LiveKit's TURN REST
 credentials (an HMAC of the participant and an expiry with TCP_TURN_SECRET), so only participants
-LiveKit admitted can allocate; relays go to private addresses only, UDP only.
+LiveKit admitted can allocate; relays go to private addresses only, UDP only, and the NetworkPolicy
+at the end lets the pod send only to LiveKit's media port, not to the rest of the cluster.
 */}}
 apiVersion: apps/v1
 kind: Deployment
@@ -49,6 +50,7 @@ spec:
             - --no-tcp-relay
             - --no-multicast-peers
             - --denied-peer-ip=0.0.0.0-255.255.255.255
+            - --denied-peer-ip=::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
             - --allowed-peer-ip=10.0.0.0-10.255.255.255
             - --allowed-peer-ip=172.16.0.0-172.31.255.255
             - --allowed-peer-ip=192.168.0.0-192.168.255.255
@@ -114,4 +116,27 @@ spec:
       port: {{ $t.port }}
       targetPort: turn-tcp
       protocol: TCP
+---
+# The relay may only reach LiveKit's media port: a participant's credentials must not open a way
+# to other pods' or services' UDP ports. Egress only: clients arrive through the load balancer.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: livekit-tcp-turn
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "livekit-tcp-turn") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "assistant.selector" (dict "root" . "name" "livekit-tcp-turn") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "assistant.selector" (dict "root" . "name" "livekit") | nindent 14 }}
+      ports:
+        - protocol: UDP
+          port: 7882
 {{- end }}

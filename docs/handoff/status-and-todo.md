@@ -83,6 +83,9 @@ extra TURN server, with `relay_acceptance_min_wait` 1s. Live test from the branc
 14 to 18): the same SDK joins relay-only in 2.8 s (20 s timeouts before), and a Beyond Presence
 session started in 2.15 s, its agent `"connectionType": "turn"` with audio and video. Not yet
 checked after it: a Tavus and an OpenSpline session in the browser, and Bey from the browser.
+The TURN server runs one replica behind `externalTrafficPolicy: Local`: a restart of its pod drops
+the Bey sessions relayed through it (they reconnect); a second replica is an option if that
+matters for a demo.
 
 ## Lip sync and phantom turns, after the switch (2026-10-26 evening)
 

@@ -94,6 +94,26 @@ install and for a prebuilt image alike. Bumping `openspline.ref` means checking 
 patch still matches; the log says whether it did. Ideally upstream fixes both and the
 patch goes away (to do, after asking Mohamed).
 
+## The patch for each answer's pose
+OpenSpline keeps the face's motion from one answer to the next. Even its `interrupt()` keeps it,
+on purpose ("resetting to the portrait here causes a visible jump"). A new answer then started
+from a face caught mid-word, and the lips trailed the voice, worst after an interruption
+(Mohamed, 2026-10-26: voice first, lips late, mostly after interruptions, with headphones).
+
+A second snippet in the start command adds `Session._reset_pose()` to `session.py`: before the
+first audio of each answer (where the session creates its audio converter), it calls the worker's
+`prepare` with the portrait, as `Session.start()` does, clears the audio history and shows the
+portrait. It runs inside the session's one inference loop, so it never overlaps a GPU call.
+`openspline.resetPoseEachAnswer` (`OPENSPLINE_RESET_POSE_EACH_ANSWER`) switches it, and each reset
+logs `[pose] reset to the portrait in <seconds>`; `scripts/voice-timings.sh` lists them. The face
+snaps to its resting pose before each answer, which Mohamed asked for. The cost is the portrait's
+encoding per answer, to be measured.
+
+**Between answers the face goes still.** OpenSpline's idle feeds near-silence (amplitude 1e-5) to
+the model, which renders a calm, almost motionless face. Mohamed wants it never to look frozen.
+That needs idle motion the model does not produce from silence (blinks, small head movements):
+real presenter footage gives it for free (see [avatar-research.md](avatar-research.md)); to do.
+
 ## Faces
 - **The list:** `openspline.faces` in `chart/values.yaml`: Meera, Lisa and Emily (female),
   Steve (male). Two to four faces, and the first is the default. The chart's `configmap.yaml`

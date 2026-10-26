@@ -449,6 +449,11 @@ openspline:
   # the full one. Without it, a slow link (TURN over TCP, for example) can only queue the video, so
   # it falls behind the voice.
   simulcast: true
+  # Start every answer from the portrait's pose. OpenSpline otherwise carries the face's motion
+  # from the previous answer, even across an interruption, and the lips then trail the voice.
+  # The face snaps back to its resting pose before each answer; the worker's log line "[pose]
+  # reset" says how long that adds before the first video.
+  resetPoseEachAnswer: true
   # Volume for the install and the model weights, about 8 GB each; kept across upgrades
   storage: 30Gi
   # Faces offered in the UI (two to four; the first is the default), each with its portrait

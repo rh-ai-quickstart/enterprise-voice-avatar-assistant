@@ -92,3 +92,15 @@ def test_requested_provider_reads_the_participant_attribute():
     assert faces.requested_provider(SimpleNamespace(attributes={"avatar_provider": "tavus"})) == "tavus"
     assert faces.requested_provider(SimpleNamespace(attributes={"avatar_face": "r1"})) is None
     assert faces.requested_provider(None) is None
+
+
+def test_beyond_presence_faces_come_from_their_catalog(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_providers", "openspline,bey")
+    monkeypatch.setattr(settings, "bey_api_key", "k")
+    monkeypatch.setattr(
+        settings, "avatar_faces_bey", json.dumps([{"id": "a1", "name": "Nelly", "gender": "female"}])
+    )
+    assert faces.select("a1", "bey").name == "Nelly"
+    assert faces.select("not-in-the-catalog", "bey").id == "a1"  # an unknown id never reaches the plugin
+    monkeypatch.setattr(settings, "avatar_faces_bey", "")
+    assert faces.catalog("bey") == [] and faces.select(None, "bey") is None  # the plugin's stock avatar

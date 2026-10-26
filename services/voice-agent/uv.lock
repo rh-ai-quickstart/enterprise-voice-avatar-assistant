@@ -1311,7 +1311,7 @@ requires-dist = [
     { name = "livekit-plugins-silero", specifier = ">=1.8.9,<2" },
     { name = "livekit-plugins-simli", specifier = ">=1.8.9,<2" },
     { name = "livekit-plugins-tavus", specifier = ">=1.8.9,<2" },
-    { name = "openai", specifier = ">=1.50" },
+    { name = "openai", specifier = ">=3.19,<4" },
     { name = "openspline", specifier = ">=0.1.1,<0.2" },
     { name = "pydantic-settings", specifier = ">=2.5" },
 ]

@@ -110,7 +110,9 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
   - a Tavus session works (the free plan has 25 minutes a month and one stream);
   - a Beyond Presence session works with Nelly, Jerome and Laura, and each one's voice fits
     (their genders in `chart/values-demo-cluster.yaml` were guessed from the names); the admin
-    portal's Integrations test confirms the avatar ids;
+    portal's Integrations test confirms the avatar ids; end of speech to first audio stays
+    within 1 to 2 s; and after "End voice" the session shows as ended in Bey Studio (Beyond
+    Presence has no end call; its avatar leaves when the room is deleted, so billing stops);
   - after the move to LiveKit Agents 1.8.9 (for the Beyond Presence plugin): noise still gets no
     answer, words still interrupt the avatar, and end of speech to first audio stays 1 to 2 s;
   - Emily is still sharp at 1 Mbps;

@@ -373,3 +373,14 @@ def test_beyond_presence_is_offered_with_its_key(monkeypatch, tmp_path):
         assert _claims(token["token"])["attributes"] == {"avatar_provider": "bey", "avatar_face": "a1"}
     monkeypatch.setattr(settings, "avatar_faces_bey", "")
     assert faces.catalog("bey") == []  # no list: the stock avatar, no face to choose
+
+
+def test_beyond_presence_as_the_default_takes_avatar_faces(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_providers", "bey,tavus")
+    monkeypatch.setenv("BEY_API_KEY", "k")
+    monkeypatch.setattr(settings, "avatar_faces_bey", "")
+    monkeypatch.setattr(settings, "avatar_faces", json.dumps([{"id": "a7", "name": "Laura"}]))
+    assert faces.avatar_provider() == "bey" and [f.id for f in faces.catalog()] == ["a7"]
+    monkeypatch.setattr(settings, "avatar_providers", "tavus,bey")  # no longer the default: no fallback
+    monkeypatch.setattr(settings, "tavus_api_key", "k")
+    assert faces.catalog("bey") == []

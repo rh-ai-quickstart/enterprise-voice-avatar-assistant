@@ -202,7 +202,7 @@ It exits non-zero on any FAIL. Helm only waits for the `n8n-setup` hook Job, not
 Deployments; the script's own waits do that.
 
 ## Runbook (TMM, from the Mac)
-Start with `export KUBECONFIG=~/.kube/tmm` and `oc project -q`. If `oc` says
+Start with `oc project -q` (the Mac's default kubeconfig is the TMM one). If `oc` says
 "Unauthorized", log in again (the private environment file has the exact command).
 
 ```bash

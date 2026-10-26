@@ -20,9 +20,10 @@ An enterprise voice and text assistant with a talking avatar on Red Hat OpenShif
   CI commits image promotions there after every image build.
 - **Never ask for a key or token in the chat, and never print one.** Keys go through
   `scripts/setup.sh` step 5 (hidden input) into `~/secrets.env`.
-- **Commands for Mohamed:** one step per message, for zsh on a Mac, starting with
-  `export KUBECONFIG=~/.kube/tmm`. Secrets go through `read -rs "VAR?prompt: "`, and nothing
-  touches the end of a URL.
+- **Commands for Mohamed:** one step per message, for zsh on a Mac. His default kubeconfig
+  (`~/.kube/config`) has the TMM cluster with his project current, so commands need no
+  `KUBECONFIG` (`~/.kube/tmm` is a link to it). Secrets go through `read -rs "VAR?prompt: "`,
+  and nothing touches the end of a URL.
 - **This repository is public.** Internal cluster hostnames, user and group names stay out
   of git (`docs/handoff/private/` is gitignored).
 - **Self-hosted first.** Keep latency at 1 to 2 s from the end of speech to the first audio.

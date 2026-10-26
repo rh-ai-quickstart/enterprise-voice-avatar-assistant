@@ -7,8 +7,14 @@ sessions. Follow them; they are not in the code.
 ## Approvals
 - **Every push to `main` needs an explicit go**, in the form "Yes, push <sha> to main".
   Commit locally, show what changed, ask, then push only that commit. An approval covers
-  that push only. The repository has no PR requirement and no auto-merge. Recent work went
-  straight to `main` at Mohamed's request; earlier features went through PRs (#6 to #11).
+  that push only. The repository has no PR requirement and no auto-merge.
+- **Since 2026-10-26 work goes through pull requests reviewed by Claude** (#12 onwards).
+  Open the PR from a branch (a separate `git worktree`, so his checkout stays untouched while he
+  runs setup), comment `@claude review this PR`, address every point of the review with a
+  commit and a reply that answers each one, and wait for CI. When Mohamed asks to merge, merge
+  once the comments are addressed and CI is green: squash, with the PR number in the subject
+  (`... (#14)`), as #6 to #11 were. A merge to `main` is a push to `main`: it needs his go for
+  that PR. Earlier, some work went straight to `main` at his request.
 - Before pushing, `git fetch` and rebase on `origin/main`. CI's promote commits
   (`ci: deploy images sha-<7> ...`) land on `main` after every image build.
 - Actions that are hard to undo or that reach outside: ask first, every time. That covers
@@ -36,15 +42,17 @@ sessions. Follow them; they are not in the code.
     after a URL, even inside quotes, which leaves a `for>` prompt. End the line with the URL,
     or follow it with a space and `&&`. Avoid `for ...; do ...; done` loops with a URL inside.
   - zsh does not split `$var` into words. Use arrays, or `bash -c`.
-- **Start Mac commands with `export KUBECONFIG=~/.kube/tmm`.** Another terminal tab may point
-  at another cluster. Run `oc whoami` before anything that sends the token
+- **The Mac's default kubeconfig is the TMM cluster.** Since 2026-10-26 `~/.kube/config` has the
+  TMM context with his project current, and `~/.kube/tmm` is a link to it, so commands need no
+  `export KUBECONFIG` (Mohamed asked for that). If another cluster is ever added to the file,
+  switch with `oc config use-context`. Run `oc whoami` before anything that sends the token
   (`oc whoami -t`).
 - Mohamed runs setup from the main checkout: `~/redhat-code/enterprise-voice-avatar-assistant`.
   zsh aliases: `cd-enterprise-voice-avatar-assistant` goes there, and
   `cld-enterprise-voice-avatar-assistant` goes there and starts Claude Code. `cd-redhat-code`
   and `cld-redhat-code` do the same for the parent folder. The usual cycle after a push is:
   ```bash
-  cd ~/redhat-code/enterprise-voice-avatar-assistant && git pull && export KUBECONFIG=~/.kube/tmm && scripts/setup.sh --step 6
+  cd ~/redhat-code/enterprise-voice-avatar-assistant && git pull && scripts/setup.sh --step 6
   ```
 - Prefer polling loops (`until ...; do sleep 10; done`) over fixed sleeps.
 

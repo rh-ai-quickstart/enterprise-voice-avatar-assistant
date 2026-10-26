@@ -159,7 +159,11 @@ administers one project only.
     (`CLAUDE_CODE_OAUTH_TOKEN`); on PR #12 Claude answered `@claude review this PR` within
     seconds, as `github-actions[bot]`. Pushing a workflow file needed the `workflow` scope on
     the `gh` login (`gh auth refresh --scopes workflow`).
-  - PR #13 merged as `756396d`; its images are `sha-756396d` (`b2db8ef`).
+  - PR #13 merged as `756396d`; its images are `sha-756396d` (`b2db8ef`). PR #14 (the pose
+    reset after each answer, `scripts/voice-timings.sh`) merged as `3eb41bd`.
+  - One kubeconfig on the Mac: `~/.kube/tmm` merged into `~/.kube/config` (the project's context
+    current) and replaced by a link to it, so commands need no `export KUBECONFIG`. Backups of
+    both files are next to them, dated 2026-10-26.
   - Lips late after interruptions: every OpenSpline answer starts from the portrait's pose
     (`openspline.resetPoseEachAnswer`, a patch to `session.py`), and `scripts/voice-timings.sh`
     collects the timings of voice sessions from the logs.

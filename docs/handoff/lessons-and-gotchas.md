@@ -24,6 +24,23 @@ Everything here cost time at least once. Each entry says what happens and what t
   Homebrew on a new Mac. That is expected.
 
 ## OpenShift and Kubernetes
+- **A passthrough Route sends TLS by SNI, and LiveKit's native SDK got no relay through it.**
+  Browsers relay through LiveKit's TURN server behind the Route; a client on LiveKit's Python
+  SDK (what Beyond Presence's agents run) gathered no relay candidate there at all. A TURN server
+  on its own TCP load balancer, plain TCP, works for both (`livekit.tcpTurn`).
+- **On TMM the cloud creates TCP load balancers only.** "Only TCP is supported" for UDP. A TCP
+  one gets its host name in about 35 s; public DNS follows within minutes, and a laptop's resolver
+  can cache the first "not found": ask `dig @8.8.8.8`.
+- **`node_ip` in LiveKit is not a free switch.** Setting it also moves the TURN relay address to
+  it, and stops LiveKit from discovering its NAT-mapped UDP address (no STUN when node_ip is set),
+  which is how Tavus connects. Announce extra paths with `rtc.turn_servers` instead.
+- **A binary with file capabilities will not start with every capability dropped.** coturn's
+  `turnserver` carries `NET_BIND_SERVICE`: "exec ... Operation not permitted" until the container
+  adds it back (it is in the restricted policies), even when it listens on a high port.
+- **coturn 4.18 dropped `--no-dtls`** (DTLS and the CLI are off unless `--dtls`, `--cli`); an
+  unknown option prints the help and exits 255.
+- **`helm upgrade --reuse-values` keeps the old chart's defaults.** After adding a value block to
+  the chart, use `--reset-then-reuse-values`, or new templates see empty values.
 - **A node with broken container storage looks empty, so the scheduler favours it.**
   Symptom: `FailedCreatePodSandBox ... creating overlay mount ... input/output error` over
   and over. `deploy.sh` and `test-services.sh` detect it and add a `NotIn` affinity; the

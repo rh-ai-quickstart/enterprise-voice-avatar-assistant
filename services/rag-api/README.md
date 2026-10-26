@@ -31,9 +31,9 @@ scripts send. Public routes are marked below.
 | POST | `/v1/tickets/stale/escalate` | `?ticket_ref=&current_priority=` raises the priority one step |
 | POST | `/v1/requests` | service request intake: classify, create the ticket, notify n8n |
 | GET | `/v1/knowledge-gaps/digest` | `?hours=24` open low-confidence questions: counts, the most-asked and the groups (knowledge-gap workflow) |
-| GET | `/v1/voice/token` (public) | LiveKit token; `session_id` maps to room `session-<id>`; `face_id` puts the chosen avatar face in the token |
-| GET | `/v1/voice/faces` (public) | avatar faces to choose from (`AVATAR_FACES`), with the voice each one speaks with; names and thumbnail URLs from Tavus when `TAVUS_API_KEY` is set |
-| GET | `/v1/voice/faces/{id}/poster` (public) | JPEG still of a face for the picker, cut from the Tavus thumbnail video and cached in the pod |
+| GET | `/v1/voice/token` (public) | LiveKit token; `session_id` maps to room `session-<id>`; `provider` and `face_id` put the chosen avatar and face in the token |
+| GET | `/v1/voice/faces` (public) | the avatars offered (`providers`, the default first) with the faces of each, and the voice each face speaks with; names and thumbnail URLs from Tavus when `TAVUS_API_KEY` is set. `provider`, `default` and `faces` repeat the default avatar's |
+| GET | `/v1/voice/faces/{id}/poster` (public) | JPEG still of a face for the picker: OpenSpline's portrait, or cut from the Tavus thumbnail video; cached in the pod |
 | GET | `/v1/info` (public) | active models and providers |
 | PATCH | `/v1/internal/archives/{id}` | `{"status": "indexed"\|"failed", "object_key", "doc_id", "job_id", "error"}`: what re-ingestion made of an archive (WF5); records `transcript.archived` or `transcript.archive_failed` |
 | POST | `/v1/internal/events` | `{"kind", "title", "severity"?, "detail"?, "ref_type"?, "ref_id"?, "actor"?, "data"?}` records an activity event the RAG API cannot see itself (n8n: ingestion results, SLA reminders, Slack failures) |
@@ -107,7 +107,7 @@ Environment variables, provided by the Helm chart's config map and secrets. See
 | `DATABASE_URL` | PostgreSQL; without it memory and tickets are disabled |
 | `LIVEKIT_PUBLIC_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | voice tokens |
 | `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_DOCS_FOLDER_ID` | transcript documents in Google Drive (both empty: no document, archival still re-ingests) |
-| `AVATAR_PROVIDER`, `AVATAR_FACES`, `TAVUS_FACE_ID`, `TAVUS_API_KEY`, `TTS_VOICE`, `TTS_VOICE_FEMALE`, `TTS_VOICE_MALE` | face catalog served to the UI |
+| `AVATAR_PROVIDERS` (or `AVATAR_PROVIDER`), `AVATAR_FACES_OPENSPLINE`, `AVATAR_FACES_TAVUS`, `AVATAR_FACES`, `TAVUS_FACE_ID`, `TAVUS_API_KEY`, `TTS_VOICE`, `TTS_VOICE_FEMALE`, `TTS_VOICE_MALE` | avatars and faces served to the UI; a provider without its key is left out |
 | `INGESTION_URL`, `N8N_URL` | neighbours used by classification and request intake |
 | `INTERNAL_API_TOKEN` | bearer token for the internal routes, also sent to the ingestion service; empty disables the check (local development only) |
 | `ADMIN_ENABLED`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, `ADMIN_SESSION_HOURS` | admin portal sign-in; an empty password makes sign-in answer 503; changing the password or the secret signs everyone out |

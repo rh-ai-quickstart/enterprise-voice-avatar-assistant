@@ -9,7 +9,7 @@ complements the user documentation (the [README](../../README.md), [SETUP.md](..
 [demo-script.md](../demo-script.md)), which stays the reference for how things work. This
 folder records where things stand and why they are the way they are.
 
-Last updated: 2026-10-26, with the last code commit on `main` at `77a3215`.
+Last updated: 2026-10-26 evening, after the avatar switch (several avatars in the UI).
 
 ## Reading order
 
@@ -21,6 +21,7 @@ Last updated: 2026-10-26, with the last code commit on `main` at `77a3215`.
 | [environments.md](environments.md) | The two kinds of cluster (RHDP sandbox with cluster-admin, the shared Red Hat TMM cluster with one project), CI/CD, registries, external accounts |
 | [setup-and-deploy.md](setup-and-deploy.md) | `scripts/setup.sh` in depth (both paths, every step, state files, environment variables), `deploy.sh`, tests, and an operations runbook |
 | [openspline.md](openspline.md) | The self-hosted avatar: design, faces, quality and GPUs, benchmarks, limits, the patch to its server |
+| [avatar-research.md](avatar-research.md) | What could replace or join OpenSpline for a professional HD look: the search of October 2026, the decision, and the plan for the self-hosted track |
 | [voice-pipeline.md](voice-pipeline.md) | Latency work and its measurements, noise and phantom turns, interruptions with an avatar, LiveKit Agents 1.8 behaviour |
 | [lessons-and-gotchas.md](lessons-and-gotchas.md) | Everything that cost time once and should not cost it twice |
 | [history.md](history.md) | What was done, in order, with commits and the reason for each |

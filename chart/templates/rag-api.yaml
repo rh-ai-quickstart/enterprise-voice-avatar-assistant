@@ -82,7 +82,7 @@ spec:
             {{- toYaml .Values.ragApi.resources | nindent 12 }}
           securityContext:
             {{- include "assistant.securityContext" . | nindent 12 }}
-          {{- if eq .Values.voiceAgent.avatarProvider "openspline" }}
+          {{- if has "openspline" (include "assistant.avatarProviders" . | fromJsonArray) }}
           volumeMounts:
             - name: portraits
               mountPath: /portraits

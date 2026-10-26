@@ -1,11 +1,14 @@
 """Avatar faces a person can pick before a voice session, and the voice each face speaks with.
 
-The catalog comes from the chart (AVATAR_FACES, a JSON list of {id, name?, gender?, voice?}).
-Tavus publishes no gender for its faces, so the operator declares it once per face; the voice
-follows from it (TTS_VOICE_FEMALE / TTS_VOICE_MALE) unless the face pins a voice. Names and
-thumbnails missing from the catalog are filled in from the Tavus API when a key is available.
-OpenSpline's faces are portraits from the chart (<id>.jpg in AVATAR_PORTRAIT_DIR), which are also
-their pictures in the picker. The voice agent applies the same catalog when it joins the room.
+Several avatar providers can be offered at once (AVATAR_PROVIDERS, the default first); a provider
+whose key is missing is left out. Each has its own catalog from the chart (AVATAR_FACES_<PROVIDER>,
+a JSON list of {id, name?, gender?, voice?}; AVATAR_FACES for the default provider when it has no
+list of its own). Tavus publishes no gender for its faces, so the operator declares it once per
+face; the voice follows from it (TTS_VOICE_FEMALE / TTS_VOICE_MALE) unless the face pins a voice.
+Names and thumbnails missing from the catalog are filled in from the Tavus API when a key is
+available. OpenSpline's faces are portraits from the chart (<id>.jpg in AVATAR_PORTRAIT_DIR), which
+are also their pictures in the picker. The voice agent applies the same catalog when it joins the
+room, with the provider and face the browser put in its token.
 """
 
 from __future__ import annotations
@@ -30,6 +33,10 @@ TAVUS_API_URL = "https://tavusapi.com/v2"
 GENDERS = ("female", "male")
 MAX_FACES = 4  # the UI offers at most four faces
 FACE_ATTRIBUTE = "avatar_face"  # LiveKit participant attribute carrying the chosen face
+PROVIDER_ATTRIBUTE = "avatar_provider"  # and the one carrying the chosen avatar provider
+# How the UI names each provider, and which ones run in the cluster
+PROVIDER_NAMES = {"openspline": "OpenSpline", "tavus": "Tavus", "simli": "Simli", "hedra": "Hedra"}
+SELF_HOSTED = {"openspline"}
 CACHE_SECONDS = 3600.0
 RETRY_SECONDS = 300.0
 # Posters: one still per face, cut from the Tavus thumbnail video (a full clip of several MB
@@ -88,18 +95,46 @@ def parse(raw: str) -> list[Face]:
 AVATAR_KEYS = {"tavus": "TAVUS_API_KEY", "simli": "SIMLI_API_KEY", "hedra": "HEDRA_API_KEY"}
 
 
+def configured_providers() -> list[str]:
+    """The configured providers in order, the default first (AVATAR_PROVIDERS, else AVATAR_PROVIDER)."""
+    names: list[str] = []
+    for item in (settings.avatar_providers.strip() or settings.avatar_provider or "none").split(","):
+        name = item.strip().lower()
+        if name and name != "none" and name not in names:
+            names.append(name)
+    return names
+
+
 def configured_provider() -> str:
-    return (settings.avatar_provider or "none").strip().lower()
+    """The configured default provider, whether or not its key is there."""
+    configured = configured_providers()
+    return configured[0] if configured else "none"
+
+
+def has_key(provider: str) -> bool:
+    if provider == "tavus":
+        return bool(settings.tavus_api_key)
+    key = AVATAR_KEYS.get(provider)
+    return not key or bool(os.environ.get(key, "").strip())
+
+
+def providers() -> list[str]:
+    """The providers in effect, the default first: configured, with their key."""
+    return [name for name in configured_providers() if has_key(name)]
 
 
 def avatar_provider() -> str:
-    """The avatar in effect: the configured provider, or none when its key is missing. Voice
-    sessions are then audio-only, and no face is offered."""
-    provider = configured_provider()
-    if provider == "tavus":
-        return provider if settings.tavus_api_key else "none"
-    key = AVATAR_KEYS.get(provider)
-    return provider if not key or os.environ.get(key, "").strip() else "none"
+    """The default avatar in effect: the first provider in effect, or none when no provider has its
+    key. Voice sessions are then audio-only, and no face is offered."""
+    offered = providers()
+    return offered[0] if offered else "none"
+
+
+def _faces_setting(provider: str) -> str:
+    own = getattr(settings, f"avatar_faces_{provider}", "") or ""
+    if own.strip():
+        return own
+    return settings.avatar_faces if provider == configured_provider() else "[]"
 
 
 def portrait_path(face_id: str) -> Path | None:
@@ -110,15 +145,17 @@ def portrait_path(face_id: str) -> Path | None:
     return path if path.is_file() else None
 
 
-def catalog() -> list[Face]:
-    """Declared faces: Tavus faces (without a list, the single configured face is offered by id),
-    or OpenSpline faces that have their portrait."""
-    provider = avatar_provider()
+def catalog(provider: str | None = None) -> list[Face]:
+    """Declared faces of a provider in effect (the default one if not named): Tavus faces (without
+    a list, the single configured face is offered by id), or OpenSpline faces that have their portrait."""
+    provider = provider or avatar_provider()
+    if provider not in providers():
+        return []
     if provider == "openspline":
-        return [face for face in parse(settings.avatar_faces) if portrait_path(face.id)]
+        return [face for face in parse(_faces_setting(provider)) if portrait_path(face.id)]
     if provider != "tavus":
         return []
-    faces = parse(settings.avatar_faces)
+    faces = parse(_faces_setting(provider))
     if not faces and settings.tavus_face_id:
         faces = [Face(id=settings.tavus_face_id, name=settings.tavus_face_id)]
     return faces
@@ -134,14 +171,14 @@ def voice_for(face: Face) -> str:
     return settings.tts_voice
 
 
-def resolve(face_id: str | None) -> Face | None:
+def resolve(face_id: str | None, provider: str | None = None) -> Face | None:
     if not face_id:
         return None
-    return next((face for face in catalog() if face.id == face_id), None)
+    return next((face for face in catalog(provider) if face.id == face_id), None)
 
 
-def default_id() -> str | None:
-    faces = catalog()
+def default_id(provider: str | None = None) -> str | None:
+    faces = catalog(provider)
     return faces[0].id if faces else None
 
 
@@ -177,10 +214,12 @@ def _merge(face: Face, detail: dict | None) -> Face:
     return replace(face, name=name, thumbnail_url=thumbnail)
 
 
-def enriched() -> list[Face]:
-    """The catalog with names and thumbnails from Tavus, cached; the plain catalog if Tavus is unreachable."""
-    faces = catalog()
-    if not faces or not settings.tavus_api_key or avatar_provider() != "tavus":
+def enriched(provider: str | None = None) -> list[Face]:
+    """A provider's catalog (the default one's if not named), Tavus faces with names and thumbnails
+    from Tavus, cached; the plain catalog if Tavus is unreachable."""
+    provider = provider or avatar_provider()
+    faces = catalog(provider)
+    if not faces or not settings.tavus_api_key or provider != "tavus":
         return faces
     key = tuple(face.id for face in faces)
     now = time.monotonic()
@@ -262,8 +301,9 @@ def _save_poster(image, target: Path) -> None:
 
 
 def poster(face_id: str) -> bytes | None:
-    """JPEG poster for a face, generated on first use and cached on disk; None when unavailable."""
-    face = next((f for f in enriched() if f.id == face_id), None)
+    """JPEG poster for a face of any provider in effect, generated on first use and cached on disk;
+    None when unavailable."""
+    face = next((f for provider in providers() for f in enriched(provider) if f.id == face_id), None)
     portrait = portrait_path(face_id) if face else None
     if face is None or not (face.thumbnail_url or portrait):
         return None
@@ -300,6 +340,7 @@ def poster(face_id: str) -> bytes | None:
 
 def warm_posters() -> None:
     """Generate every poster once so the first page load does not wait for downloads."""
-    for face in enriched():
-        if face.thumbnail_url or portrait_path(face.id):
-            poster(face.id)
+    for provider in providers():
+        for face in enriched(provider):
+            if face.thumbnail_url or portrait_path(face.id):
+                poster(face.id)

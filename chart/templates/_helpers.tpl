@@ -1,4 +1,18 @@
 {{/*
+The avatars offered in the UI, the default first, as a JSON list (read it with fromJsonArray):
+voiceAgent.avatarProviders, or voiceAgent.avatarProvider alone when that list is empty. "none" is
+left out, so no avatar is an empty list.
+*/}}
+{{- define "assistant.avatarProviders" -}}
+{{- $out := list }}
+{{- range (.Values.voiceAgent.avatarProviders | default (list .Values.voiceAgent.avatarProvider)) }}
+{{- $p := toString . | trim | lower }}
+{{- if and $p (ne $p "none") (not (has $p $out)) }}{{ $out = append $out $p }}{{ end }}
+{{- end }}
+{{- toJson $out }}
+{{- end -}}
+
+{{/*
 Common labels for every resource.
 */}}
 {{- define "assistant.labels" -}}

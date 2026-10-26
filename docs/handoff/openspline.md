@@ -72,14 +72,23 @@ restricted SCC.
   `frontend/src/components/VoicePanel.tsx`).
 - **LiveKit's default encoding:** simulcast with **300 kbps** at 512x512 and 225 kbps at
   360x360. Busy backgrounds (Emily: bookshelves, guitars, curls) came out as a smear.
+- **The fix went too far once.** `b5dd698` sent one 2 Mbps stream with simulcast off. Over
+  TURN on TCP, the lips then lagged the voice (2026-10-26, likely cause; see
+  [status-and-todo.md](status-and-todo.md#avatar-slow-and-out-of-sync-2026-10-26)). Now:
+  1 Mbps with simulcast on, both chart values.
 
 The server container's start command runs a short Python snippet before `serve`. It edits
 the installed `livekit.py` in place:
 - `TrackPublishOptions(source=SOURCE_MICROPHONE)` for audio;
-- `TrackPublishOptions(source=SOURCE_CAMERA, simulcast=False, video_encoding=VideoEncoding(max_bitrate=$OPENSPLINE_VIDEO_BITRATE, max_framerate=25))`
-  for video. The bitrate comes from `openspline.videoBitrate`, 2 Mbps by default.
+- `TrackPublishOptions(source=SOURCE_CAMERA, simulcast=$OPENSPLINE_VIDEO_SIMULCAST, video_encoding=VideoEncoding(max_bitrate=$OPENSPLINE_VIDEO_BITRATE, max_framerate=25))`
+  for video. The values come from `openspline.simulcast` (on) and `openspline.videoBitrate`
+  (1 Mbps), read from the environment when the worker publishes, so changing them needs no new
+  patch.
 
-It prints "publish options patched", or "already patched" on later starts. If the call
+It prints "publish options patched", or "already patched" on later starts. The patch is
+written into the install on the volume, so it outlives the chart that wrote it: a file patched
+by `b5dd698`, with simulcast fixed off, is rewritten and the log says "publish options
+updated". If the call
 changes upstream it prints a warning and leaves the defaults. It works for the volume
 install and for a prebuilt image alike. Bumping `openspline.ref` means checking that the
 patch still matches; the log says whether it did. Ideally upstream fixes both and the

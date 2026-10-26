@@ -14,7 +14,7 @@ import {
 } from "@livekit/components-react";
 import { ConnectionState, LogLevel, ParticipantKind, Track, setLogLevel } from "livekit-client";
 import * as api from "../lib/api";
-import type { AssistantTurn, VoiceFace, VoiceToken } from "../types";
+import type { AssistantTurn, VoiceFace, VoiceFaces, VoiceProvider, VoiceToken } from "../types";
 
 // Open the page with ?debug=1 to get verbose LiveKit client logs (ICE candidates, TURN, reconnects).
 if (new URLSearchParams(window.location.search).has("debug")) setLogLevel(LogLevel.debug);
@@ -60,19 +60,57 @@ const STATE_LABEL: Record<string, string> = {
   disconnected: "Assistant not connected",
 };
 
-const FACE_KEY = "assistant.face"; // the chosen face is remembered in this browser
+// The chosen avatar, and the face chosen for each avatar, are remembered in this browser
+// (assistant.face.<avatar>; before the choice of avatar there was one face, assistant.face)
+const PROVIDER_KEY = "assistant.avatar";
+const FACE_KEY = "assistant.face";
 const MAX_FACES = 4;
 
 function slug(name: string) {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-function readStoredFace(): string {
+function readStored(key: string): string {
   try {
-    return localStorage.getItem(FACE_KEY) ?? "";
+    return localStorage.getItem(key) ?? "";
   } catch {
     return "";
   }
+}
+
+function store(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** The avatars offered; an older RAG API sends only the default one, with its faces at the top level. */
+export function offeredProviders(result: VoiceFaces): VoiceProvider[] {
+  if (result.providers) return result.providers;
+  if (result.provider === "none") return [];
+  return [
+    {
+      id: result.provider,
+      name: result.provider,
+      self_hosted: result.provider === "openspline",
+      default: result.default,
+      faces: result.faces,
+    },
+  ];
+}
+
+/** The wanted avatar when it is offered, otherwise the default (the first). */
+export function pickProvider(providers: VoiceProvider[], wanted: string): VoiceProvider | null {
+  return providers.find((p) => p.id === wanted) ?? providers[0] ?? null;
+}
+
+/** The wanted face when the avatar offers it, otherwise the avatar's default face. */
+export function pickFace(provider: VoiceProvider | null, wanted: string): string {
+  if (!provider) return "";
+  const faces = provider.faces.slice(0, MAX_FACES);
+  return faces.some((f) => f.id === wanted) ? wanted : (provider.default ?? faces[0]?.id ?? "");
 }
 
 export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChange }: Props) {
@@ -83,36 +121,38 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Faces the person can choose from; the agent picks the matching voice when it joins the room.
-  const [faces, setFaces] = useState<VoiceFace[]>([]);
-  // OpenSpline renders a square video; other providers wide ones
-  const [defaultAspect, setDefaultAspect] = useState(WIDE);
-  const [faceId, setFaceId] = useState<string>(readStoredFace);
+  // Avatars and their faces the person can choose from; the agent starts the chosen avatar and
+  // picks the voice that matches the face when it joins the room.
+  const [providers, setProviders] = useState<VoiceProvider[]>([]);
+  const [providerId, setProviderId] = useState<string>(() => readStored(PROVIDER_KEY));
+  const [faceId, setFaceId] = useState("");
   useEffect(() => {
     let cancelled = false;
     api
       .voiceFaces()
       .then((result) => {
-        if (cancelled) return;
-        const offered = result.faces.slice(0, MAX_FACES);
-        setFaces(offered);
-        setDefaultAspect(result.provider === "openspline" ? 1 : WIDE);
-        // keep the remembered face when it is still offered; otherwise fall back to the default
-        setFaceId((current) => (offered.some((f) => f.id === current) ? current : (result.default ?? "")));
+        if (!cancelled) setProviders(offeredProviders(result));
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, []);
-  useEffect(() => {
-    try {
-      if (faceId) localStorage.setItem(FACE_KEY, faceId);
-    } catch {
-      /* storage unavailable */
-    }
-  }, [faceId]);
+  const provider = pickProvider(providers, providerId);
+  const faces = provider ? provider.faces.slice(0, MAX_FACES) : [];
   const face = faces.find((f) => f.id === faceId) ?? null;
+  // A new avatar brings back the face last chosen for it, or its default face
+  useEffect(() => {
+    if (provider) setFaceId(pickFace(provider, readStored(`${FACE_KEY}.${provider.id}`) || readStored(FACE_KEY)));
+  }, [provider]);
+  useEffect(() => {
+    if (provider) store(PROVIDER_KEY, provider.id);
+  }, [provider]);
+  useEffect(() => {
+    if (provider && face) store(`${FACE_KEY}.${provider.id}`, face.id);
+  }, [provider, face]);
+  // OpenSpline renders a square video; the other avatars wide ones
+  const defaultAspect = provider?.id === "openspline" ? 1 : WIDE;
 
   const start = async () => {
     setStarting(true);
@@ -122,7 +162,8 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
         session_id: sessionId,
         identity: `user-${slug(userName) || "guest"}`,
         name: userName.trim() || undefined,
-        face_id: faceId || undefined,
+        face_id: face?.id,
+        provider: provider?.id,
       });
       setConnection(token);
     } catch (e) {
@@ -140,6 +181,25 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
             <span aria-hidden="true">🎙</span> {starting ? "Starting…" : "Start voice conversation"}
           </button>
         </div>
+        {providers.length > 1 && (
+          <div className="avatar-picker" role="radiogroup" aria-label="Avatar">
+            <span className="face-picker-label">Avatar</span>
+            {providers.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="radio"
+                aria-checked={p.id === provider?.id}
+                className={`avatar-option${p.id === provider?.id ? " selected" : ""}`}
+                onClick={() => setProviderId(p.id)}
+                title={p.self_hosted ? `${p.name} runs in this cluster` : `${p.name} is a cloud service`}
+              >
+                <span className="avatar-option-name">{p.name}</span>
+                <span className="avatar-option-hosting">{p.self_hosted ? "Self-hosted" : "Cloud"}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {faces.length > 1 && (
           <div className="face-picker" role="radiogroup" aria-label="Avatar face">
             <span className="face-picker-label">Avatar face</span>
@@ -181,7 +241,7 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
       <VoiceStage
         onAssistantTurn={onAssistantTurn}
         error={error}
-        faceName={face?.name ?? null}
+        faceName={face ? (providers.length > 1 && provider ? `${provider.name} · ${face.name}` : face.name) : null}
         defaultAspect={defaultAspect}
       />
       <RoomAudioRenderer />

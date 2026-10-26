@@ -28,10 +28,17 @@ export function info() {
   return request<Info>("/v1/info");
 }
 
-export function voiceToken(params: { session_id: string; identity: string; name?: string; face_id?: string }) {
+export function voiceToken(params: {
+  session_id: string;
+  identity: string;
+  name?: string;
+  face_id?: string;
+  provider?: string;
+}) {
   const query = new URLSearchParams({ session_id: params.session_id, identity: params.identity });
   if (params.name) query.set("name", params.name);
   if (params.face_id) query.set("face_id", params.face_id);
+  if (params.provider) query.set("provider", params.provider);
   return request<VoiceToken>(`/v1/voice/token?${query.toString()}`);
 }
 

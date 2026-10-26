@@ -325,6 +325,7 @@ class VoiceTokenResponse(BaseModel):
     identity: str
     session_id: str
     face_id: str | None = None
+    provider: str | None = None
 
 
 class VoiceFace(BaseModel):
@@ -336,10 +337,20 @@ class VoiceFace(BaseModel):
     poster_url: str | None = None  # still image served by this API, relative to its base URL
 
 
+class VoiceProvider(BaseModel):
+    id: str  # openspline, tavus, ...
+    name: str  # as the UI shows it
+    self_hosted: bool  # runs in the cluster (no data leaves it)
+    default: str | None = None  # its default face
+    faces: list[VoiceFace]
+
+
 class VoiceFacesResponse(BaseModel):
+    # The default provider and its faces; providers lists every avatar offered, the default first
     provider: str
     default: str | None = None
     faces: list[VoiceFace]
+    providers: list[VoiceProvider] = []
 
 
 class Notification(BaseModel):

@@ -18,6 +18,7 @@ Everything here cost time at least once. Each entry says what happens and what t
   expired token. Log in again with the export, or copy the file over.
 - **BSD `sed -i` needs an argument** (`sed -i '' ...`); GNU sed does not. Prefer Python for
   in-place edits in scripts that run on both.
+- **A new Mac has no `uv`.** The Python checks in CLAUDE.md need it: `brew install uv`.
 - **macOS's `openssl` is LibreSSL.** Setup wants OpenSSL, so step 1 installs `openssl@3` with
   Homebrew on a new Mac. That is expected.
 
@@ -70,6 +71,10 @@ Everything here cost time at least once. Each entry says what happens and what t
 - **PVCs survive uninstall** with `helm.sh/resource-policy: keep`. That is wanted for data
   and for the OpenSpline install, but remember it when "starting fresh".
 - **Helm waits only for the hook Job**, not the Deployments. `deploy.sh` has its own waits.
+- **A patch written into a volume outlives the chart that wrote it.** OpenSpline's publish
+  patch edits the install on `openspline-data`, and an upgraded chart finds the old patch
+  there. Make such patches recognise their earlier versions, and read tunable values from the
+  environment instead of baking them into the file.
 
 ## LiveKit Agents (voice agent)
 - **Preemptive generation runs `llm_node` before `on_user_turn_completed`**, and
@@ -115,6 +120,13 @@ Everything here cost time at least once. Each entry says what happens and what t
   whatever the GPU.
 - **High quality on one H200 barely keeps up** (1.07x). Do not make it the default on a
   single GPU.
+- **Keep simulcast on for the avatar video.** With one stream, the LiveKit server has nothing
+  lighter to send a slow viewer. On TMM every browser comes through TURN over TCP, and after
+  `b5dd698` (2 Mbps, simulcast off) the lips lagged the voice while OpenSpline itself kept up.
+  That is the likely cause; confirm it after the fix is deployed.
+- **When the avatar seems slow, measure each hop before guessing.** `playback_latency` in the
+  voice agent log, `denoise per step` in OpenSpline's log, and `"connectionType"` in LiveKit's
+  log told apart the GPU, the agent and the network within minutes.
 
 ## Process
 - **Rebase after every image build.** A push touching `services/` or `frontend/` triggers a

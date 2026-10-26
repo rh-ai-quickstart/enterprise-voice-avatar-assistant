@@ -71,7 +71,12 @@ def test_without_its_key_tavus_is_off(monkeypatch):
     assert faces.configured_provider() == "tavus" and faces.avatar_provider() == "none"
     assert faces.catalog() == []
     with TestClient(app) as client:
-        assert client.get("/v1/voice/faces").json() == {"provider": "none", "default": None, "faces": []}
+        assert client.get("/v1/voice/faces").json() == {
+            "provider": "none",
+            "default": None,
+            "faces": [],
+            "providers": [],
+        }
         voice = client.get("/v1/info").json()["voice"]
         assert voice["avatar_provider"] == "none" and voice["faces"] == 0
         plain = client.get("/v1/voice/token", params={"session_id": "abc", "identity": "mo"})
@@ -262,3 +267,87 @@ def test_openspline_faces_are_the_portraits_of_the_chart(monkeypatch, tmp_path):
             "/v1/voice/faces/steve/poster",
         ]
         assert client.get("/v1/voice/faces/meera/poster").status_code == 200
+
+
+def _both(monkeypatch, tmp_path, tavus_key="k"):
+    """OpenSpline (the default) and Tavus offered together, each with its own faces."""
+    from PIL import Image
+
+    portraits = tmp_path / "portraits"
+    portraits.mkdir()
+    Image.new("RGB", (512, 512), "gray").save(portraits / "meera.jpg")
+    monkeypatch.setattr(settings, "avatar_provider", "none")
+    monkeypatch.setattr(settings, "avatar_providers", "openspline,tavus")
+    monkeypatch.setattr(settings, "avatar_portrait_dir", str(portraits))
+    monkeypatch.setattr(settings, "avatar_faces", "[]")
+    monkeypatch.setattr(
+        settings,
+        "avatar_faces_openspline",
+        json.dumps([{"id": "meera", "name": "Meera", "gender": "female"}]),
+    )
+    monkeypatch.setattr(settings, "avatar_faces_tavus", CATALOG)
+    monkeypatch.setattr(settings, "tavus_api_key", tavus_key)
+    monkeypatch.setattr(faces, "_tavus_faces", lambda face_ids, key: {})
+    monkeypatch.setattr(faces, "POSTER_DIR", tmp_path / "posters")
+    monkeypatch.setattr(settings, "tts_voice_female", "af_bella")
+    faces.reset_cache()
+
+
+def test_several_avatars_each_with_its_faces(monkeypatch, tmp_path):
+    _both(monkeypatch, tmp_path)
+    assert faces.providers() == ["openspline", "tavus"] and faces.avatar_provider() == "openspline"
+    assert [f.id for f in faces.catalog()] == ["meera"]
+    assert [f.id for f in faces.catalog("tavus")] == ["r67d1c9cac37", "r9d3aaaa1111", "rpinned"]
+    assert faces.resolve("meera", "tavus") is None and faces.default_id("tavus") == "r67d1c9cac37"
+    with TestClient(app) as client:
+        body = client.get("/v1/voice/faces").json()
+        # the default provider's faces at the top level, as before; every provider in providers
+        assert body["provider"] == "openspline" and [f["id"] for f in body["faces"]] == ["meera"]
+        assert [(p["id"], p["name"], p["self_hosted"], p["default"]) for p in body["providers"]] == [
+            ("openspline", "OpenSpline", True, "meera"),
+            ("tavus", "Tavus", False, "r67d1c9cac37"),
+        ]
+        assert len(body["providers"][1]["faces"]) == 3
+        assert client.get("/v1/info").json()["voice"]["avatar_providers"] == ["openspline", "tavus"]
+        # posters of every provider's faces are served
+        assert client.get("/v1/voice/faces/meera/poster").status_code == 200
+
+
+def test_the_token_carries_the_chosen_avatar(monkeypatch, tmp_path):
+    _both(monkeypatch, tmp_path)
+    with TestClient(app) as client:
+        params = {"session_id": "abc", "identity": "mo"}
+        token = client.get(
+            "/v1/voice/token", params={**params, "provider": "Tavus", "face_id": "r9d3aaaa1111"}
+        ).json()
+        assert token["provider"] == "tavus" and token["face_id"] == "r9d3aaaa1111"
+        assert _claims(token["token"])["attributes"] == {
+            "avatar_provider": "tavus",
+            "avatar_face": "r9d3aaaa1111",
+        }
+        # a face of another provider, or a provider not offered, is refused
+        assert (
+            client.get(
+                "/v1/voice/token", params={**params, "provider": "tavus", "face_id": "meera"}
+            ).status_code
+            == 400
+        )
+        assert client.get("/v1/voice/token", params={**params, "provider": "simli"}).status_code == 400
+        # no provider: the default's faces apply, and the agent takes the default
+        plain = client.get("/v1/voice/token", params={**params, "face_id": "meera"}).json()
+        assert plain["provider"] is None and _claims(plain["token"])["attributes"] == {"avatar_face": "meera"}
+
+
+def test_a_provider_without_its_key_is_not_offered(monkeypatch, tmp_path):
+    _both(monkeypatch, tmp_path, tavus_key=None)
+    assert faces.configured_providers() == ["openspline", "tavus"] and faces.providers() == ["openspline"]
+    assert faces.catalog("tavus") == []
+    with TestClient(app) as client:
+        assert [p["id"] for p in client.get("/v1/voice/faces").json()["providers"]] == ["openspline"]
+        assert (
+            client.get("/v1/voice/token", params={"session_id": "abc", "provider": "tavus"}).status_code
+            == 400
+        )
+    # the default without its key: the next provider becomes the default
+    monkeypatch.setattr(settings, "avatar_providers", "tavus,openspline")
+    assert faces.avatar_provider() == "openspline" and faces.default_id() == "meera"

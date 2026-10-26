@@ -236,12 +236,15 @@ async def entrypoint(ctx: JobContext) -> None:
     session_id = helpers.session_id_from_room(ctx.room.name)
     user_id = helpers.user_id_from_identity(participant.identity if participant else None)
     user_name = helpers.display_name(participant)
-    face = faces.select(faces.requested_face(participant))
+    # The avatar and face the browser chose (the defaults when it chose none, or one not offered)
+    provider = avatars.choose(faces.requested_provider(participant))
+    face = faces.select(faces.requested_face(participant), provider)
     log.info(
-        "joined room %s (session %s) for participant %s; face=%s voice=%s",
+        "joined room %s (session %s) for participant %s; avatar=%s face=%s voice=%s",
         ctx.room.name,
         session_id,
         user_id,
+        provider,
         face.id if face else "configured default",
         faces.voice_for(face),
     )
@@ -252,7 +255,7 @@ async def entrypoint(ctx: JobContext) -> None:
     }
     if ctx.proc.userdata.get("turn_detector"):
         turn_handling["turn_detection"] = build_turn_detector()
-    if avatars.active():
+    if avatars.active(provider):
         # An avatar's stream cannot pause, so LiveKit cannot hold the answer at a sound and resume
         # it when no words follow (resume_false_interruption): any noise would cut the answer off.
         # Words interrupt instead, and noise never becomes words (Assistant.stt_node).
@@ -269,22 +272,22 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     try:
         avatar = await asyncio.wait_for(
-            avatars.start(session, ctx.room, face_id=face.id if face else None),
+            avatars.start(session, ctx.room, face_id=face.id if face else None, name=provider),
             timeout=settings.avatar_start_timeout_seconds,
         )
     except TimeoutError:
         log.error(
             "avatar provider %s did not start within %.0fs; continuing audio-only",
-            avatars.provider(),
+            provider,
             settings.avatar_start_timeout_seconds,
         )
         avatar = None
     except Exception:
-        log.exception("avatar provider %s failed to start; continuing audio-only", avatars.provider())
+        log.exception("avatar provider %s failed to start; continuing audio-only", provider)
         avatar = None
 
     async def stop_avatar() -> None:
-        await avatars.stop(avatar)
+        await avatars.stop(avatar, provider)
 
     ctx.add_shutdown_callback(stop_avatar)
 

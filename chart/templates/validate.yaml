@@ -32,7 +32,13 @@ cannot reach a model. Renders nothing.
 {{- if not (has .Values.voiceAgent.avatarProvider $providers) }}
 {{- fail (printf "voiceAgent.avatarProvider is %q; use one of %s" .Values.voiceAgent.avatarProvider (join ", " $providers)) }}
 {{- end }}
-{{- if eq .Values.voiceAgent.avatarProvider "openspline" }}
+{{- range $p := .Values.voiceAgent.avatarProviders | default list }}
+{{- if not (has (toString $p) $providers) }}
+{{- fail (printf "voiceAgent.avatarProviders lists %q; use some of %s" (toString $p) (join ", " $providers)) }}
+{{- end }}
+{{- end }}
+{{- $avatars := include "assistant.avatarProviders" . | fromJsonArray }}
+{{- if has "openspline" $avatars }}
 {{- if gt (len .Values.openspline.faces) 4 }}
 {{- fail (printf "openspline.faces lists %d faces; the UI offers at most 4" (len .Values.openspline.faces)) }}
 {{- end }}
@@ -45,7 +51,7 @@ cannot reach a model. Renders nothing.
 {{- end }}
 {{- end }}
 {{- end }}
-{{- if eq .Values.voiceAgent.avatarProvider "openspline" }}
+{{- if has "openspline" $avatars }}
 {{- $q := .Values.openspline.quality }}
 {{- if not (has $q (list "low" "high")) }}
 {{- fail (printf "openspline.quality is %q; use low (one GPU per session) or high (two)" $q) }}

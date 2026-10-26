@@ -87,10 +87,12 @@ def _configuration(name: str) -> tuple[bool, dict[str, Any], list[str]]:
         }
         return settings.google_docs_enabled, config, missing
     if name == "avatar":
-        provider = settings.avatar_provider
-        key = AVATAR_KEYS.get(provider)
-        missing = [key] if key and not _env(key) else []
-        return provider != "none", {"provider": provider, "faces": [f.id for f in faces.catalog()]}, missing
+        configured = faces.configured_providers()
+        missing = [k for p in configured if (k := AVATAR_KEYS.get(p)) and not _env(k)]
+        config: dict[str, Any] = {"providers": configured, "default": faces.avatar_provider()}
+        for provider in configured:
+            config[f"{provider}_faces"] = [f.id for f in faces.catalog(provider)]
+        return bool(configured), config, missing
     if name == "n8n":
         return True, {"url": settings.n8n_url}, [] if _env("N8N_API_KEY") else ["N8N_API_KEY"]
     model = _models()[name]
@@ -230,7 +232,18 @@ def _test_google_docs() -> list[dict[str, Any]]:
 
 
 def _test_avatar() -> list[dict[str, Any]]:
-    provider = settings.avatar_provider
+    """Every configured avatar provider; with several, each check names its provider."""
+    configured = faces.configured_providers()
+    if len(configured) < 2:
+        return _test_avatar_provider(configured[0] if configured else "none")
+    return [
+        {**check, "name": f"{provider}: {check['name']}"}
+        for provider in configured
+        for check in _test_avatar_provider(provider)
+    ]
+
+
+def _test_avatar_provider(provider: str) -> list[dict[str, Any]]:
     if provider == "openspline":
         return _test_openspline()
     key = AVATAR_KEYS.get(provider)
@@ -240,7 +253,9 @@ def _test_avatar() -> list[dict[str, Any]]:
         return [_check("key", False, f"{key} is empty")]
     if provider != "tavus":
         return [_check("key", True, f"{key} is set (no live test for {provider})")]
-    ids = [f.id for f in faces.catalog()] or ([settings.tavus_face_id] if settings.tavus_face_id else [])
+    ids = [f.id for f in faces.catalog("tavus")] or (
+        [settings.tavus_face_id] if settings.tavus_face_id else []
+    )
     if not ids:
         return [_check("faces", False, "no face configured (voiceAgent.faces or TAVUS_FACE_ID)")]
     found = faces._tavus_faces(ids, _env(key))

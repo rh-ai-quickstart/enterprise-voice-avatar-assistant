@@ -134,7 +134,9 @@ def test_google_docs_test_needs_a_writable_folder(monkeypatch):
 def test_avatar_test_looks_up_the_faces(monkeypatch):
     monkeypatch.setattr(settings, "avatar_provider", "tavus")
     monkeypatch.setenv("TAVUS_API_KEY", "k")
-    monkeypatch.setattr(faces, "catalog", lambda: [SimpleNamespace(id="r1"), SimpleNamespace(id="r2")])
+    monkeypatch.setattr(
+        faces, "catalog", lambda provider=None: [SimpleNamespace(id="r1"), SimpleNamespace(id="r2")]
+    )
     monkeypatch.setattr(faces, "_tavus_faces", lambda ids, key: {"r1": {"face_name": "Jackie"}})
     checks = integrations._test_avatar()
     assert [(c["name"], c["ok"], c["detail"]) for c in checks] == [
@@ -193,3 +195,22 @@ def test_a_test_is_recorded_and_errors_become_failed_checks(history, monkeypatch
     result = integrations.test("slack", "Dana")
     assert result["ok"] is False and "ConnectionError" in result["checks"][0]["detail"]
     assert recorded[0][0] == "integration.test" and recorded[0][2] == "error"
+
+
+def test_avatar_status_and_test_cover_every_provider(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_providers", "openspline,tavus")
+    monkeypatch.delenv("TAVUS_API_KEY", raising=False)
+    monkeypatch.setattr(faces, "catalog", lambda provider=None: [SimpleNamespace(id=f"{provider}-1")])
+    enabled, config, missing = integrations._configuration("avatar")
+    assert enabled and missing == ["TAVUS_API_KEY"]
+    assert config["providers"] == ["openspline", "tavus"] and config["openspline_faces"] == ["openspline-1"]
+    loaded = {"workers": [{"id": "gpu-0", "ready": True, "occupied": False}]}
+    monkeypatch.setattr(
+        integrations, "_http", lambda: FakeHttp({"http://openspline:7860/readyz": (200, loaded)})
+    )
+    checks = integrations._test_avatar()
+    assert [(c["name"], c["ok"]) for c in checks] == [
+        ("openspline: service", True),
+        ("openspline: GPU worker", True),
+        ("tavus: key", False),
+    ]

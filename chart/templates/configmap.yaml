@@ -45,11 +45,17 @@ data:
   ADMIN_SESSION_HOURS: {{ .Values.admin.sessionHours | quote }}
   # OpenShift service CA, trusted for in-cluster model endpoints served over TLS
   SERVICE_CA_FILE: "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
-  AVATAR_PROVIDER: {{ .Values.voiceAgent.avatarProvider | quote }}
-  # Faces offered in the UI; the RAG API serves the list and the voice agent applies the choice
-  {{- $faces := ternary .Values.openspline.faces .Values.voiceAgent.faces (eq .Values.voiceAgent.avatarProvider "openspline") }}
+  # The avatars offered in the UI, the default first (a provider without its key is left out), and
+  # the faces of each; the RAG API serves the lists and the voice agent applies the choice
+  {{- $avatars := include "assistant.avatarProviders" . | fromJsonArray }}
+  {{- $default := first $avatars | default "none" }}
+  AVATAR_PROVIDERS: {{ join "," $avatars | quote }}
+  AVATAR_PROVIDER: {{ $default | quote }}
+  AVATAR_FACES_OPENSPLINE: {{ .Values.openspline.faces | default list | toJson | quote }}
+  AVATAR_FACES_TAVUS: {{ .Values.voiceAgent.faces | default list | toJson | quote }}
+  {{- $faces := ternary .Values.openspline.faces .Values.voiceAgent.faces (eq $default "openspline") }}
   AVATAR_FACES: {{ $faces | default list | toJson | quote }}
-  # The self-hosted avatar worker (avatarProvider openspline); the RAG API tests it, the voice agent uses it
+  # The self-hosted avatar worker (openspline among the avatars); the RAG API tests it, the voice agent uses it
   OPENSPLINE_URL: "http://openspline:7860"
   # OpenSpline's portraits, one <face id>.jpg each (ConfigMap avatar-portraits)
   AVATAR_PORTRAIT_DIR: "/portraits"

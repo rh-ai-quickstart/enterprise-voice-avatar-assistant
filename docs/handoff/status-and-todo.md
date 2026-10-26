@@ -1,9 +1,10 @@
 # Status and to-do list
 
-As of 2026-10-26 (Mohamed's local time is UTC+4). The last code commit on `main` is
-`77a3215`. The images are promoted to `sha-571acbf` in `chart/values-demo-cluster.yaml`. The
-later commits (`b5dd698`, `193c128`, `d943998`, `77a3215`) change only the chart, scripts and
-docs, so they need no new image.
+As of 2026-10-26 evening (Mohamed's local time is UTC+4). The latest work on `main` is the
+avatar switch (several avatars in the UI) with the OpenSpline sync fix, described below. It
+changes the RAG API, the voice agent and the frontend, so CI builds new images and commits
+their promotion to `main`; deploying it takes `git pull`, `scripts/setup.sh --step 2` and
+`--step 6`. Until then the cluster runs images `sha-571acbf` with the chart of `b5dd698`.
 
 ## Where it runs
 
@@ -17,7 +18,7 @@ Mohamed is admin of that one project only, so setup takes the namespace path: a 
 | Embeddings | Models-as-a-Service `bge-m3` | |
 | Speech to text | Whisper large-v3-turbo, InferenceService in the project | On a MIG slice `nvidia.com/mig-3g.71gb` from the booked queue `reserved` |
 | Text to speech | Kokoro (`kokoro-fastapi-gpu`) | On the second MIG 3g.71gb slice. 45 to 115 ms per sentence |
-| Avatar | OpenSpline, low quality | On one whole H200 (`nvidia.com/gpu: 1`). Faces Meera, Lisa, Steve and Emily |
+| Avatar | OpenSpline, low quality | On one whole H200 (`nvidia.com/gpu: 1`). Faces Meera, Lisa, Steve and Emily. After the next deploy, Tavus is offered next to it in the UI (step 2 answered `openspline,tavus`) |
 | Everything else | Default Kueue queue (CPU) | Frontend, RAG API, ingestion, voice agent, LiveKit, n8n, PostgreSQL, Qdrant, the object store (VersityGW) |
 | Integrations | On | Slack, Google Docs archival, the admin portal |
 
@@ -48,20 +49,36 @@ state from the cluster and ran steps 1, 2, 3, 5, 7 and 9 without redeploying (de
 Step 2 came to the same layout as the running release: OpenSpline low on the whole H200,
 Whisper and Kokoro on the two MIG slices. Nothing in the browser was tested that night.
 
+## Avatar slow and out of sync (2026-10-26)
+
+Mohamed reported the avatar very slow, its lips no longer following the voice. What was found,
+read-only, on the cluster:
+- **The server side keeps up.** The voice agent hands audio to OpenSpline within 0.28 to
+  0.39 s, and end of speech to first audio is still 1.5 to 1.8 s. OpenSpline renders each
+  0.96 s chunk in about 0.18 s (four denoising steps of 0.03 s), on schedule.
+- **What changed:** Helm revision 10 (2026-10-24 23:30 local) deployed `b5dd698`, which sends
+  the video as one 2 Mbps stream with simulcast off. The sync was confirmed working at
+  revision 8 (23:03), with LiveKit's 300 kbps simulcast.
+- **Every browser session reaches LiveKit through TURN** (`"connectionType": "turn"` in the
+  LiveKit log), over TLS on TCP 443, since UDP is not possible on TMM. TCP can only queue late
+  video, and a single stream gives the server nothing lighter to send.
+- **Likely cause, not yet confirmed:** the 2 Mbps single stream outruns the relayed path, so
+  the video falls behind the audio. The fix: 1 Mbps with simulcast on
+  (`openspline.videoBitrate`, `openspline.simulcast`). The patch on OpenSpline's volume reads
+  simulcast from the environment now and rewrites the old patch, which fixed it off.
+
 ## Last confirmed deploy
 
-The voice agent ran `sha-5e063c2` after `scripts/setup.sh --step 6` at 23:03 local. Every
-connectivity check passed. The browser was confirmed working for:
-- the OpenSpline video;
+The voice agent ran `sha-5e063c2` after `scripts/setup.sh --step 6` at 23:03 local on
+2026-10-24 (Helm revision 8). Every connectivity check passed. The browser was confirmed
+working for:
+- the OpenSpline video, in sync;
 - the four faces in the picker;
 - answers no longer cut off by noise.
 
-Pushed afterwards, not yet confirmed in the browser (they need `git pull` and `--step 6`
-if Mohamed has not run it since; the run on 2026-10-25 skipped step 6, so it did not deploy
-them):
-- `571acbf`: square avatar frame; the greeting appears once in the chat;
-- `b5dd698`: OpenSpline video at 2 Mbps in one stream (Emily was a smear at 300 kbps);
-- `193c128`: OpenSpline quality chosen from the GPUs. It stays low with today's booking.
+Revision 10 (23:30) deployed images `sha-571acbf` (square avatar frame; the greeting once in the
+chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. `193c128`
+(quality from the GPUs) is not deployed; it changes nothing with today's booking.
 
 ## Measured
 
@@ -78,18 +95,31 @@ them):
 
 ## To do, in priority order
 
-### 1. Confirm the last three pushes in the browser
-- **Run:** `git pull`, then `scripts/setup.sh --step 6`, then hard-refresh the page.
+### 1. Deploy the avatar switch and confirm the sync fix
+- **Wait** for CI to build the images and commit their promotion to `main`.
+- **Run:** `git pull`, then `scripts/setup.sh --step 2` (answer `openspline,tavus`), then
+  `--step 6`, then hard-refresh the page. Step 6 restarts the OpenSpline worker; its log
+  should say "publish options updated: simulcast from OPENSPLINE_VIDEO_SIMULCAST".
 - **Check:**
-  - the frame is square around the avatar;
-  - the greeting appears once, even after ending and restarting voice;
-  - Emily is sharp, no longer a smear;
-  - a long answer ("What's in the IT service catalog?") plays to the end;
-  - saying "wait, I meant laptops" during an answer still interrupts it.
+  - the lips follow the voice again with OpenSpline; if not, read the troubleshooting entry
+    on lag (`docs/troubleshooting.md`) and try a lower `openspline.videoBitrate`;
+  - the Avatar switch shows OpenSpline and Tavus, each with its faces, and the choice is
+    remembered after a reload;
+  - a Tavus session works (the free plan has 25 minutes a month and one stream);
+  - Emily is still sharp at 1 Mbps;
+  - the frame is square for OpenSpline and wide for Tavus;
+  - the greeting appears once, a long answer plays to the end, and "wait, I meant laptops"
+    still interrupts.
 - **If anything cuts off:** read the voice agent log (runbook in
-  [setup-and-deploy.md](setup-and-deploy.md)).
+  [setup-and-deploy.md](setup-and-deploy.md)); each session logs `avatar=<provider>`.
 
-### 2. Sharper portraits (waiting on Mohamed)
+### 2. A self-hosted HD avatar (research track)
+Mohamed wants professional, high-resolution avatars, self-hosted first. No open model renders
+HD in real time on one H200 yet. The plan, the candidates and the sources are in
+[avatar-research.md](avatar-research.md). It needs HD presenter footage and another whole H200,
+both Mohamed's to provide.
+
+### 3. Sharper portraits (waiting on Mohamed)
 The four faces are single frames of OpenSpline's 240x240 example GIFs, enlarged to 512x512.
 That is the main reason the avatar looks soft. OpenSpline renders exactly what it gets.
 
@@ -115,7 +145,7 @@ Processing, once the files are on the Mac:
 - New people instead of the four: edit `openspline.faces` in `chart/values.yaml` (id, name,
   gender). There are four at most, and the first is the default.
 
-### 3. Measure high quality on a GPU pair
+### 4. Measure high quality on a GPU pair
 `193c128` makes setup choose high quality when two whole GPUs are free next to the models
 and Kokoro keeps its slice. The pair is not measured yet.
 - Book a second whole H200, then run `scripts/setup.sh --step 2`. It should report
@@ -128,7 +158,13 @@ and Kokoro keeps its slice. The pair is not measured yet.
 - Try it in the browser. The high weights (Model_Pro, VAE_Wan) are already on the volume
   `openspline-data`, downloaded for the single-GPU benchmark.
 
-### 4. Smaller follow-ups
+### 5. Smaller follow-ups
+- **Hedra is gone from LiveKit Agents** (removed 2026-09-02). Drop it from
+  `services/voice-agent/app/avatars.py`, the RAG API's `AVATAR_KEYS` and the chart's
+  `validate.yaml`.
+- **Beyond Presence as a hosted third avatar**, if one is wanted quickly (see
+  [avatar-research.md](avatar-research.md)): `livekit-plugins-bey` needs
+  `livekit-agents>=1.8.9`, so the voice agent's lock moves from 1.8.0.
 - **Setup status after a profile change.** The status board shows step 6 as done even after
   step 2 changed the profile (for example a new avatar). It should say "profile changed: run
   --step 6". Compare a hash of `values-object.json` saved at the last step 6.

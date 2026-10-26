@@ -146,9 +146,9 @@ Decided from the GPUs found, without a prompt:
 
 Then the one question of the step, the avatar video: `tavus` (Tavus cloud, its key in step
 5), `openspline` (self-hosted: OpenSpline on a GPU of the cluster, sharing a time-sliced card
-with the models on this path) or `none` (audio only). `AVATAR_PROVIDER` in the environment
-answers it, `--yes` takes the suggestion (`tavus` here), and a later `--step 2` then
-`--step 6` switches.
+with the models on this path), both (`openspline,tavus`: the UI offers each, the first
+preselected) or `none` (audio only). `AVATAR_PROVIDER` in the environment answers it, `--yes`
+takes the suggestion (`tavus` here), and a later `--step 2` then `--step 6` switches.
 
 The result is `~/.assistant-setup/values-object.json`. The values file in git stays
 cluster-neutral: no domain, no endpoint, no key.
@@ -195,7 +195,7 @@ are created or refreshed with `scripts/create-secrets.sh`.
 | Slack channels (5c) | none, normally | Lists the channels, creates the five missing ones and joins them (scopes `channels:manage` and `channels:join` from the manifest). An app installed with fewer scopes gets the instruction and a confirmation instead |
 | Slack signing secret (5d) | Basic Information > App Credentials: show and paste the Signing Secret | Checks its form (32 hexadecimal characters). n8n verifies every click on an approval card with it; without it the clicks are refused and requests are approved in the admin portal only |
 | Slack request URL (5e) | For an app created from this manifest: none. For a reused app: set Interactivity & Shortcuts > Request URL to `https://<n8n host>/webhook/slack-interactions` | Asks which case it is; remembers the host it was confirmed for, so a re-run on the same cluster does not ask again |
-| Tavus (5f) | Create an API key (only when step 2 chose `tavus`) | Calls the Tavus API with it; a rejected key is asked again. `Skip` leaves the avatar off: voice sessions are audio-only with the default voice, and no face is offered |
+| Tavus (5f) | Create an API key (only when step 2 chose `tavus`, alone or with OpenSpline) | Calls the Tavus API with it; a rejected key is asked again. `Skip` leaves Tavus out of the UI: with OpenSpline chosen too, the UI offers OpenSpline only; otherwise voice sessions are audio-only with the default voice, and no face is offered |
 | Google key (5g, 5h) | Enable the Drive API, create a service account and a JSON key, paste the file's content (finish with a line containing only `}`; a path to the file also works) | Validates the JSON, then obtains an access token with it; a revoked key or disabled account is asked again |
 | Google folder (5i) | Share a Drive folder with the service account's e-mail as Editor, paste the folder's URL or id | Reads the folder through the Drive API as the service account and checks it can add files; an unshared folder or a wrong id is asked again |
 | Remote model keys (profile `remote` only) | none | `LLM_API_KEY`, `STT_API_KEY`, `EMBEDDINGS_API_KEY` |
@@ -213,8 +213,8 @@ Every integration is optional. The step ends by saying which ones step 6 turns o
 `integrations.slack.enabled` follows the Slack bot token, `integrations.googleDocs.enabled`
 the service account key and the folder together (set `SLACK_ENABLED` or `GOOGLE_DOCS_ENABLED`
 to `true` or `false` in the environment to decide otherwise), and the avatar the choice of
-step 2: OpenSpline needs no key, while Tavus without its key makes step 6 pass
-`voiceAgent.avatarProvider=none`. Requests are always approved in
+step 2: OpenSpline needs no key, while Tavus alone without its key makes step 6 pass
+`voiceAgent.avatarProvider=none` (next to OpenSpline, it is simply left out of the UI). Requests are always approved in
 the admin portal, and in Slack as well when it is on; conversations are archived with or
 without Google Docs, which adds a copy in Drive. The portal's password is generated into the
 secret `assistant-admin` on the first run and kept afterwards, with the session key and the
@@ -301,7 +301,7 @@ differ from the cluster path:
 | Step | On the namespace path |
 |---|---|
 | 1 Access and prerequisites | The tools (Homebrew on macOS), admin rights in the project, permission to create every kind the chart needs (routes with a host included), KServe in the project, the Kueue queues of the project with their GPU quota and the booking's end, the Models-as-a-Service models, a default StorageClass, cert-manager. The apps domain comes from the console URL |
-| 2 Deployment profile | Per model: `REMOTE_<X>_ENDPOINT` when given, else the Models-as-a-Service model (`MAAS_<X>_MODEL`), else the chart serves it in the project on the smallest GPU or MIG slice of a queue with quota that fits (10 GB for Whisper and BGE-M3, 24 GB for the language model). Without enough quota it stops with what is required, what the queues have, and the options (book GPUs, or remote endpoints). Then the avatar (`tavus`, `openspline` or `none`; `openspline` is suggested when a queue has a whole GPU free next to the models, and gets that GPU first, since real-time video wants a whole card). OpenSpline runs in high quality (the Pro model, finer detail) on a pair of whole GPUs when the queue has one free next to the models and Kokoro still gets its GPU slice, else in low quality on one GPU (one H200 runs high only just in real time); `AVATAR_QUALITY=low` or `high` decides instead. Kokoro (text to speech) gets a GPU slice the queue has left over, with its GPU image: a sentence in a fraction of a second instead of seconds on CPU (`TTS_GPU=false` keeps it on CPU). The overlay holds the endpoints, the GPU resources, the queue label (`models.podLabels`, `models.tts.podLabels`, `openspline.podLabels`), the avatar and a 10 GiB n8n volume |
+| 2 Deployment profile | Per model: `REMOTE_<X>_ENDPOINT` when given, else the Models-as-a-Service model (`MAAS_<X>_MODEL`), else the chart serves it in the project on the smallest GPU or MIG slice of a queue with quota that fits (10 GB for Whisper and BGE-M3, 24 GB for the language model). Without enough quota it stops with what is required, what the queues have, and the options (book GPUs, or remote endpoints). Then the avatar (`tavus`, `openspline`, both as `openspline,tavus` so the UI offers each, or `none`; `openspline,tavus` is suggested when a queue has a whole GPU free next to the models, and OpenSpline gets that GPU first, since real-time video wants a whole card). OpenSpline runs in high quality (the Pro model, finer detail) on a pair of whole GPUs when the queue has one free next to the models and Kokoro still gets its GPU slice, else in low quality on one GPU (one H200 runs high only just in real time); `AVATAR_QUALITY=low` or `high` decides instead. Kokoro (text to speech) gets a GPU slice the queue has left over, with its GPU image: a sentence in a fraction of a second instead of seconds on CPU (`TTS_GPU=false` keeps it on CPU). The overlay holds the endpoints, the GPU resources, the queue label (`models.podLabels`, `models.tts.podLabels`, `openspline.podLabels`), the avatar and a 10 GiB n8n volume |
 | 3 Project check | Nothing is installed. Checks the project and that the queue still has quota, and warns when the booking ends within two hours |
 | 4 TURN certificate | The cluster's wildcard certificate is out of reach, so a namespaced cert-manager Issuer requests one for `livekit-turn-<project>.<apps domain>` from Let's Encrypt (HTTP-01; the e-mail defaults to the login). When the certificate is not Ready within ten minutes, the setup continues without TURN; `--step 4`, then `--step 6`, tries again later |
 | 5 Keys and integrations | As on the cluster path, plus one Models-as-a-Service API key, created with your login and bound to a subscription that includes every model used there (`MAAS_API_KEY` in `~/secrets.env`; `LLM_API_KEY` and `EMBEDDINGS_API_KEY` get its value). Nothing to do in a browser |

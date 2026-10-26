@@ -396,6 +396,11 @@ voiceAgent:
   # is needed. For the others, a provider whose key is missing from the integrations secret counts
   # as none: voice is audio-only and no face is offered.
   avatarProvider: none
+  # Several avatars offered at once, for example [openspline, tavus]: the person picks the avatar,
+  # then its face, before a voice session, and the first one is preselected. When set it replaces
+  # avatarProvider. openspline in the list deploys its GPU worker; a provider whose key is missing
+  # from the integrations secret is left out of the UI.
+  avatarProviders: []
   # Extra environment for the worker; explicit entries win over the config map and secrets,
   # so non-secret provider settings such as TAVUS_FACE_ID can be pinned here.
   extraEnv: {}
@@ -416,7 +421,8 @@ voiceAgent:
 
 # OpenSpline (MIT, https://github.com/openspline/openspline), the self-hosted avatar: animates a
 # portrait with the SoulX-FlashHead models on a GPU and joins the LiveKit room itself. Deployed
-# when voiceAgent.avatarProvider is openspline. One worker serves one voice session at a time.
+# when openspline is the avatar (voiceAgent.avatarProvider) or one of them (voiceAgent.avatarProviders).
+# One worker serves one voice session at a time.
 openspline:
   # Empty: the stock Python image below installs the pinned OpenSpline release onto the volume on
   # first start, so no image build or registry is needed and later starts reuse the install. Or an
@@ -432,9 +438,13 @@ openspline:
   # GPU (low) or per pair (high), each serving one voice session at a time. scripts/setup.sh picks
   # high when the booked quota has two whole GPUs for it (AVATAR_QUALITY overrides).
   quality: low
-  # Bits per second for the avatar video (one stream). LiveKit's default for 512 x 512 is 300000,
-  # which smears faces in front of busy backgrounds.
-  videoBitrate: 2000000
+  # Bits per second for the avatar video. LiveKit's default for 512 x 512 is 300000, which smears
+  # faces in front of busy backgrounds.
+  videoBitrate: 1000000
+  # Simulcast adds a small layer the LiveKit server forwards when a viewer's connection cannot carry
+  # the full one. Without it, a slow link (TURN over TCP, for example) can only queue the video, so
+  # it falls behind the voice.
+  simulcast: true
   # Volume for the install and the model weights, about 8 GB each; kept across upgrades
   storage: 30Gi
   # Faces offered in the UI (two to four; the first is the default), each with its portrait

@@ -1,9 +1,11 @@
 """Avatar faces and the voice each one speaks with.
 
-The catalog (AVATAR_FACES, a JSON list of {id, name?, gender?, voice?}) is the one the RAG API
-offers in the UI. The browser's choice arrives as the participant attribute "avatar_face"; the
-voice follows the face's declared gender (TTS_VOICE_FEMALE / TTS_VOICE_MALE) unless the face pins
-a voice. Tavus publishes no gender for its faces, so the operator declares it in the chart.
+The catalog of each avatar provider (AVATAR_FACES_<PROVIDER>, a JSON list of {id, name?, gender?,
+voice?}; AVATAR_FACES for the default provider when it has no list of its own) is the one the RAG
+API offers in the UI. The browser's choice arrives as the participant attributes "avatar_provider"
+and "avatar_face"; the voice follows the face's declared gender (TTS_VOICE_FEMALE /
+TTS_VOICE_MALE) unless the face pins a voice. Tavus publishes no gender for its faces, so the
+operator declares it in the chart.
 """
 
 from __future__ import annotations
@@ -65,8 +67,13 @@ def parse(raw: str) -> list[Face]:
     return faces
 
 
-def catalog() -> list[Face]:
-    return parse(settings.avatar_faces)
+def catalog(provider: str | None = None) -> list[Face]:
+    """The faces of a provider (the default one if not named)."""
+    provider = provider or avatars.provider()
+    own = getattr(settings, f"avatar_faces_{provider}", "") or ""
+    if own.strip():
+        return parse(own)
+    return parse(settings.avatar_faces) if provider == avatars.provider() else []
 
 
 def voice_for(face: Face | None) -> str:
@@ -82,14 +89,14 @@ def voice_for(face: Face | None) -> str:
     return settings.tts_voice
 
 
-def select(requested: str | None) -> Face | None:
-    """The face for this session: the requested one when it is in the catalog (or the catalog is
-    empty and the id is trusted as-is), otherwise the first catalog entry, otherwise None so the
-    provider settings (TAVUS_FACE_ID) apply."""
-    if not avatars.active():
+def select(requested: str | None, provider: str | None = None) -> Face | None:
+    """The face for this session with a provider (the default one if not named): the requested one
+    when it is in the provider's catalog (or the catalog is empty and the id is trusted as-is),
+    otherwise the first catalog entry, otherwise None so the provider settings (TAVUS_FACE_ID) apply."""
+    if not avatars.active(provider):
         # No avatar, no face: the session speaks with the default voice (models.tts.voice)
         return None
-    faces = catalog()
+    faces = catalog(provider)
     requested = _text(requested) or None
     if requested:
         match = next((face for face in faces if face.id == requested), None)
@@ -101,10 +108,19 @@ def select(requested: str | None) -> Face | None:
     return faces[0] if faces else None
 
 
-def requested_face(participant: object) -> str | None:
-    """The face id the browser put in its token, if any."""
+def _attribute(participant: object, name: str) -> str | None:
     attributes = getattr(participant, "attributes", None) or {}
     try:
-        return _text(attributes.get(FACE_ATTRIBUTE)) or None
+        return _text(attributes.get(name)) or None
     except AttributeError:
         return None
+
+
+def requested_face(participant: object) -> str | None:
+    """The face id the browser put in its token, if any."""
+    return _attribute(participant, FACE_ATTRIBUTE)
+
+
+def requested_provider(participant: object) -> str | None:
+    """The avatar provider the browser put in its token, if any."""
+    return _attribute(participant, avatars.PROVIDER_ATTRIBUTE)

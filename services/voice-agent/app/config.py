@@ -53,6 +53,9 @@ class Settings(BaseSettings):
 
     # Avatar: none | openspline | simli | tavus | hedra
     avatar_provider: str = "none"
+    # The avatars the browser can choose from, comma-separated, the first being the default; empty
+    # means avatar_provider alone. The choice arrives as the participant attribute "avatar_provider".
+    avatar_providers: str = ""
     # Give up on the avatar and answer audio-only if the provider has not joined within this time
     avatar_start_timeout_seconds: float = 25.0
     # With an avatar, words transcribed while it speaks that interrupt it: its stream cannot pause
@@ -62,8 +65,11 @@ class Settings(BaseSettings):
     simli_face_id: str | None = None
     tavus_api_key: str | None = None
     tavus_face_id: str | None = None  # stock or custom face, e.g. r3f4182ef554
-    # Faces the browser can choose from, JSON list of {id, name, gender|voice}; see faces.py
+    # Faces the browser can choose from, JSON list of {id, name, gender|voice}; see faces.py.
+    # One list per provider; avatar_faces is the default provider's when its own list is empty.
     avatar_faces: str = "[]"
+    avatar_faces_openspline: str = ""
+    avatar_faces_tavus: str = ""
     tavus_pal_id: str | None = None  # optional; the plugin's stock PAL is used when empty
     # Older Tavus names (replica -> face, persona -> PAL); still accepted
     tavus_replica_id: str | None = None

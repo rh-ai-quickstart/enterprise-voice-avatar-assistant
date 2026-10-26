@@ -16,7 +16,9 @@
 #     RUN_TESTS=1            run the connectivity test pod at the end (helm test's pod, via scripts/test-services.sh)
 #     HELM_TIMEOUT=20m       how long helm waits for the n8n-setup hook Job
 #     AVATAR_PROVIDER=<name> openspline (the self-hosted worker on a GPU), tavus, simli, hedra or none;
-#                            default: the values file, or none without TAVUS_API_KEY
+#                            default: the values file, or none without TAVUS_API_KEY. Several,
+#                            comma-separated (openspline,tavus), are all offered in the UI, the
+#                            first preselected; one without its key is left out there
 #     LOG_FILE=<path>        also write everything printed to this file
 #     AVOID_NODES="<node> ..." nodes to keep every pod off (global.avoidNodes); nodes found unable to
 #                            start containers while waiting are added, and AVOID_NODES_FILE keeps the list
@@ -69,7 +71,11 @@ SLACK_ON=false; has_key SLACK_BOT_TOKEN && SLACK_ON=true
 DOCS_ON=false; has_key GOOGLE_SERVICE_ACCOUNT_JSON && has_key GOOGLE_DOCS_FOLDER_ID && DOCS_ON=true
 AVATAR_ARGS=()
 case "${AVATAR_PROVIDER:-}" in ""|tavus) has_key TAVUS_API_KEY || AVATAR_PROVIDER=none;; esac
-[ -n "${AVATAR_PROVIDER:-}" ] && AVATAR_ARGS=(--set "voiceAgent.avatarProvider=$AVATAR_PROVIDER")
+if [[ "${AVATAR_PROVIDER:-}" == *,* ]]; then
+  AVATAR_ARGS=(--set "voiceAgent.avatarProvider=${AVATAR_PROVIDER%%,*}" --set "voiceAgent.avatarProviders={$AVATAR_PROVIDER}")
+elif [ -n "${AVATAR_PROVIDER:-}" ]; then
+  AVATAR_ARGS=(--set "voiceAgent.avatarProvider=$AVATAR_PROVIDER")
+fi
 say "Integrations from the keys in assistant-integrations: Slack $SLACK_ON, Google Docs $DOCS_ON, avatar ${AVATAR_PROVIDER:-from the values}"
 
 # A node that cannot start containers (the pod sandbox keeps failing, as when the node's container

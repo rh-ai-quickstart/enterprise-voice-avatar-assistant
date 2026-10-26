@@ -116,6 +116,13 @@ button.cite:hover { border-color: var(--accent); }
 .voice-state.state-speaking { border-color: var(--accent); color: var(--accent); }
 .voice-state.state-thinking { border-color: var(--warning); color: var(--warning); }
 .voice-face { color: var(--muted); }
+/* the avatar (OpenSpline, Tavus, ...) above its faces: one row of equal buttons */
+.avatar-picker { display: flex; flex-wrap: wrap; gap: 10px; }
+.avatar-option { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface-2); }
+.avatar-option:hover { border-color: var(--border-strong); background: var(--surface-3); }
+.avatar-option.selected { border-color: var(--accent); background: var(--surface-3); box-shadow: 0 0 0 3px var(--accent-soft); }
+.avatar-option-name { font-size: 0.95rem; font-weight: 600; }
+.avatar-option-hosting { font-size: 0.75rem; color: var(--muted); }
 .face-picker { display: flex; flex-wrap: wrap; gap: 10px; }
 .face-picker-label { flex-basis: 100%; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 /* four cards share one row: equal widths, the picture large, the name ellipsizes rather than wrapping */

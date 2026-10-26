@@ -8,8 +8,8 @@ GET  /v1/sessions/{id}/messages     conversation history
 GET  /v1/sessions/{id}/notifications, POST .../notifications/ack   outcome notices for the conversation
 POST /v1/sessions/{id}/archive       trigger the transcript archival workflow (WF5)
 DELETE /v1/sessions/{id}            forget a conversation
-GET  /v1/voice/token                LiveKit token for the browser (face_id picks the avatar face)
-GET  /v1/voice/faces                avatar faces to choose from, with the voice each one speaks with
+GET  /v1/voice/token                LiveKit token for the browser (provider and face_id pick the avatar)
+GET  /v1/voice/faces                avatars and their faces to choose from, with the voice each face speaks with
 GET  /v1/voice/faces/{id}/poster    still image of a face for the picker (cut from the Tavus thumbnail video)
 GET  /v1/info                       active models and providers (for the diagnostics panel)
 
@@ -83,6 +83,7 @@ from .schemas import (
     UserMemoryItem,
     VoiceFace,
     VoiceFacesResponse,
+    VoiceProvider,
     VoiceTokenResponse,
 )
 
@@ -196,6 +197,7 @@ def info():
         "voice": {
             "livekit_url": settings.livekit_public_url or settings.livekit_url,
             "avatar_provider": faces.avatar_provider(),
+            "avatar_providers": faces.providers(),
             "faces": len(faces.catalog()),
         },
     }
@@ -385,13 +387,23 @@ def voice_token(
     identity: str | None = None,
     name: str | None = None,
     face_id: str | None = None,
+    provider: str | None = None,
 ):
     session_id = session_id or uuid.uuid4().hex
     identity = identity or f"user-{uuid.uuid4().hex[:8]}"
     room = voice.room_for_session(session_id)
     attributes: dict[str, str] = {}
+    # The avatar chosen in the UI; without one the voice agent takes the default
+    provider = (provider or "").strip().lower() or None
+    if provider:
+        if provider not in faces.providers():
+            raise HTTPException(
+                status_code=400,
+                detail=f"avatar {provider!r} is not offered; GET /v1/voice/faces lists the choices",
+            )
+        attributes[faces.PROVIDER_ATTRIBUTE] = provider
     if face_id:
-        if faces.catalog() and faces.resolve(face_id) is None:
+        if faces.catalog(provider) and faces.resolve(face_id, provider) is None:
             raise HTTPException(
                 status_code=400,
                 detail=f"unknown avatar face {face_id!r}; GET /v1/voice/faces lists the choices",
@@ -404,25 +416,39 @@ def voice_token(
         identity=identity,
         session_id=session_id,
         face_id=face_id or None,
+        provider=provider,
+    )
+
+
+def _voice_face(face: faces.Face) -> VoiceFace:
+    return VoiceFace(
+        id=face.id,
+        name=face.name,
+        gender=face.gender,
+        voice=faces.voice_for(face),
+        thumbnail_url=face.thumbnail_url,
+        poster_url=faces.poster_url(face),
     )
 
 
 @app.get("/v1/voice/faces", response_model=VoiceFacesResponse)
 async def voice_faces():
-    items = await asyncio.to_thread(faces.enriched)
+    offered = faces.providers()
+    items = {provider: await asyncio.to_thread(faces.enriched, provider) for provider in offered}
+    default = faces.avatar_provider()
     return VoiceFacesResponse(
-        provider=faces.avatar_provider(),
+        provider=default,
         default=faces.default_id(),
-        faces=[
-            VoiceFace(
-                id=f.id,
-                name=f.name,
-                gender=f.gender,
-                voice=faces.voice_for(f),
-                thumbnail_url=f.thumbnail_url,
-                poster_url=faces.poster_url(f),
+        faces=[_voice_face(f) for f in items.get(default, [])],
+        providers=[
+            VoiceProvider(
+                id=provider,
+                name=faces.PROVIDER_NAMES.get(provider, provider.title()),
+                self_hosted=provider in faces.SELF_HOSTED,
+                default=faces.default_id(provider),
+                faces=[_voice_face(f) for f in items[provider]],
             )
-            for f in items
+            for provider in offered
         ],
     )
 

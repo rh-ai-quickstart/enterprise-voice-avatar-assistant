@@ -79,9 +79,14 @@ class Settings(BaseSettings):
     livekit_api_key: str = "devkey"
     livekit_api_secret: str = "secret"
     voice_token_ttl_seconds: int = 3600
-    # Avatar faces offered in the UI (see faces.py); the voice agent applies the same catalog
+    # Avatars and their faces offered in the UI (see faces.py); the voice agent applies the same
+    # catalog. avatar_providers lists several, the first being the default (empty: avatar_provider
+    # alone); each has its own faces, and avatar_faces is the default provider's when it has none.
     avatar_provider: str = "none"
+    avatar_providers: str = ""
     avatar_faces: str = "[]"
+    avatar_faces_openspline: str = ""
+    avatar_faces_tavus: str = ""
     tavus_face_id: str | None = None
     tavus_api_key: str | None = None
     # The self-hosted avatar worker (avatar provider openspline), for the Integrations page test

@@ -67,3 +67,28 @@ def test_tavus_kwargs_use_the_session_face():
     assert new == {"face_id": "r1", "api_key": "k", "pal_id": "p1"}
     old = avatars.tavus_kwargs("r1", None, "k", {"replica_id": None})
     assert old == {"replica_id": "r1", "api_key": "k"}
+
+
+def test_each_provider_has_its_own_faces(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_providers", "openspline,tavus")
+    monkeypatch.setattr(settings, "tavus_api_key", "k")
+    monkeypatch.setattr(settings, "avatar_faces", "[]")
+    monkeypatch.setattr(
+        settings, "avatar_faces_openspline", json.dumps([{"id": "meera", "gender": "female"}])
+    )
+    monkeypatch.setattr(settings, "avatar_faces_tavus", CATALOG)
+    assert [f.id for f in faces.catalog()] == ["meera"]  # the default provider's
+    assert [f.id for f in faces.catalog("tavus")][:2] == ["r67d1c9cac37", "r9d3aaaa1111"]
+    assert faces.select("r9d3aaaa1111", "tavus").name == "Nathan"
+    assert faces.select("r9d3aaaa1111", "openspline").id == "meera"  # not one of OpenSpline's faces
+    monkeypatch.setattr(settings, "avatar_faces_openspline", "")
+    monkeypatch.setattr(settings, "avatar_faces", json.dumps([{"id": "lisa"}]))
+    assert [f.id for f in faces.catalog("openspline")] == ["lisa"]  # AVATAR_FACES: the default's
+    monkeypatch.setattr(settings, "avatar_faces_tavus", "")
+    assert faces.catalog("tavus") == []  # not the default: no fallback to AVATAR_FACES
+
+
+def test_requested_provider_reads_the_participant_attribute():
+    assert faces.requested_provider(SimpleNamespace(attributes={"avatar_provider": "tavus"})) == "tavus"
+    assert faces.requested_provider(SimpleNamespace(attributes={"avatar_face": "r1"})) is None
+    assert faces.requested_provider(None) is None

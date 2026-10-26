@@ -140,7 +140,20 @@ administers one project only.
     current project in a new kubeconfig, and question 5e asked again.
 - **2026-10-26:** the handoff notes brought up to date with the second-laptop run
   (`cd3fc8a`). After a new login, the queue's slot label had moved a day forward and the GPU
-  pods had kept running: the booking continues past each slot end.
+  pods had kept running: the booking continues past each slot end. A check of the nodes from
+  the project (`a794a45`): the broken node stays avoided, one CPU worker is watched after a DNS
+  failure restarted n8n.
+- **2026-10-26 evening: the avatar switch.**
+  - Mohamed reported the avatar slow and out of sync. OpenSpline and the voice agent kept up;
+    the likely cause is `b5dd698`'s single 2 Mbps stream over TURN on TCP. Back to simulcast,
+    at 1 Mbps; the patch on the volume now reads simulcast from the environment.
+  - He asked for much higher quality and resolution, and for a way to try Tavus, OpenSpline
+    and a third avatar in the UI. The search ([avatar-research.md](avatar-research.md)) found
+    no open model with real-time HD on one GPU; he chose a self-hosted research track over a
+    hosted third vendor.
+  - Several avatars in the UI: `voiceAgent.avatarProviders`, an Avatar switch above the faces,
+    the provider in the token, per-session providers in the voice agent, setup step 2
+    accepting `openspline,tavus`.
 
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)

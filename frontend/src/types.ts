@@ -61,7 +61,7 @@ export interface Info {
   guardrails: { provider: string; model: string };
   retrieval: { collection: string; top_k: number; min_score: number };
   memory: boolean;
-  voice: { livekit_url: string; avatar_provider?: string; faces?: number };
+  voice: { livekit_url: string; avatar_provider?: string; avatar_providers?: string[]; faces?: number };
 }
 
 /** An avatar face the person can pick before a voice session; the voice follows the face. */
@@ -74,10 +74,24 @@ export interface VoiceFace {
   poster_url?: string | null;
 }
 
+/** An avatar the person can pick before a voice session (OpenSpline, Tavus, ...), with its faces. */
+export interface VoiceProvider {
+  id: string;
+  name: string;
+  /** runs in the cluster, so no audio or video leaves it */
+  self_hosted: boolean;
+  /** its default face */
+  default: string | null;
+  faces: VoiceFace[];
+}
+
 export interface VoiceFaces {
+  /** the default avatar, with its default face and its faces */
   provider: string;
   default: string | null;
   faces: VoiceFace[];
+  /** every avatar offered, the default first (missing from RAG APIs older than the choice of avatar) */
+  providers?: VoiceProvider[];
 }
 
 export interface VoiceToken {
@@ -87,6 +101,7 @@ export interface VoiceToken {
   identity: string;
   session_id: string;
   face_id?: string | null;
+  provider?: string | null;
 }
 
 /** Published by the voice agent on the room data channel (topic "assistant") after every answer. */

@@ -113,3 +113,43 @@ def test_a_missing_key_means_audio_only(monkeypatch, caplog):
     assert avatars.missing_key() is None and avatars.active()
     monkeypatch.setattr(settings, "avatar_provider", "none")
     assert avatars.missing_key() is None and not avatars.active()
+
+
+def test_several_providers_the_first_is_the_default(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_provider", "tavus")  # ignored once the list is set
+    monkeypatch.setattr(settings, "avatar_providers", "openspline, Tavus,none,openspline")
+    monkeypatch.setattr(settings, "tavus_api_key", "k")
+    assert avatars.providers() == ["openspline", "tavus"] and avatars.provider() == "openspline"
+    assert avatars.available() == ["openspline", "tavus"]
+    monkeypatch.setattr(settings, "avatar_providers", "openspline,hologram")
+    with pytest.raises(RuntimeError):
+        avatars.providers()
+
+
+def test_the_session_gets_the_requested_provider_when_it_is_offered(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "avatar_providers", "tavus,openspline")
+    monkeypatch.setattr(settings, "tavus_api_key", "k")
+    assert avatars.choose("openspline") == "openspline"
+    assert avatars.choose(" TAVUS ") == "tavus"
+    assert avatars.choose(None) == "tavus"  # nothing asked: the default
+    with caplog.at_level("WARNING", logger="voice-agent.avatar"):
+        assert avatars.choose("simli") == "tavus"  # not offered here
+    assert "not offered" in caplog.text
+    monkeypatch.setattr(settings, "tavus_api_key", None)  # Tavus without its key drops out
+    assert avatars.available() == ["openspline"] and avatars.choose(None) == "openspline"
+    assert avatars.choose("tavus") == "openspline"
+    monkeypatch.setattr(settings, "avatar_providers", "tavus")
+    assert avatars.choose(None) == "tavus"  # nothing available: start() then says the key is missing
+
+
+def test_build_and_start_take_the_session_provider(monkeypatch):
+    monkeypatch.setattr(settings, "avatar_providers", "openspline,tavus")
+    monkeypatch.setattr(settings, "tavus_api_key", None)
+    for field in ("tavus_face_id", "tavus_replica_id"):
+        monkeypatch.setattr(settings, field, None)
+    assert avatars.build("meera").provider == "openspline"  # the default
+    with pytest.raises(RuntimeError, match="TAVUS_FACE_ID is required for avatar provider 'tavus'"):
+        avatars.build(None, "tavus")
+    assert not avatars.active("tavus") and avatars.active("openspline")
+    monkeypatch.setattr(avatars, "_warned", set())
+    assert asyncio.run(avatars.start(None, None, name="tavus")) is None  # no key: audio only

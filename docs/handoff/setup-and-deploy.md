@@ -42,8 +42,12 @@ with `oc project <name>`.
      matching `MAAS_<X>_MODEL`; else the chart serves it on the smallest GPU or MIG slice of
      a queue that fits (`assign_gpus`: LLM needs 24 GB, Whisper and BGE-M3 10 GB, Kokoro
      4 GB, the avatar a whole card).
-   - **The avatar question:** tavus, openspline or none. The suggestion is openspline when
-     a whole GPU is free.
+   - **The avatar question:** tavus, openspline, several (`openspline,tavus`: the UI offers
+     each, the first preselected) or none. The suggestion is `openspline,tavus` when a whole
+     GPU is free. `AVATAR_CHOICE` in `state.env` holds the answer; `avatar_has`,
+     `avatar_list` and `avatar_default` read it. With several, the overlay gets
+     `voiceAgent.avatarProviders`, and step 6 passes the list to `deploy.sh` as
+     `AVATAR_PROVIDER=openspline,tavus`.
    - **OpenSpline's quality:** high on a GPU pair when one is free and Kokoro keeps its
      slice, else low (`AVATAR_QUALITY` overrides).
    - **Kokoro** gets a leftover slice with the GPU image (`TTS_GPU=false` keeps it on CPU).
@@ -107,7 +111,7 @@ The overlay setup writes on the namespace path, for example:
             "podLabels": {"kueue.x-k8s.io/queue-name": "reserved"},
             "tts": {"image": "ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.2", "resources": {"...": "mig-3g.71gb: 1"}}},
  "n8n": {"storage": "10Gi"},
- "voiceAgent": {"avatarProvider": "openspline"},
+ "voiceAgent": {"avatarProvider": "openspline", "avatarProviders": ["openspline", "tavus"]},
  "openspline": {"quality": "low", "resources": {"limits": {"nvidia.com/gpu": "1"}},
                 "podLabels": {"kueue.x-k8s.io/queue-name": "reserved"}}}
 ```

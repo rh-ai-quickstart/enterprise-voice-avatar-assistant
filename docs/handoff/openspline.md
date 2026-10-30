@@ -126,9 +126,10 @@ real presenter footage gives it for free (see [avatar-research.md](avatar-resear
   first is the default. On 2026-10-30 Professor and Acharya replaced Steve and Emily at
   Mohamed's request: Emily was still a smear at 1 Mbps (her busy background). They were the
   last of OpenSpline's examples; the others are public figures (Elon Musk, Nikola Tesla, Ye).
-  A face remembered in the browser that is no longer offered falls back to the default. The chart's `configmap.yaml`
-  sends `AVATAR_FACES` from `openspline.faces` when the provider is openspline, else from
-  `voiceAgent.faces` (Tavus).
+  Professor is OpenSpline's own character "Professor Nikolaev", a different face from its
+  Nikola Tesla example. A face remembered in the browser that is no longer offered falls back
+  to the default. The chart's `configmap.yaml` sends `AVATAR_FACES` from `openspline.faces`
+  when the provider is openspline, else from `voiceAgent.faces` (Tavus).
 - **The portraits:** `chart/files/portraits/<id>.jpg`. The chart puts them in the ConfigMap
   `avatar-portraits`, keeping them under about 700 KB (the 1 MiB limit includes base64), and
   mounts it at `/portraits` in the voice agent and the RAG API. It refuses to render when a

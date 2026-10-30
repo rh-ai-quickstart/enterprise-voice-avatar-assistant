@@ -173,6 +173,10 @@ administers one project only.
     the integrations secret, three stock avatars in `voiceAgent.beyFaces`,
     `scripts/list-bey-avatars.sh`, and a live check on the Integrations page. The voice agent
     moved to LiveKit Agents 1.8.9 for the plugin (the `openai` SDK to 3.x with it).
+- **2026-10-30: two new OpenSpline faces.** Mohamed asked to replace Steve and Emily (Emily was
+  a smear at 1 Mbps in his screenshot). Professor and Acharya, the last of OpenSpline's examples
+  that are not public figures, took their places; both are male, so the faces are two women and
+  two men.
 
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)

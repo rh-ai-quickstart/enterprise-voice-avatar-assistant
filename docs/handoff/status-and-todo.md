@@ -19,7 +19,7 @@ Mohamed is admin of that one project only, so setup takes the namespace path: a 
 | Embeddings | Models-as-a-Service `bge-m3` | |
 | Speech to text | Whisper large-v3-turbo, InferenceService in the project | On a MIG slice `nvidia.com/mig-3g.71gb` from the booked queue `reserved` |
 | Text to speech | Kokoro (`kokoro-fastapi-gpu`) | On the second MIG 3g.71gb slice. 45 to 115 ms per sentence |
-| Avatar | OpenSpline, low quality | On one whole H200 (`nvidia.com/gpu: 1`). Faces Meera, Lisa, Steve and Emily. After the next deploy, Tavus is offered next to it in the UI (step 2 answered `openspline,tavus`) |
+| Avatar | OpenSpline, low quality | On one whole H200 (`nvidia.com/gpu: 1`). Faces Meera, Lisa, Professor and Acharya once PR #17 is deployed (Steve and Emily before). After the next deploy, Tavus is offered next to it in the UI (step 2 answered `openspline,tavus`) |
 | Everything else | Default Kueue queue (CPU) | Frontend, RAG API, ingestion, voice agent, LiveKit, n8n, PostgreSQL, Qdrant, the object store (VersityGW) |
 | Integrations | On | Slack, Google Docs archival, the admin portal |
 
@@ -142,7 +142,10 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
     Presence has no end call; its avatar leaves when the room is deleted, so billing stops);
   - after the move to LiveKit Agents 1.8.9 (for the Beyond Presence plugin): noise still gets no
     answer, words still interrupt the avatar, and end of speech to first audio stays 1 to 2 s;
-  - Emily is still sharp at 1 Mbps;
+  - Professor and Acharya (replacing Steve and Emily) are offered and sharp at 1 Mbps, and
+    speak with the male voice. Emily was a smear at 1 Mbps in Mohamed's screenshot of
+    2026-10-30, so a calm background matters more than the bitrate. If one smears, blur or
+    flatten the background of its JPEG rather than raising `openspline.videoBitrate`;
   - the frame is square for OpenSpline and wide for Tavus and Beyond Presence;
   - the greeting appears once, a long answer plays to the end, and "wait, I meant laptops"
     still interrupts.
@@ -159,10 +162,11 @@ HD in real time on one H200 yet. The plan, the candidates and the sources are in
 both Mohamed's to provide.
 
 ### 3. Sharper portraits (waiting on Mohamed)
-The four faces are single frames of OpenSpline's 240x240 example GIFs, enlarged to 512x512.
+The four faces are single frames of OpenSpline's example GIFs (240 or 180 pixels high),
+enlarged to 512x512.
 That is the main reason the avatar looks soft. OpenSpline renders exactly what it gets.
 
-Mohamed is to provide, per face (Meera, Lisa, Steve, Emily, or replacements):
+Mohamed is to provide, per face (Meera, Lisa, Professor, Acharya, or replacements):
 - at least 1024x1024 (512 minimum), JPEG or PNG;
 - front-facing, head and shoulders, eyes open, mouth closed;
 - even light, a calm background;

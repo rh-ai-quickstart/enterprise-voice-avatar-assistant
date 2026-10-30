@@ -71,7 +71,8 @@ restricted SCC.
   frontend falls back to unknown-source tracks of the avatar worker (`useAvatarTracks` in
   `frontend/src/components/VoicePanel.tsx`).
 - **LiveKit's default encoding:** simulcast with **300 kbps** at 512x512 and 225 kbps at
-  360x360. Busy backgrounds (Emily: bookshelves, guitars, curls) came out as a smear.
+  360x360. Busy backgrounds (Emily, a face until 2026-10-30: bookshelves, guitars, curls) came out
+  as a smear.
 - **The fix went too far once.** `b5dd698` sent one 2 Mbps stream with simulcast off. Over
   TURN on TCP, the lips then lagged the voice (2026-10-26, likely cause; see
   [status-and-todo.md](status-and-todo.md#avatar-slow-and-out-of-sync-2026-10-26)). Now:
@@ -120,10 +121,15 @@ That needs idle motion the model does not produce from silence (blinks, small he
 real presenter footage gives it for free (see [avatar-research.md](avatar-research.md)); to do.
 
 ## Faces
-- **The list:** `openspline.faces` in `chart/values.yaml`: Meera, Lisa and Emily (female),
-  Steve (male). Two to four faces, and the first is the default. The chart's `configmap.yaml`
-  sends `AVATAR_FACES` from `openspline.faces` when the provider is openspline, else from
-  `voiceAgent.faces` (Tavus).
+- **The list:** `openspline.faces` in `chart/values.yaml`: Meera and Lisa (female), Professor
+  and Acharya (male, so both speak with `models.tts.voices.male`). Two to four faces, and the
+  first is the default. On 2026-10-30 Professor and Acharya replaced Steve and Emily at
+  Mohamed's request: Emily was still a smear at 1 Mbps (her busy background). They were the
+  last of OpenSpline's examples; the others are public figures (Elon Musk, Nikola Tesla, Ye).
+  Professor is OpenSpline's own character "Professor Nikolaev", a different face from its
+  Nikola Tesla example. A face remembered in the browser that is no longer offered falls back
+  to the default. The chart's `configmap.yaml` sends `AVATAR_FACES` from `openspline.faces`
+  when the provider is openspline, else from `voiceAgent.faces` (Tavus).
 - **The portraits:** `chart/files/portraits/<id>.jpg`. The chart puts them in the ConfigMap
   `avatar-portraits`, keeping them under about 700 KB (the 1 MiB limit includes base64), and
   mounts it at `/portraits` in the voice agent and the RAG API. It refuses to render when a
@@ -134,8 +140,9 @@ real presenter footage gives it for free (see [avatar-research.md](avatar-resear
   - the voice agent uploads the portrait, and the voice follows the face's gender;
   - both only look up plain names, because the id comes from the browser.
 - **The current pictures:** frames of OpenSpline's README GIFs (`media/examples/*.gif`, MIT),
-  chosen with the mouth closed, cropped to head and shoulders, enlarged from 240 to 512, and
-  lightly sharpened. They are soft: replacing them is to-do 2 in
+  chosen with the mouth closed, cropped to head and shoulders, enlarged to 512 (from 240, or
+  from 180 for Professor and Acharya, whose faces fill about 40% of the frame, as Steve's did),
+  and lightly sharpened. They are soft: replacing them is to-do 2 in
   [status-and-todo.md](status-and-todo.md). OpenSpline's dashboard has the originals, but they
   are not under the repository's license. Ask before using them.
 - **The fallback:** `services/voice-agent/app/portraits/default.png` is SoulX-FlashHead's

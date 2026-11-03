@@ -110,6 +110,16 @@ preselected, and replaces it.
 - **Missing key:** a cloud provider without its key counts as `none`, and the deploy
   scripts set `none` when there is no Tavus key.
 
+## How media reaches LiveKit
+- **Inside the cluster** (the voice agent, OpenSpline): LiveKit's pod address, UDP.
+- **Browsers:** LiveKit's TURN server over TLS on 443, through the passthrough Route
+  `livekit-turn-<project>`; UDP to LiveKit is not reachable from outside on TMM.
+- **Tavus:** directly to LiveKit's NAT-mapped UDP address (`srflx`).
+- **Beyond Presence:** through coturn on a TCP load balancer (`livekit.tcpTurn`), which LiveKit
+  announces as an extra TURN server. Its agents run LiveKit's native SDK, which gathered no relay
+  through the Route (the Route routes TLS by SNI); with two NATs and no relay it failed after its
+  4-second limit.
+
 ## Configuration
 - **Single source:** every setting is a chart value (`chart/values.yaml`; reference in
   `chart/README.md`). The services read environment variables from the `assistant-config`

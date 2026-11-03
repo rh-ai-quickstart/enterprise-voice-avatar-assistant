@@ -38,6 +38,7 @@ N8N_OWNER_EMAIL="${N8N_OWNER_EMAIL:-$(existing assistant-n8n N8N_OWNER_EMAIL)}";
 N8N_OWNER_PASSWORD="${N8N_OWNER_PASSWORD:-$(existing assistant-n8n N8N_OWNER_PASSWORD)}"; N8N_OWNER_PASSWORD="${N8N_OWNER_PASSWORD:-Aa1$(rand 10)}"
 LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-$(existing assistant-livekit LIVEKIT_API_KEY)}"; LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-APIk$(rand 6)}"
 LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-$(existing assistant-livekit LIVEKIT_API_SECRET)}"; LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-$(rand 24)}"
+TCP_TURN_SECRET="${TCP_TURN_SECRET:-$(existing assistant-turn TCP_TURN_SECRET)}"; TCP_TURN_SECRET="${TCP_TURN_SECRET:-$(rand 32)}"
 QDRANT_API_KEY="${QDRANT_API_KEY:-$(existing assistant-qdrant QDRANT_API_KEY)}"; QDRANT_API_KEY="${QDRANT_API_KEY:-$(rand 24)}"
 # Admin portal sign-in and the token the services send each other (docs/admin-portal.md)
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(existing assistant-admin ADMIN_PASSWORD)}"; ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(rand 12)}"
@@ -92,6 +93,10 @@ make_secret assistant-admin \
 make_secret assistant-livekit \
   --from-literal=LIVEKIT_API_KEY="${LIVEKIT_API_KEY}" \
   --from-literal=LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET}"
+
+# Shared by LiveKit and the TURN server on a TCP load balancer (chart value livekit.tcpTurn)
+make_secret assistant-turn \
+  --from-literal=TCP_TURN_SECRET="${TCP_TURN_SECRET}"
 
 # API keys for model endpoints. In-cluster vLLM ignores them; MaaS endpoints need them.
 make_secret assistant-models \

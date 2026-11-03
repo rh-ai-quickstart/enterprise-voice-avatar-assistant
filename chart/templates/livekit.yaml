@@ -2,6 +2,7 @@
 {{- $host := include "assistant.publicHost" (dict "root" . "name" "livekit" "override" .Values.livekit.publicHost) }}
 {{- $turnHost := include "assistant.publicHost" (dict "root" . "name" "livekit-turn" "override" .Values.livekit.turn.publicHost) }}
 {{- $turn := and .Values.livekit.turn.enabled .Values.livekit.turn.tlsSecret $turnHost }}
+{{- $tcpTurn := and .Values.livekit.tcpTurn.enabled .Values.livekit.tcpTurn.publicHost }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,6 +17,17 @@ data:
       tcp_port: 7881
       udp_port: 7882
       use_external_ip: false
+      {{- if $tcpTurn }}
+      {{- with .Values.livekit.tcpTurn.relayAcceptanceMinWait }}
+      relay_acceptance_min_wait: {{ . }}
+      {{- end }}
+      # the TURN server on the TCP load balancer (livekit.tcpTurn); the start command fills in the secret
+      turn_servers:
+        - host: {{ .Values.livekit.tcpTurn.publicHost }}
+          port: {{ .Values.livekit.tcpTurn.port }}
+          protocol: tcp
+          secret: __TCP_TURN_SECRET__
+      {{- end }}
     {{- if $turn }}
     turn:
       enabled: true
@@ -53,10 +65,25 @@ spec:
         - name: livekit
           image: {{ .Values.livekit.image }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          {{- if $tcpTurn }}
+          # the TURN secret stays out of the ConfigMap: put it into a copy of the config at start (a
+          # literal replacement, so any character in the secret is safe)
+          command: ["/bin/sh", "-ec"]
+          args:
+            - awk '{ i = index($0, "__TCP_TURN_SECRET__"); if (i) $0 = substr($0, 1, i - 1) ENVIRON["TCP_TURN_SECRET"] substr($0, i + 19) } 1' /etc/livekit/config.yaml > /tmp/config.yaml && exec /livekit-server --config /tmp/config.yaml
+          {{- else }}
           args:
             - --config
             - /etc/livekit/config.yaml
+          {{- end }}
           env:
+            {{- if $tcpTurn }}
+            - name: TCP_TURN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.turn }}
+                  key: TCP_TURN_SECRET
+            {{- end }}
             - name: LIVEKIT_API_KEY
               valueFrom:
                 secretKeyRef:

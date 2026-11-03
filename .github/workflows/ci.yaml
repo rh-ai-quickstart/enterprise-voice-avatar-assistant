@@ -19,7 +19,8 @@ jobs:
         run: |
           for args in "--set integrations.slack.enabled=true" "--set integrations.googleDocs.enabled=true" \
                       "--set admin.enabled=false --set integrations.slack.enabled=true" \
-                      "--set admin.enabled=false --set ragApi.requestsRequireApproval=false"; do
+                      "--set admin.enabled=false --set ragApi.requestsRequireApproval=false" \
+                      "--set livekit.tcpTurn.enabled=true --set livekit.tcpTurn.publicHost=lb.example.com"; do
             echo "helm template $args"; helm template assistant chart --set global.domain=apps.example.com $args > /dev/null
           done
       - name: no approval surface is refused

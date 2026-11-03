@@ -187,6 +187,13 @@ S3-compatible object storage: VersityGW (https://github.com/versity/versitygw), 
 | `livekit.turn.publicHost` | `""` | Public hostname; computed from `global.domain` when empty. |
 | `livekit.turn.tlsSecret` | `""` |  |
 | `livekit.turn.allowRestrictedPeerCidrs` | `[10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]` | LiveKit denies TURN relay permissions for private peer addresses unless they are listed here. Inside a pod the media server's own ICE candidate is its private pod IP, so the pod network must be allowed or no media flows. The defaults cover the RFC 1918 ranges used by OpenShift pod networks. |
+| `livekit.tcpTurn.enabled` | `false` | A second TURN server, coturn, behind a cloud TCP load balancer: plain TCP, no certificate and no SNI, for cloud avatars on LiveKit's native SDK (Beyond Presence) where the cloud has no UDP load balancer. LiveKit announces it next to its own TURN server; it relays over UDP to LiveKit's private addresses only. It creates a load balancer with a public address. |
+| `livekit.tcpTurn.image` | `docker.io/coturn/coturn:4.18.0` | Container image (full reference). |
+| `livekit.tcpTurn.port` | `443` | Port of the load balancer. |
+| `livekit.tcpTurn.publicHost` | `""` | The load balancer's host name (Service livekit-tcp-turn); scripts/deploy.sh sets it once the cloud has created the balancer. LiveKit announces the server only when it is set. |
+| `livekit.tcpTurn.annotations` | `{}` | Annotations for the load balancer Service. |
+| `livekit.tcpTurn.relayAcceptanceMinWait` | `1s` | How long LiveKit waits before it accepts a relayed path (pion's default 2s); Beyond Presence gives up joining after 4 seconds. |
+| `livekit.tcpTurn.relayPortMin`, `relayPortMax` | `49152`, `49251` | UDP ports the TURN server relays from, inside its pod. |
 | `livekit.resources.requests.cpu` | `500m` | CPU request. |
 | `livekit.resources.requests.memory` | `512Mi` | Memory request. |
 | `livekit.resources.limits.cpu` | `"2"` | CPU limit. |

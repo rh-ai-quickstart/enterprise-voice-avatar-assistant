@@ -1,0 +1,142 @@
+{{- if and .Values.livekit.enabled .Values.livekit.tcpTurn.enabled }}
+{{- $t := .Values.livekit.tcpTurn }}
+{{- /*
+coturn behind a cloud TCP load balancer (see livekit.tcpTurn in values.yaml): clients reach it over
+plain TCP, and it relays over UDP to LiveKit inside the cluster. Credentials are LiveKit's TURN REST
+credentials (an HMAC of the participant and an expiry with TCP_TURN_SECRET), so only participants
+LiveKit admitted can allocate; relays go to private addresses only, UDP only, and the NetworkPolicy
+at the end lets the pod send only to LiveKit's media port, not to the rest of the cluster.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit-tcp-turn
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "livekit-tcp-turn") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "assistant.selector" (dict "root" . "name" "livekit-tcp-turn") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "assistant.componentLabels" (dict "root" . "name" "livekit-tcp-turn") | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      {{- include "assistant.affinity" $ | nindent 6 }}
+      containers:
+        - name: turn
+          image: {{ $t.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["turnserver"]
+          args:
+            - --log-file=stdout
+            - --simple-log
+            - --pidfile=/tmp/turnserver.pid
+            - --userdb=/tmp/turndb
+            - --listening-port=3478
+            # TCP from clients only: no UDP listener, no TLS (no certificate, no SNI); coturn 4.18 keeps
+            # DTLS and its admin CLI off unless asked
+            - --no-udp
+            - --no-tls
+            - --min-port={{ $t.relayPortMin }}
+            - --max-port={{ $t.relayPortMax }}
+            - --use-auth-secret
+            - --static-auth-secret=$(TCP_TURN_SECRET)
+            - --realm=livekit
+            - --fingerprint
+            # relay UDP to LiveKit's private addresses, nothing else
+            - --no-tcp-relay
+            - --no-multicast-peers
+            - --denied-peer-ip=0.0.0.0-255.255.255.255
+            - --denied-peer-ip=::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+            - --allowed-peer-ip=10.0.0.0-10.255.255.255
+            - --allowed-peer-ip=172.16.0.0-172.31.255.255
+            - --allowed-peer-ip=192.168.0.0-192.168.255.255
+            - --user-quota=12
+            - --total-quota=240
+          env:
+            - name: TCP_TURN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.turn }}
+                  key: TCP_TURN_SECRET
+          ports:
+            - name: turn-tcp
+              containerPort: 3478
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: turn-tcp
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: turn-tcp
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml $t.resources | nindent 12 }}
+          # the image's turnserver carries the file capability NET_BIND_SERVICE: the kernel refuses to
+          # run it unless that capability is in the container's set (port 3478 does not need it)
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_BIND_SERVICE
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit-tcp-turn
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "livekit-tcp-turn") | nindent 4 }}
+  {{- with $t.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    {{- include "assistant.selector" (dict "root" . "name" "livekit-tcp-turn") | nindent 4 }}
+  ports:
+    - name: turn-tcp
+      port: {{ $t.port }}
+      targetPort: turn-tcp
+      protocol: TCP
+---
+# The relay may only reach LiveKit's media port: a participant's credentials must not open a way
+# to other pods' or services' UDP ports. Egress only: clients arrive through the load balancer.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: livekit-tcp-turn
+  labels:
+    {{- include "assistant.componentLabels" (dict "root" . "name" "livekit-tcp-turn") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "assistant.selector" (dict "root" . "name" "livekit-tcp-turn") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "assistant.selector" (dict "root" . "name" "livekit") | nindent 14 }}
+      ports:
+        - protocol: UDP
+          port: 7882
+{{- end }}

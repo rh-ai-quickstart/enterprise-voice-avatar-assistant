@@ -157,8 +157,8 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
   - the Avatar switch shows OpenSpline and Tavus, each with its faces, and the choice is
     remembered after a reload;
   - a Tavus session works (the free plan has 25 minutes a month and one stream);
-  - the OpenSpline badge says "High quality" next to the face during a session (it shows in the
-    picker on the live site since revision 23; the worker staying up is checked, see
+  - the OpenSpline badge says "High quality" next to the face during a session. It shows in the
+    picker since revision 23, and the worker staying up between sessions is checked (see
     [openspline.md](openspline.md));
   - after the move to LiveKit Agents 1.8.9 (for the Beyond Presence plugin): noise still gets no
     answer, words still interrupt the avatar, and end of speech to first audio stays 1 to 2 s;

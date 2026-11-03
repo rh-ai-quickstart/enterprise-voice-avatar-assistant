@@ -106,6 +106,13 @@ export function pickProvider(providers: VoiceProvider[], wanted: string): VoiceP
   return providers.find((p) => p.id === wanted) ?? providers[0] ?? null;
 }
 
+/** OpenSpline's quality as the UI names it: high on a GPU pair, normal on one GPU (low). */
+export function qualityLabel(quality: string | null | undefined): string | null {
+  if (quality === "high") return "High quality";
+  if (quality === "low") return "Normal quality";
+  return null;
+}
+
 /** The wanted face when the avatar offers it, otherwise the avatar's default face. */
 export function pickFace(provider: VoiceProvider | null, wanted: string): string {
   if (!provider) return "";
@@ -196,6 +203,7 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
               >
                 <span className="avatar-option-name">{p.name}</span>
                 <span className="avatar-option-hosting">{p.self_hosted ? "Self-hosted" : "Cloud"}</span>
+                <QualityBadge quality={p.quality} />
               </button>
             ))}
           </div>
@@ -242,10 +250,22 @@ export function VoicePanel({ sessionId, userName, onAssistantTurn, onActiveChang
         onAssistantTurn={onAssistantTurn}
         error={error}
         faceName={face ? (providers.length > 1 && provider ? `${provider.name} · ${face.name}` : face.name) : null}
+        quality={provider?.quality}
         defaultAspect={defaultAspect}
       />
       <RoomAudioRenderer />
     </LiveKitRoom>
+  );
+}
+
+function QualityBadge({ quality }: { quality: string | null | undefined }) {
+  const label = qualityLabel(quality);
+  if (!label) return null;
+  const detail = quality === "high" ? "OpenSpline's Pro model on two GPUs" : "OpenSpline's Lite model on one GPU";
+  return (
+    <span className={`quality-badge quality-${quality}`} title={`${label}: ${detail}`}>
+      {label}
+    </span>
   );
 }
 
@@ -267,11 +287,13 @@ function VoiceStage({
   onAssistantTurn,
   error,
   faceName,
+  quality,
   defaultAspect,
 }: {
   onAssistantTurn: (turn: AssistantTurn) => void;
   error: string | null;
   faceName: string | null;
+  quality: string | null | undefined;
   defaultAspect: number;
 }) {
   const { state, audioTrack, videoTrack } = useAvatarTracks();
@@ -317,6 +339,7 @@ function VoiceStage({
       <div className="voice-controls">
         <span className={`voice-state state-${state}`}>{label}</span>
         {faceName && <span className="voice-face">{faceName}</span>}
+        <QualityBadge quality={quality} />
         <button type="button" className="secondary" onClick={() => localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)}>
           {isMicrophoneEnabled ? "Mute" : "Unmute"}
         </button>

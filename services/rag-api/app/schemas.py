@@ -341,6 +341,7 @@ class VoiceProvider(BaseModel):
     id: str  # openspline, tavus, ...
     name: str  # as the UI shows it
     self_hosted: bool  # runs in the cluster (no data leaves it)
+    quality: str | None = None  # OpenSpline's: low, or high on a GPU pair; None for the others
     default: str | None = None  # its default face
     faces: list[VoiceFace]
 

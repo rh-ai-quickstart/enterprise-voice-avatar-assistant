@@ -120,6 +120,22 @@ the model, which renders a calm, almost motionless face. Mohamed wants it never 
 That needs idle motion the model does not produce from silence (blinks, small head movements):
 real presenter footage gives it for free (see [avatar-research.md](avatar-research.md)); to do.
 
+## The patch for high quality between sessions
+High quality runs one process per GPU of the pair. Rank 0 takes the server's commands; rank 1
+waits for each one in `dist.broadcast_object_list`. OpenSpline creates the process group with a
+5-minute timeout (`usp_device.py`), so after 5 minutes without a voice session rank 1's
+broadcast timed out, NCCL ended the worker, and the server started it again with a fresh model
+load. On 2026-11-03 (revision 21, two H200s) that happened 15 times in 5 h 17 min, about every
+24 minutes: `Watchdog caught collective operation timeout ... OpType=BROADCAST` six times, and
+`watchdog got stuck for 480 seconds` the other times. A session that started during a reload ran
+audio-only.
+
+A third snippet in the start command changes `_rank_main` in `worker.py`: rank 0 waits at most
+60 s for a command (`conn.poll(60)`), and otherwise broadcasts a `keepalive` no-op, which every
+rank skips without answering the server. Low quality has one process and no broadcast, so
+nothing changes for it. The log says "rank keepalive patched" (or "already patched"). Upstream
+`main` (1e5f2b0) has the same loop; reporting it upstream is to do, after asking Mohamed.
+
 ## Faces
 - **The list:** `openspline.faces` in `chart/values.yaml`: Meera and Lisa (female). Two to
   four faces, and the first is the default. At Mohamed's request, Steve and Emily were removed
@@ -152,6 +168,9 @@ real presenter footage gives it for free (see [avatar-research.md](avatar-resear
     parallel through xfuser, which is in the install).
 
   Both render 512x512; OpenSpline fixes that size.
+- **The UI shows it:** `/v1/voice/faces` gives OpenSpline's `quality` (the RAG API reads
+  `OPENSPLINE_QUALITY`), and the page shows "High quality" in green or "Normal quality" in grey
+  in the avatar picker and next to the face during a session.
 - **The workers:** the GPU count in `openspline.resources` makes them: one per GPU (low), one
   per pair (high), written to `workers.yaml`. A changed layout restarts the pod (a checksum
   annotation). The chart refuses high with fewer than two GPUs.
@@ -171,9 +190,9 @@ browser):
 | low | 5.2x (129 fps) | 0.18 s per 0.96 s | 0.35 s | 6 GB |
 | high | 1.07x (26.9 fps) | 1.03 s per 1.12 s | 1.26 s | 8 GB |
 
-OpenSpline's README reports, on an A100: 64 fps low, 8 fps high. The GPU pair for high is
-**not measured yet** (to-do 3). A MIG 3g.71gb slice for low is not tested either; at about
-3/7 of the compute, it would land around 2x real time.
+OpenSpline's README reports, on an A100: 64 fps low, 8 fps high. The GPU pair for high runs
+since 2026-11-03 but is **not measured yet** (to-do 4). A MIG 3g.71gb slice for low is not tested
+either; at about 3/7 of the compute, it would land around 2x real time.
 
 ## Benchmark commands
 Inside the running pod. It loads a second copy of the model next to the live worker; an H200

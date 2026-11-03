@@ -74,7 +74,9 @@ sessions. Follow them; they are not in the code.
 - **"100% automated in setup.sh."** A new environment or a new choice belongs in setup.sh,
   detected from the cluster, with an environment variable to override it, not in manual
   steps.
-- **Keep both avatar options.** Tavus and OpenSpline stay; setup step 2 chooses.
+- **Keep both avatar options.** Tavus and OpenSpline stay; setup step 2 chooses. Beyond
+  Presence is not wanted (2026-11-03): answer step 2 with `openspline,tavus`. OpenSpline should
+  run in high quality whenever two whole GPUs are booked, and the UI shows which quality runs.
 - **Latency matters a lot.** The current 1 to 2 s from end of speech to first audio is the
   bar. Do not trade it away for picture quality without saying so: that is why high quality
   needs a GPU pair, and why it never pushes Kokoro off its GPU.

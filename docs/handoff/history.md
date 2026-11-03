@@ -184,6 +184,11 @@ administers one project only.
   two men.
 - **2026-11-03: Professor and Acharya removed.** At Mohamed's request; OpenSpline offers Meera
   and Lisa, both female.
+- **2026-11-03: high quality, OpenSpline and Tavus only.** Two whole H200s booked; step 2 chose
+  high quality (revision 21) and was answered `openspline,tavus`, so Beyond Presence left the UI
+  (Mohamed does not want it) and the TURN server of #16 stays off. High quality restarted about
+  every 24 minutes between sessions (NCCL's 5-minute timeout on the second GPU's broadcast); a
+  keepalive patch fixes it, and the UI shows the quality (#19).
 
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)

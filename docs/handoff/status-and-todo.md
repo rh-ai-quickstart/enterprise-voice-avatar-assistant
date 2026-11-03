@@ -1,11 +1,12 @@
 # Status and to-do list
 
-As of 2026-10-26 evening (Mohamed's local time is UTC+4). The latest work on `main` is the
-avatar switch (several avatars in the UI) with the OpenSpline sync fix, described below, and
-Beyond Presence as a third avatar. It
-changes the RAG API, the voice agent and the frontend, so CI builds new images and commits
-their promotion to `main`; deploying it takes `git pull`, `scripts/setup.sh --step 2` and
-`--step 6`. Until then the cluster runs images `sha-571acbf` with the chart of `b5dd698`.
+As of 2026-11-03 (Mohamed's local time is UTC+4). OpenSpline runs in high quality on two H200s,
+and Mohamed wants OpenSpline and Tavus only, not Beyond Presence. The latest work on `main`:
+Meera and Lisa as OpenSpline's only faces (#18, deployed as Helm revision 22), the TURN server on
+a TCP load balancer for Beyond Presence (#16, off while Beyond Presence is not offered), and the
+quality badge in the UI with the keepalive patch for high quality (#19). #19 changes the RAG API
+and the frontend, so CI builds their images and commits the promotion to `main`; deploying it
+takes `git pull` and `scripts/setup.sh --step 6`.
 
 ## Where it runs
 
@@ -19,7 +20,7 @@ Mohamed is admin of that one project only, so setup takes the namespace path: a 
 | Embeddings | Models-as-a-Service `bge-m3` | |
 | Speech to text | Whisper large-v3-turbo, InferenceService in the project | On a MIG slice `nvidia.com/mig-3g.71gb` from the booked queue `reserved` |
 | Text to speech | Kokoro (`kokoro-fastapi-gpu`) | On the second MIG 3g.71gb slice. 45 to 115 ms per sentence |
-| Avatar | OpenSpline, high quality | On two whole H200s (`nvidia.com/gpu: 2`) since 2026-11-03 (Helm revision 21): one worker on devices 0 and 1. Faces Meera and Lisa once PR #18 is deployed (Professor and Acharya before). Tavus and Beyond Presence are offered next to it in the UI |
+| Avatar | OpenSpline, high quality | On two whole H200s (`nvidia.com/gpu: 2`) since 2026-11-03 (Helm revision 21): one worker on devices 0 and 1, kept up between sessions by the keepalive patch (#19). Faces Meera and Lisa. The UI shows "High quality" next to OpenSpline. Tavus is offered next to it; Beyond Presence is not wanted (2026-11-03) |
 | Everything else | Default Kueue queue (CPU) | Frontend, RAG API, ingestion, voice agent, LiveKit, n8n, PostgreSQL, Qdrant, the object store (VersityGW) |
 | Integrations | On | Slack, Google Docs archival, the admin portal |
 
@@ -86,7 +87,8 @@ session started in 2.15 s, its agent `"connectionType": "turn"` with audio and v
 checked after it: a Tavus and an OpenSpline session in the browser, and Bey from the browser.
 The TURN server runs one replica behind `externalTrafficPolicy: Local`: a restart of its pod drops
 the Bey sessions relayed through it (they reconnect); a second replica is an option if that
-matters for a demo.
+matters for a demo. Since 2026-11-03 Beyond Presence is not offered (Mohamed does not want it),
+so setup leaves `livekit.tcpTurn` off.
 
 ## Lip sync and phantom turns, after the switch (2026-10-26 evening)
 
@@ -143,32 +145,28 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
 
 ## To do, in priority order
 
-### 1. Deploy the avatar switch with Beyond Presence, and confirm the sync fix
+### 1. Deploy the avatar switch, and confirm the sync fix
 - **Wait** for CI to build the images and commit their promotion to `main`.
-- **Run:** `git pull`, then `scripts/setup.sh --step 2` (answer `openspline,tavus,bey`), then
-  `--step 5` (it asks for the Beyond Presence key, hidden), then `--step 6`, then hard-refresh
-  the page. Step 6 restarts the OpenSpline worker; its log
-  should say "publish options updated: simulcast from OPENSPLINE_VIDEO_SIMULCAST".
+- **Run:** `git pull`, then `scripts/setup.sh --step 2` (answer `openspline,tavus`: Mohamed does
+  not want Beyond Presence, 2026-11-03), then `--step 6`, then hard-refresh the page. Step 6
+  restarts the OpenSpline worker; its log should say "publish options updated: simulcast from
+  OPENSPLINE_VIDEO_SIMULCAST".
 - **Check:**
   - the lips follow the voice again with OpenSpline; if not, read the troubleshooting entry
     on lag (`docs/troubleshooting.md`) and try a lower `openspline.videoBitrate`;
   - the Avatar switch shows OpenSpline and Tavus, each with its faces, and the choice is
     remembered after a reload;
   - a Tavus session works (the free plan has 25 minutes a month and one stream);
-  - a Beyond Presence session shows video (it joins through `livekit.tcpTurn`; `oc logs
-    deploy/livekit | grep bey-avatar-agent` says `"connectionType": "turn"`), with Nelly, Jerome
-    and Laura, and each one's voice fits
-    (their genders in `chart/values-demo-cluster.yaml` were guessed from the names); the admin
-    portal's Integrations test confirms the avatar ids; end of speech to first audio stays
-    within 1 to 2 s; and after "End voice" the session shows as ended in Bey Studio (Beyond
-    Presence has no end call; its avatar leaves when the room is deleted, so billing stops);
+  - the OpenSpline option shows "High quality" in the picker and next to the face during a
+    session, and the worker log shows no new `Starting worker gpu-0` after 30 minutes without a
+    session (the keepalive patch, #19);
   - after the move to LiveKit Agents 1.8.9 (for the Beyond Presence plugin): noise still gets no
     answer, words still interrupt the avatar, and end of speech to first audio stays 1 to 2 s;
   - OpenSpline offers Meera and Lisa only, and the face picker still shows with the two. A
     busy background smears at 1 Mbps (Emily did, in Mohamed's screenshot of 2026-10-30): for
     a new face, blur or flatten the background of its JPEG rather than raising
     `openspline.videoBitrate`;
-  - the frame is square for OpenSpline and wide for Tavus and Beyond Presence;
+  - the frame is square for OpenSpline and wide for Tavus;
   - the greeting appears once, a long answer plays to the end, and "wait, I meant laptops"
     still interrupts.
   - after an interruption the face snaps back to its resting pose and the lips follow the new
@@ -212,8 +210,9 @@ Processing, once the files are on the Mac:
 ### 4. Measure high quality on a GPU pair
 `193c128` makes setup choose high quality when two whole GPUs are free next to the models
 and Kokoro keeps its slice. Since 2026-11-03 it runs: revision 21 has one worker,
-`quality: high`, on devices 0 and 1, with about 9 GB in use on each H200. It is not measured
-yet, nor tried in the browser.
+`quality: high`, on devices 0 and 1, with about 9 GB in use on each H200. Until the keepalive
+patch (#19) it restarted about every 24 minutes between sessions (see
+[openspline.md](openspline.md)). It is not measured yet, nor tried in the browser.
 - Done on 2026-11-03: a second whole H200 booked, `scripts/setup.sh --step 2` chose high
   quality, and `--step 6` deployed it.
 - Run the benchmark inside the pod with `--quality high --devices 0 1` (command in

@@ -17,7 +17,7 @@ vi.mock("@livekit/components-react", () => ({
   },
 }));
 
-import { avatarAspect, offeredProviders, pickFace, pickProvider, useAvatarTracks } from "./VoicePanel";
+import { avatarAspect, offeredProviders, pickFace, pickProvider, qualityLabel, useAvatarTracks } from "./VoicePanel";
 
 const agent = { identity: "agent-AJ_1", kind: 4, attributes: {} };
 const worker = { identity: "openspline-1", kind: 4, attributes: { "lk.publish_on_behalf": "agent-AJ_1" } };
@@ -86,6 +86,13 @@ describe("choosing the avatar", () => {
     expect(pickProvider([openspline, tavus], "simli")).toBe(openspline);
     expect(pickProvider([openspline, tavus], "")).toBe(openspline);
     expect(pickProvider([], "tavus")).toBeNull();
+  });
+
+  it("names OpenSpline's quality, and nothing for an avatar without one", () => {
+    expect(qualityLabel("high")).toBe("High quality");
+    expect(qualityLabel("low")).toBe("Normal quality");
+    expect(qualityLabel(null)).toBeNull();
+    expect(qualityLabel(undefined)).toBeNull(); // a cloud avatar, or an older RAG API
   });
 
   it("keeps the remembered face when the avatar has it, else takes the avatar's default face", () => {

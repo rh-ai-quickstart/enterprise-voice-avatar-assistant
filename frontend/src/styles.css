@@ -123,6 +123,9 @@ button.cite:hover { border-color: var(--accent); }
 .avatar-option.selected { border-color: var(--accent); background: var(--surface-3); box-shadow: 0 0 0 3px var(--accent-soft); }
 .avatar-option-name { font-size: 0.95rem; font-weight: 600; }
 .avatar-option-hosting { font-size: 0.75rem; color: var(--muted); }
+/* OpenSpline's quality, in the avatar picker and next to the face during a session */
+.quality-badge { padding: 1px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border-strong); }
+.quality-badge.quality-high { color: var(--success); background: var(--success-soft); border-color: var(--success); }
 .face-picker { display: flex; flex-wrap: wrap; gap: 10px; }
 .face-picker-label { flex-basis: 100%; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 /* four cards share one row: equal widths, the picture large, the name ellipsizes rather than wrapping */

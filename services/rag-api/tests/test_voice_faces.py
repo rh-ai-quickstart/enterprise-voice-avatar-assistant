@@ -295,6 +295,7 @@ def _both(monkeypatch, tmp_path, tavus_key="k"):
 
 def test_several_avatars_each_with_its_faces(monkeypatch, tmp_path):
     _both(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "openspline_quality", "high")
     assert faces.providers() == ["openspline", "tavus"] and faces.avatar_provider() == "openspline"
     assert [f.id for f in faces.catalog()] == ["meera"]
     assert [f.id for f in faces.catalog("tavus")] == ["r67d1c9cac37", "r9d3aaaa1111", "rpinned"]
@@ -307,6 +308,8 @@ def test_several_avatars_each_with_its_faces(monkeypatch, tmp_path):
             ("openspline", "OpenSpline", True, "meera"),
             ("tavus", "Tavus", False, "r67d1c9cac37"),
         ]
+        # OpenSpline's quality, for the UI's badge; the cloud avatars have none
+        assert [p["quality"] for p in body["providers"]] == ["high", None]
         assert len(body["providers"][1]["faces"]) == 3
         assert client.get("/v1/info").json()["voice"]["avatar_providers"] == ["openspline", "tavus"]
         # posters of every provider's faces are served

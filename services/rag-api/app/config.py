@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     openspline_url: str = "http://openspline:7860"
     # OpenSpline's faces: one portrait each, <face id>.jpg (the chart's ConfigMap avatar-portraits)
     avatar_portrait_dir: str = "/portraits"
+    # OpenSpline's quality (the chart's openspline.quality): low, or high on a GPU pair; the UI shows it
+    openspline_quality: str = "low"
     tts_voice: str = "af_heart"
     tts_voice_female: str = "af_bella"
     tts_voice_male: str = "am_michael"

@@ -80,6 +80,8 @@ export interface VoiceProvider {
   name: string;
   /** runs in the cluster, so no audio or video leaves it */
   self_hosted: boolean;
+  /** OpenSpline's quality: "high" (on a GPU pair) or "low"; absent for the cloud avatars and older RAG APIs */
+  quality?: string | null;
   /** its default face */
   default: string | null;
   faces: VoiceFace[];

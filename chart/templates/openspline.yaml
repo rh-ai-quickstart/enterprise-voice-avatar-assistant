@@ -182,6 +182,10 @@ spec:
           # session's inference loop is idle, so the next answer does not wait for it (about 0.2 s);
           # if that answer's audio comes first, the reset runs before it. A failed reset is logged
           # and the pose kept. The log prints how long each reset took.
+          # A third patch keeps high quality alive between sessions. Its second GPU's process waits
+          # in a broadcast for the next command, and OpenSpline gives that wait NCCL's 5-minute
+          # timeout, so after 5 idle minutes the worker died and loaded the model again (15 times
+          # in 5 hours on 2026-11-03). Rank 0 now sends a no-op after each idle minute.
           command: ["/bin/bash", "-euc"]
           args:
             - |
@@ -257,6 +261,28 @@ spec:
                   print("pose reset patched")
               else:
                   print("WARNING: session code not as expected; answers keep the previous pose")
+              path = pathlib.Path(importlib.util.find_spec("openspline_server.worker").origin)
+              text = path.read_text()
+              old_recv = "            command = conn.recv() if rank == 0 else None\n"
+              old_close = '            if op == "close":\n                break\n'
+              markers = ('("keepalive", ())', 'if op == "keepalive":')
+              if all(m in text for m in markers):
+                  print("rank keepalive already patched")
+              elif any(m in text for m in markers):
+                  print("WARNING: rank keepalive partly patched; high quality restarts after 5 idle minutes")
+              elif text.count(old_recv) == 1 and text.count(old_close) == 1:
+                  text = text.replace(old_recv, (
+                      "            # chart patch: while idle, rank 0 sends a no-op every minute, so the other\n"
+                      "            # ranks never wait in the broadcast until NCCL's 5-minute timeout\n"
+                      "            if rank == 0 and dist and not conn.poll(60):\n"
+                      "                command = (\"keepalive\", ())\n"
+                      "            else:\n"
+                      "                command = conn.recv() if rank == 0 else None\n"))
+                  text = text.replace(old_close, old_close + '            if op == "keepalive":\n                continue\n')
+                  path.write_text(text)
+                  print("rank keepalive patched")
+              else:
+                  print("WARNING: worker loop not as expected; high quality restarts after 5 idle minutes")
               PY
               exec {{ $bin }} serve --config /config/workers.yaml --host 0.0.0.0 --port 7860
           env:

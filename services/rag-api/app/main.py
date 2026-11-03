@@ -445,6 +445,7 @@ async def voice_faces():
                 id=provider,
                 name=faces.PROVIDER_NAMES.get(provider, provider.title()),
                 self_hosted=provider in faces.SELF_HOSTED,
+                quality=settings.openspline_quality if provider == "openspline" else None,
                 default=faces.default_id(provider),
                 faces=[_voice_face(f) for f in items[provider]],
             )

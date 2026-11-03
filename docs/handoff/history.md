@@ -182,6 +182,8 @@ administers one project only.
   a smear at 1 Mbps in his screenshot). Professor and Acharya, the last of OpenSpline's examples
   that are not public figures, took their places; both are male, so the faces are two women and
   two men.
+- **2026-11-03: Professor and Acharya removed.** At Mohamed's request; OpenSpline offers Meera
+  and Lisa, both female.
 
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)

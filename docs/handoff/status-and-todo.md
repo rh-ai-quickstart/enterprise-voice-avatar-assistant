@@ -4,9 +4,9 @@ As of 2026-11-03 (Mohamed's local time is UTC+4). OpenSpline runs in high qualit
 and Mohamed wants OpenSpline and Tavus only, not Beyond Presence. The latest work on `main`:
 Meera and Lisa as OpenSpline's only faces (#18, deployed as Helm revision 22), the TURN server on
 a TCP load balancer for Beyond Presence (#16, off while Beyond Presence is not offered), and the
-quality badge in the UI with the keepalive patch for high quality (#19). #19 changes the RAG API
-and the frontend, so CI builds their images and commits the promotion to `main`; deploying it
-takes `git pull` and `scripts/setup.sh --step 6`.
+quality badge in the UI with the keepalive patch for high quality (#19). All of it is deployed:
+Helm revision 23 (18:44 local on 2026-11-03, images `sha-becc97e`). The OpenSpline worker then
+stayed up for 47 minutes without a session; before the patch it restarted about every 24.
 
 ## Where it runs
 
@@ -157,9 +157,9 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
   - the Avatar switch shows OpenSpline and Tavus, each with its faces, and the choice is
     remembered after a reload;
   - a Tavus session works (the free plan has 25 minutes a month and one stream);
-  - the OpenSpline option shows "High quality" in the picker and next to the face during a
-    session, and the worker log shows no new `Starting worker gpu-0` after 30 minutes without a
-    session (the keepalive patch, #19);
+  - the OpenSpline badge says "High quality" next to the face during a session (it shows in the
+    picker on the live site since revision 23; the worker staying up is checked, see
+    [openspline.md](openspline.md));
   - after the move to LiveKit Agents 1.8.9 (for the Beyond Presence plugin): noise still gets no
     answer, words still interrupt the avatar, and end of speech to first audio stays 1 to 2 s;
   - OpenSpline offers Meera and Lisa only, and the face picker still shows with the two. A

@@ -136,6 +136,10 @@ rank skips without answering the server. Low quality has one process and no broa
 nothing changes for it. The log says "rank keepalive patched" (or "already patched"). Upstream
 `main` (1e5f2b0) has the same loop; reporting it upstream is to do, after asking Mohamed.
 
+Checked after the deploy (revision 23): the log said "rank keepalive patched", and the worker
+stayed up from 14:44 to 15:31 UTC with no voice session: one `Starting worker gpu-0`, no NCCL
+timeout, `/readyz` 200 throughout.
+
 ## Faces
 - **The list:** `openspline.faces` in `chart/values.yaml`: Meera and Lisa (female). Two to
   four faces, and the first is the default. At Mohamed's request, Steve and Emily were removed

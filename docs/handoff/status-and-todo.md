@@ -19,11 +19,12 @@ Mohamed is admin of that one project only, so setup takes the namespace path: a 
 | Embeddings | Models-as-a-Service `bge-m3` | |
 | Speech to text | Whisper large-v3-turbo, InferenceService in the project | On a MIG slice `nvidia.com/mig-3g.71gb` from the booked queue `reserved` |
 | Text to speech | Kokoro (`kokoro-fastapi-gpu`) | On the second MIG 3g.71gb slice. 45 to 115 ms per sentence |
-| Avatar | OpenSpline, low quality | On one whole H200 (`nvidia.com/gpu: 1`). Faces Meera and Lisa once PR #18 is deployed (Professor and Acharya before). After the next deploy, Tavus is offered next to it in the UI (step 2 answered `openspline,tavus`) |
+| Avatar | OpenSpline, high quality | On two whole H200s (`nvidia.com/gpu: 2`) since 2026-11-03 (Helm revision 21): one worker on devices 0 and 1. Faces Meera and Lisa once PR #18 is deployed (Professor and Acharya before). Tavus and Beyond Presence are offered next to it in the UI |
 | Everything else | Default Kueue queue (CPU) | Frontend, RAG API, ingestion, voice agent, LiveKit, n8n, PostgreSQL, Qdrant, the object store (VersityGW) |
 | Integrations | On | Slack, Google Docs archival, the admin portal |
 
-The GPU booking is 1 whole H200 plus 2 MIG 3g.71gb slices. It appears as ClusterQueue
+Since 2026-11-03 the GPU booking is 2 whole H200s plus 2 MIG 3g.71gb slices (1 whole H200
+before), all in use. It appears as ClusterQueue
 `user-<name>` behind LocalQueue `reserved`. Its `rhai-tmm.dev/until` label is the end of the
 current daily slot and moves forward each day while the booking lasts. When the booking
 ends, Kueue stops the GPU pods: Whisper, Kokoro and OpenSpline. Voice then stops; text chat
@@ -210,9 +211,11 @@ Processing, once the files are on the Mac:
 
 ### 4. Measure high quality on a GPU pair
 `193c128` makes setup choose high quality when two whole GPUs are free next to the models
-and Kokoro keeps its slice. The pair is not measured yet.
-- Book a second whole H200, then run `scripts/setup.sh --step 2`. It should report
-  "OpenSpline in high quality ... on 2 x nvidia.com/gpu". Then run `--step 6`.
+and Kokoro keeps its slice. Since 2026-11-03 it runs: revision 21 has one worker,
+`quality: high`, on devices 0 and 1, with about 9 GB in use on each H200. It is not measured
+yet, nor tried in the browser.
+- Done on 2026-11-03: a second whole H200 booked, `scripts/setup.sh --step 2` chose high
+  quality, and `--step 6` deployed it.
 - Run the benchmark inside the pod with `--quality high --devices 0 1` (command in
   [openspline.md](openspline.md)). Comfortable means a real-time factor of about 1.8 or more
   and a first block under 0.6 s.

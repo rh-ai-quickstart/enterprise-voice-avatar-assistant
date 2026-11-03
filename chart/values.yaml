@@ -497,12 +497,6 @@ openspline:
     - id: lisa
       name: Lisa
       gender: female
-    - id: professor
-      name: Professor
-      gender: male
-    - id: acharya
-      name: Acharya
-      gender: male
   # Whole GPUs: real-time video needs their compute (two for high quality, with more memory). On a
   # Kueue-managed project, add the queue in podLabels (kueue.x-k8s.io/queue-name); scripts/setup.sh
   # does all of this from the booked quota.

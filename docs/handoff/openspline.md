@@ -126,8 +126,8 @@ real presenter footage gives it for free (see [avatar-research.md](avatar-resear
   on 2026-10-30 (Emily was a smear at 1 Mbps, from her busy background), and Professor and
   Acharya, who replaced them, on 2026-11-03. OpenSpline's other examples are public figures
   (Elon Musk, Nikola Tesla, Ye). A face remembered in the browser that is no longer offered
-  falls back to the default. The chart's `configmap.yaml` sends `AVATAR_FACES` from `openspline.faces`
-  when the provider is openspline, else from `voiceAgent.faces` (Tavus).
+  falls back to the default. The chart's `configmap.yaml` sends `AVATAR_FACES` from
+  `openspline.faces` when the provider is openspline, else from `voiceAgent.faces` (Tavus).
 - **The portraits:** `chart/files/portraits/<id>.jpg`. The chart puts them in the ConfigMap
   `avatar-portraits`, keeping them under about 700 KB (the 1 MiB limit includes base64), and
   mounts it at `/portraits` in the voice agent and the RAG API. It refuses to render when a

@@ -188,7 +188,8 @@ administers one project only.
   high quality (revision 21) and was answered `openspline,tavus`, so Beyond Presence left the UI
   (Mohamed does not want it) and the TURN server of #16 stays off. High quality restarted about
   every 24 minutes between sessions (NCCL's 5-minute timeout on the second GPU's broadcast); a
-  keepalive patch fixes it, and the UI shows the quality (#19).
+  keepalive patch fixes it, and the UI shows the quality (#19). Deployed as revision 23; the
+  worker then stayed up for 47 minutes without a session.
 
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)

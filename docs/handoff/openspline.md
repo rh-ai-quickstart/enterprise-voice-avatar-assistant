@@ -178,10 +178,14 @@ timeout, `/readyz` 200 throughout.
 - **The workers:** the GPU count in `openspline.resources` makes them: one per GPU (low), one
   per pair (high), written to `workers.yaml`. A changed layout restarts the pod (a checksum
   annotation). The chart refuses high with fewer than two GPUs.
-- **Setup's choice** (step 2, `AVATAR_QUALITY=auto`):
+- **Setup's choice** (step 2, again at each step 6 and by `--adapt`; `AVATAR_QUALITY=auto`):
   - high when a queue has two whole GPUs free next to the models and Kokoro still gets its
     GPU slice;
-  - low on one whole GPU otherwise.
+  - low on one whole GPU otherwise;
+  - low on a MIG slice of 3g or more (the one with the most compute) when there is no whole GPU,
+    as long as Kokoro keeps a slice too (since 2026-11-20). High never runs on MIG: its two
+    processes exchange tensors between their GPUs;
+  - left out of the UI when the booking has none of these.
 
   Kokoro on CPU costs seconds per sentence, more than the detail is worth. High also gets
   16 Gi requested and 64 Gi limit of memory for its two processes.
@@ -195,8 +199,9 @@ browser):
 | high | 1.07x (26.9 fps) | 1.03 s per 1.12 s | 1.26 s | 8 GB |
 
 OpenSpline's README reports, on an A100: 64 fps low, 8 fps high. The GPU pair for high runs
-since 2026-11-03 but is **not measured yet** (to-do 4). A MIG 3g.71gb slice for low is not tested
-either; at about 3/7 of the compute, it would land around 2x real time.
+since 2026-11-03 but is **not measured yet** (to-do 4). A MIG 3g.71gb slice for low is not measured
+either, though setup now chooses it when no whole GPU is booked; at about 3/7 of the compute it
+should land around 2x real time. Measure it with `--quality low --devices 0` in the pod.
 
 ## Benchmark commands
 Inside the running pod. It loads a second copy of the model next to the live worker; an H200

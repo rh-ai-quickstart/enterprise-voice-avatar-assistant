@@ -191,6 +191,16 @@ administers one project only.
   keepalive patch fixes it, and the UI shows the quality (#19). Deployed as revision 23; the
   worker then stayed up for 47 minutes without a session.
 
+- **2026-11-19/20: the GPU layout follows the booking.** The booking of 2 whole H200s ended on
+  5 Nov; OpenSpline (still asking for 2 whole GPUs) waited in Kueue, while Whisper and Kokoro came
+  back by themselves on a 1 whole + 4 MIG booking. That one ended at midnight, and Mohamed has
+  booked 5 MIG 3g.71gb slices. He asked for the deployment to follow any booking without
+  running step 2 again. Setup now plans the GPUs at every step 6, can put OpenSpline (low) on a
+  MIG slice of 3g or more, leaves it out of the UI with no GPU for it, and
+  `scripts/setup.sh --adapt` redeploys when the booking changes; `scripts/gpu-watch.sh` runs it
+  every 10 minutes from a LaunchAgent on the Mac (an in-cluster job cannot read the
+  ClusterQueue).
+
 ## Measurements to compare against
 Kept in [status-and-todo.md](status-and-todo.md) ("Measured"), [voice-pipeline.md](voice-pipeline.md)
 and [openspline.md](openspline.md).

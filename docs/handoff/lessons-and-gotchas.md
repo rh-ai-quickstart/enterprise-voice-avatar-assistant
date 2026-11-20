@@ -24,6 +24,14 @@ Everything here cost time at least once. Each entry says what happens and what t
   Homebrew on a new Mac. That is expected.
 
 ## OpenShift and Kubernetes
+- **When a TMM booking ends, its ClusterQueue and the LocalQueue `reserved` are deleted.** Every
+  GPU pod waits (`SchedulingGated`) until the next booking recreates them. The next booking may
+  have another shape (whole GPUs or MIG slices), and Kueue cannot move a pod between
+  `nvidia.com/gpu` and `nvidia.com/mig-*`: they are different resources. Setup's step 6 and
+  `--adapt` plan the layout again (see [setup-and-deploy.md](setup-and-deploy.md)).
+- **A service account in the project cannot read its ClusterQueue** ("Forbidden"), and nothing
+  namespaced shows the quota: no ResourceQuota, and the LocalQueue's status has usage only. Only a
+  user login sees the booking, which is why the GPU watch runs on the Mac.
 - **A passthrough Route sends TLS by SNI, and LiveKit's native SDK got no relay through it.**
   Browsers relay through LiveKit's TURN server behind the Route; a client on LiveKit's Python
   SDK (what Beyond Presence's agents run) gathered no relay candidate there at all. A TURN server

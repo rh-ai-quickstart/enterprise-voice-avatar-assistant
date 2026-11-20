@@ -20,6 +20,8 @@ Symptoms first, then the cause, the command that confirms it, and the fix. Every
 
 **InferenceService predictor pod Pending, event "Insufficient nvidia.com/gpu".** Count what is allocated: `oc describe node <gpu node> | grep -A3 'nvidia.com/gpu'`, and `oc get pods -A -o json | jq '[.items[] | select(.spec.containers[].resources.limits."nvidia.com/gpu")] | .[] | .metadata.namespace + "/" + .metadata.name'`. Models served from the dashboard in other projects count too. Free a GPU or point the model at an existing endpoint (`deploy: false`).
 
+**After a new GPU booking, Whisper, Kokoro or OpenSpline stay `SchedulingGated`.** Kueue holds a pod that asks for a resource the booking does not have: `oc get workloads.kueue.x-k8s.io` shows `insufficient unused quota for nvidia.com/gpu ... 1 more needed` when the deployment still asks for whole GPUs and the booking has MIG slices (or the other way round). When a booking ends, the ClusterQueue and the LocalQueue `reserved` disappear until the next one starts, and every GPU pod waits. Run `scripts/setup.sh --step 6`, which plans the GPUs again from the booking, or let the GPU watch do it (`scripts/gpu-watch.sh status`; see SETUP.md, "Following GPU bookings"). `scripts/setup.sh --status` lists the quota setup sees.
+
 **Model pod restarts on every chart change, needing a second GPU during the rollout.** KServe defaults to a rolling update. The chart sets `deploymentStrategy: {type: Recreate}` and `serving.kserve.io/autoscalerClass: external` on every InferenceService; keep them when adding models.
 
 **Llama crash-loops with a KV cache allocation error.** Without `--max-model-len` vLLM reserves cache for the full 128k context, too much for a 24 GiB card. The chart passes `--max-model-len=16384`.

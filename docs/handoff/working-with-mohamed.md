@@ -74,12 +74,17 @@ sessions. Follow them; they are not in the code.
 - **"100% automated in setup.sh."** A new environment or a new choice belongs in setup.sh,
   detected from the cluster, with an environment variable to override it, not in manual
   steps.
-- **Keep both avatar options.** Tavus and OpenSpline stay; setup step 2 chooses. Beyond
-  Presence is not wanted (2026-11-03): answer step 2 with `openspline,tavus`. OpenSpline should
+- **Keep both avatar options in setup.** Tavus and OpenSpline stay; setup step 2 chooses. Beyond
+  Presence is not wanted (2026-11-03). Since 2026-11-20 the UI offers OpenSpline only, on
+  purpose: step 2 is answered `openspline`. OpenSpline should
   run in high quality whenever two whole GPUs are booked, and the UI shows which quality runs.
 - **Latency matters a lot.** The current 1 to 2 s from end of speech to first audio is the
   bar. Do not trade it away for picture quality without saying so: that is why high quality
   needs a GPU pair, and why it never pushes Kokoro off its GPU.
+- **The deployment follows the GPU booking by itself** (2026-11-20): "whenever I book the GPU
+  or any slicing of it, it should detect it and run on it automatically". Step 6 plans the GPUs
+  again, and the GPU watch (`scripts/gpu-watch.sh`) redeploys from the Mac. Do not bring back a
+  manual step for a booking change.
 - **Incremental scope.** Deliver one piece, confirm, continue. Ask before fanning out to many
   files when the request is open.
 

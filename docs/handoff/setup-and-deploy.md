@@ -41,16 +41,21 @@ with `oc project <name>`.
    - **Per model** (LLM, STT, EMB): `REMOTE_<X>_ENDPOINT` if given; else the MaaS model
      matching `MAAS_<X>_MODEL`; else the chart serves it on the smallest GPU or MIG slice of
      a queue that fits (`assign_gpus`: LLM needs 24 GB, Whisper and BGE-M3 10 GB, Kokoro
-     4 GB, the avatar a whole card).
+     4 GB; the avatar a whole card, else the MIG slice with the most compute, 3g or more).
    - **The avatar question:** tavus, bey, openspline, several (`openspline,tavus,bey`: the UI
-     offers each, the first preselected) or none. The suggestion is `openspline,tavus` when a whole
-     GPU is free. `AVATAR_CHOICE` in `state.env` holds the answer; `avatar_has`,
+     offers each, the first preselected) or none. The suggestion is `openspline,tavus` when the
+     booking has a GPU for OpenSpline. `AVATAR_CHOICE` in `state.env` holds the answer; `avatar_has`,
      `avatar_list` and `avatar_default` read it. With several, the overlay gets
      `voiceAgent.avatarProviders`, and step 6 passes the list to `deploy.sh` as
      `AVATAR_PROVIDER=openspline,tavus`.
-   - **OpenSpline's quality:** high on a GPU pair when one is free and Kokoro keeps its
-     slice, else low (`AVATAR_QUALITY` overrides).
-   - **Kokoro** gets a leftover slice with the GPU image (`TTS_GPU=false` keeps it on CPU).
+   - **The GPU plan** (`plan_gpus`): candidate layouts, best first, the first that fits wins:
+     OpenSpline high on two whole GPUs with Kokoro on a slice; low (whole GPU, else MIG 3g+) with
+     Kokoro on a slice; high with Kokoro on CPU; low on a whole GPU with Kokoro on CPU; then
+     without OpenSpline, with and without Kokoro's slice. So OpenSpline takes a MIG slice only
+     when Kokoro keeps one too, and drops out of the UI (`AVATAR_ACTIVE`) when it has no GPU.
+     `AVATAR_QUALITY` and `TTS_GPU=false` remove candidates. Only the models (Whisper here)
+     must fit; otherwise step 2 stops with what is required and what the queues have.
+   - **Kokoro** gets a slice with the GPU image when the plan has one (`TTS_GPU=false` keeps it on CPU).
    - **Writes** `~/.assistant-setup/values-object.json` (see below).
 3. **Project check.** The queue still has quota; warns when the booking ends within two hours.
 4. **TURN certificate.** A namespaced cert-manager Issuer (Let's Encrypt HTTP-01) and a
@@ -96,8 +101,10 @@ The cluster path differs in steps 1 to 3 (operators, GPU time-slicing, Argo CD) 
 
 ### State it keeps (`~/.assistant-setup/state.env`)
 - **Step 2:** `PROFILE`; `MODEL_<LLM|STT|EMB>_{SRC,URL,NAME,GPU}`; `MODEL_TTS_GPU`;
-  `GPU_QUEUE`; `AVATAR_CHOICE`; `AVATAR_GPU`, `AVATAR_GPUS`, `AVATAR_LEVEL` (OpenSpline's GPU
-  resource, count and quality).
+  `GPU_QUEUE`; `AVATAR_CHOICE` (the wish list); `AVATAR_ACTIVE` (the avatars deployed: the wish
+  list without OpenSpline while it has no GPU); `AVATAR_GPU`, `AVATAR_GPUS`, `AVATAR_LEVEL`
+  (OpenSpline's GPU resource, count and quality); `SAVED_<AVATAR_QUALITY|TTS_GPU|KUEUE_QUEUE|GPU_RESOURCE>`
+  when step 2 got them. Step 6 and `--adapt` rewrite the GPU part (not the model sources).
 - **Progress:** `STEP_<n>_DONE` (timestamps), `TURN_SKIPPED`, `AVOID_NODES`, and discovered
   facts.
 - **Next to it:** `values-object.json` (the overlay), `avoid-nodes`, `google-sa.json`,
@@ -169,6 +176,40 @@ the avoided node, and the doc written. A second run changed nothing.
   the passwords kept.
 - Step 9's preflight passed.
 
+### --adapt and the GPU watch
+A booking can change shape (2 whole H200s + 2 MIG slices on 2026-11-03, 1 + 4 on 2026-11-19,
+5 MIG slices booked next), and Kueue cannot move a pod from `nvidia.com/gpu` to
+`nvidia.com/mig-3g.71gb`: they are different resources, so the deployment has to change.
+- **Step 6 plans again** from the queues before every deploy, keeping step 2's answers. Without
+  room for the models it deploys the saved layout and warns.
+- **`scripts/setup.sh --adapt`** plans dry and compares `gpu_signature` of two computed values
+  documents: `planned_values` (`helm install --dry-run=client -o json` with the same files as
+  step 6, then `.chart.values * .config`) and `helm get values assistant --all`. Comparing the
+  overlay alone with the release's merged values (the first version) would differ forever if
+  `values-demo-cluster.yaml` ever set a GPU field. When they differ it runs step 6. It skips: not
+  logged in (one notification, flag `adapt-paused`), no deployment confirmed from this machine, no
+  room for the models, a live voice session (LiveKit rooms with participants, listed through the
+  voice agent's own keys; "unknown" when that fails while the voice agent is ready, which also
+  waits; `adapt-deferred` holds when it started waiting, `ADAPT_MAX_WAIT` caps it), and a layout
+  whose redeploy failed less than `ADAPT_RETRY` minutes ago (`adapt-failed`: epoch and layout;
+  one notification per layout).
+  One line per run in `logs/adapt.log`, about 25 s each, mostly discovery.
+- **`scripts/gpu-watch.sh install`** writes the LaunchAgent
+  `io.github.rh-ai-quickstart.assistant-gpu-watch` (every 600 s, `RunAtLoad`) that runs
+  `/bin/bash scripts/setup.sh --adapt` from the checkout it was installed from; setup re-execs
+  under Homebrew's bash. `status`, `now`, `uninstall`.
+- **`run.lock`** (a directory with `<pid> <mode>`) keeps the watch and a run by hand apart: the
+  watch skips while a run is active, and a run by hand stops with a message while the watch
+  deploys. A lock whose pid is gone, or no longer runs `setup.sh` (reused after a reboot), is
+  taken over.
+- **Why not in the cluster:** a service account in the project gets "Forbidden" on the
+  ClusterQueue (tested 2026-11-19), and nothing in the project shows the quota. A CronJob would
+  need the TMM admins to grant it read access to its own ClusterQueue.
+
+To try the plan on made-up bookings, load the functions from `setup.sh` into a scratch script
+and set `GPU_OFFERS` (lines of `<queue> <resource> <units> <until>`); `MODEL_STT_SRC=chart`,
+`AVATAR_CHOICE` and `KUEUE=yes` are the other inputs.
+
 ## scripts/deploy.sh
 A Helm install for a regular user, usable on its own. It takes these variables:
 - `PROJECT`, `DOMAIN`, `RELEASE` (default `assistant`);
@@ -207,6 +248,7 @@ Start with `oc project -q` (the Mac's default kubeconfig is the TMM one). If `oc
 
 ```bash
 scripts/setup.sh --status                       # the nine steps at a glance
+scripts/gpu-watch.sh status                     # the GPU watch, and its last checks
 oc get pods -o wide                             # where everything runs
 oc get workloads.kueue.x-k8s.io                 # GPU pods waiting for Kueue, and why
 oc get isvc                                     # Whisper Ready?

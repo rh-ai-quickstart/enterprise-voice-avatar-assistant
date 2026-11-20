@@ -81,7 +81,10 @@ STATE_DIR="${STATE_DIR:-$HOME/.assistant-setup}"
 STATE="$STATE_DIR/state.env"
 SECRETS_FILE="${SECRETS_FILE:-$HOME/secrets.env}"
 PROJECT_ENV="${PROJECT:-}"; ACCESS_ENV="${ACCESS:-}"; DOMAIN_ENV="${DOMAIN:-}"; AVATAR_ENV="${AVATAR_PROVIDER:-}"
-# settings that shape the GPU plan: given to step 2, they are kept for the deploys after it
+# settings that shape the GPU plan: given to step 2, they are kept for the deploys after it. For
+# each, PLAN_ENV_<X> holds the environment's value and SAVED_<X> step 2's (in the progress file);
+# <X> is the first that is set: AVATAR_QUALITY=high scripts/setup.sh --step 2 saves
+# SAVED_AVATAR_QUALITY=high, a later --step 6 reads it, and AVATAR_QUALITY=low --step 6 wins once.
 PLAN_OPTS="AVATAR_QUALITY TTS_GPU KUEUE_QUEUE GPU_RESOURCE"
 for _o in $PLAN_OPTS; do printf -v "PLAN_ENV_$_o" '%s' "${!_o:-}"; done
 PROJECT="${PROJECT:-voice-avatar-assistant}"
@@ -108,12 +111,18 @@ if [ "${DEBUG:-0}" = 1 ]; then exec {BASH_XTRACEFD}>>"$RUN_LOG.trace"; export PS
 # One run at a time: the GPU watch (--adapt) and a run by hand must not deploy over each other.
 LOCK_DIR="$STATE_DIR/run.lock"
 lock_owner() { cat "$LOCK_DIR/owner" 2>/dev/null; }   # "<pid> <mode>"
+# alive while the process that wrote the lock still runs setup.sh (a pid reused after a reboot is not)
+lock_alive() { kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q 'setup\.sh'; }
 take_lock() {
   local owner _
   for _ in 1 2 3; do
-    if mkdir "$LOCK_DIR" 2>/dev/null; then printf '%s %s\n' "$$" "$MODE" > "$LOCK_DIR/owner"; trap 'rm -rf "$LOCK_DIR"' EXIT; return 0; fi
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+      printf '%s %s\n' "$$" "$MODE" > "$LOCK_DIR/owner"
+      # The script's only EXIT trap: a trap added later must keep removing the lock.
+      trap 'rm -rf "$LOCK_DIR"' EXIT; return 0
+    fi
     owner=$(lock_owner); [ -n "$owner" ] || { sleep 1; owner=$(lock_owner); }
-    [ -n "$owner" ] && kill -0 "${owner%% *}" 2>/dev/null && return 1
+    [ -n "$owner" ] && lock_alive "${owner%% *}" && return 1
     rm -rf "$LOCK_DIR"   # left behind by a run that was killed
   done
   return 1
@@ -1443,22 +1452,33 @@ adapt_notify() {  # a macOS notification; ADAPT_NOTIFY=0 turns them off
   [ "$IS_MAC" = 1 ] && [ "${ADAPT_NOTIFY:-1}" = 1 ] || return 0
   osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "Voice assistant GPUs"' -e 'end run' "$1" >/dev/null 2>&1 || true
 }
-# gpu_signature: the GPU layout of a values document (the overlay, or the release's values) on one line
+# gpu_signature: the GPU layout in computed values (the chart's defaults merged with what was
+# given), on one line. Both sides of the comparison are computed by Helm from the same files, so a
+# field set in chart/values-demo-cluster.yaml or the chart's defaults counts on both.
 gpu_signature() {
-  jq -r 'def nv: (. // {}) | to_entries | map(select((.key | startswith("nvidia.com/")) and .value != null) | "\(.value) x \(.key | ltrimstr("nvidia.com/"))") | join(" + ");
-    def or_else($d): if . == "" then $d else . end;
-    ((.voiceAgent.avatarProviders // [.voiceAgent.avatarProvider // "none"]) | index("openspline")) as $os
+  jq -r 'def nv: (. // {}) | to_entries | map(select((.key | startswith("nvidia.com/")) and .value != null) | "\(.value) x \(.key | ltrimstr("nvidia.com/"))") | join(" + ") | if . == "" then "CPU" else . end;
+    # the avatars as the chart reads them: avatarProviders, else avatarProvider
+    ((.voiceAgent.avatarProviders // []) as $l | (if ($l | length) > 0 then $l else [.voiceAgent.avatarProvider // "none"] end) | map(ascii_downcase) | index("openspline")) as $os
     | ([.models.podLabels, .models.tts.podLabels, .openspline.podLabels | .["kueue.x-k8s.io/queue-name"]? // empty] | first // "none") as $q
-    | [ (if $os == null then "no OpenSpline" else "OpenSpline \(.openspline.quality // "low") on \(.openspline.resources.limits | nv | or_else("1 x gpu"))" end),
-        (if .models.stt.deploy == false then "Whisper remote" else "Whisper on \(.models.stt.resources.limits | nv | or_else("1 x gpu"))" end),
-        "Kokoro on \(.models.tts.resources.limits | nv | or_else("CPU"))",
+    | [ (if $os == null then "no OpenSpline" else "OpenSpline \(.openspline.quality // "low") on \(.openspline.resources.limits | nv)" end),
+        (if .models.stt.deploy == false then "Whisper remote" else "Whisper on \(.models.stt.resources.limits | nv)" end),
+        "Kokoro on \(.models.tts.resources.limits | nv)",
         "queue \($q)" ]
     | join(", ")'
 }
+# planned_values <overlay>: the computed values step 6 would deploy with this overlay, from Helm
+# itself without the cluster (a client dry run; --dry-run alone on Helm before 3.13)
+planned_values() {
+  local -a args=(assistant "$ROOT/chart" -o json -n "$PROJECT" -f "$ROOT/chart/values-demo-cluster.yaml" -f "$1" --set "global.domain=$DOMAIN")
+  { helm install "${args[@]}" --dry-run=client 2>/dev/null || helm install "${args[@]}" --dry-run 2>/dev/null; } | jq '.chart.values * .config'
+}
+deployed_values() { helm get values assistant -n "$PROJECT" --all -o json 2>/dev/null; }
 # live_sessions: the voice sessions now, as LiveKit rooms with someone in them (asked through the
-# voice agent, which has LiveKit's keys); 0 when it cannot be asked
+# voice agent, which has LiveKit's keys). When it cannot be asked: 0 if the voice agent is not
+# ready (no session can run without it), else "unknown", which waits like a live session.
 live_sessions() {
-  oc exec deploy/voice-agent -n "$PROJECT" -- .venv/bin/python -c '
+  local n
+  n=$(oc exec deploy/voice-agent -n "$PROJECT" -- .venv/bin/python -c '
 import asyncio, os
 from livekit import api
 async def main():
@@ -1468,10 +1488,14 @@ async def main():
     finally:
         await lk.aclose()
     print(sum(1 for r in rooms if r.num_participants > 0))
-asyncio.run(main())' 2>/dev/null | tail -1 | grep -E '^[0-9]+$' || echo 0
+asyncio.run(main())' 2>/dev/null | tail -1)
+  if [[ "$n" =~ ^[0-9]+$ ]]; then echo "$n"
+  elif [ "$(oc get deploy voice-agent -n "$PROJECT" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" -ge 1 ] 2>/dev/null; then echo unknown
+  else echo 0; fi
 }
 adapt() {
-  local rc=0 want have tmp n waited deferred="$STATE_DIR/adapt-deferred"
+  local rc=0 want have tmp n waited ft fw retry=no
+  local deferred="$STATE_DIR/adapt-deferred" failed="$STATE_DIR/adapt-failed"   # failed: "<epoch> <layout>" of the last redeploy that failed
   if ! oc whoami >/dev/null 2>&1; then
     say "$(stamp) not logged in to the cluster (the token expired?): nothing checked until the next oc login"
     [ -f "$STATE_DIR/adapt-paused" ] || { touch "$STATE_DIR/adapt-paused"; adapt_notify "GPU watch paused: log in to the cluster again with oc login"; }
@@ -1484,23 +1508,38 @@ adapt() {
   plan_gpus "$(avatar_has openspline && echo yes || echo no)" >/dev/null || rc=$?
   [ "$rc" = 2 ] && return 1
   if [ "$rc" = 1 ]; then rm -f "$deferred"; say "$(stamp) the GPU booking has no room for $(chart_model_names) ($(offers_text)): nothing changed"; return 0; fi
-  tmp=$(mktemp); apply_plan dry "$tmp" || { rm -f "$tmp"; return 1; }; want=$(gpu_signature < "$tmp"); rm -f "$tmp"
-  have=$(helm get values assistant -n "$PROJECT" -o json 2>/dev/null | gpu_signature)
-  [ -n "$have" ] && [ -n "$want" ] || { say "$(stamp) could not compare with release assistant (helm get values): nothing changed"; return 0; }
-  if [ "$want" = "$have" ]; then rm -f "$deferred"; say "$(stamp) unchanged: $have"; return 0; fi
+  tmp=$(mktemp); apply_plan dry "$tmp" || { rm -f "$tmp"; return 1; }; want=$(planned_values "$tmp" | gpu_signature); rm -f "$tmp"
+  have=$(deployed_values | gpu_signature)
+  [ -n "$have" ] && [ -n "$want" ] || { say "$(stamp) could not compare the planned values with release assistant's (helm): nothing changed"; return 0; }
+  if [ "$want" = "$have" ]; then rm -f "$deferred" "$failed"; say "$(stamp) unchanged: $have"; return 0; fi
   say "$(stamp) the GPU booking changed. Deployed: $have. The booking fits: $want"
+  # a redeploy that failed is tried again for the same layout only after ADAPT_RETRY minutes (60)
+  if [ -s "$failed" ]; then
+    read -r ft fw < "$failed"
+    if [ "$fw" = "$want" ]; then
+      retry=yes
+      if [ $(( $(date +%s) - ft )) -lt $(( ${ADAPT_RETRY:-60} * 60 )) ]; then
+        say "  the redeploy for this layout failed at $(until_text "$ft"); the next try comes after $(until_text $(( ft + ${ADAPT_RETRY:-60} * 60 ))) (scripts/setup.sh --step 6 tries now)"; return 0
+      fi
+    fi
+  fi
   n=$(live_sessions)
-  if [ "${n:-0}" -gt 0 ]; then
+  if [ "$n" = unknown ] || [ "${n:-0}" -gt 0 ] 2>/dev/null; then
     [ -s "$deferred" ] || date +%s > "$deferred"
     waited=$(( ($(date +%s) - $(cat "$deferred")) / 60 ))
-    if [ "$waited" -lt "${ADAPT_MAX_WAIT:-60}" ]; then say "  $n voice session(s) live: the redeploy waits for them (waited $waited of ${ADAPT_MAX_WAIT:-60} minutes)"; return 0; fi
-    say "  $n voice session(s) still live after $waited minutes: redeploying now"
+    local what="$n voice session(s) live"; [ "$n" = unknown ] && what="LiveKit could not be asked for live sessions"
+    if [ "$waited" -lt "${ADAPT_MAX_WAIT:-60}" ]; then say "  $what: the redeploy waits (waited $waited of ${ADAPT_MAX_WAIT:-60} minutes)"; return 0; fi
+    say "  $what, still after $waited minutes: redeploying now"
   fi
   rm -f "$deferred"
-  adapt_notify "GPU booking changed: redeploying for $want"
+  [ "$retry" = yes ] || adapt_notify "GPU booking changed: redeploying for $want"
   run_step 6; rc=$?
-  if [ "$rc" = 0 ]; then adapt_notify "Redeployed for the new GPU booking: $want"
-  else adapt_notify "The redeploy for the new GPU booking failed; see $RUN_LOG"; fi
+  if [ "$rc" = 0 ]; then rm -f "$failed"; adapt_notify "Redeployed for the new GPU booking: $want"
+  else
+    # one notification per layout: a retry that fails again only writes the log
+    [ "$retry" = yes ] || adapt_notify "The redeploy for the new GPU booking failed; see $RUN_LOG"
+    printf '%s %s\n' "$(date +%s)" "$want" > "$failed"
+  fi
   return $rc
 }
 

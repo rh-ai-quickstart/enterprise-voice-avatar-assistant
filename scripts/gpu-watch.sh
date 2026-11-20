@@ -71,7 +71,12 @@ $env_extra  </dict>
 EOF
   plutil -lint "$PLIST" >/dev/null || { echo "the LaunchAgent file did not validate: $PLIST"; return 1; }
   loaded && launchctl bootout "$TARGET/$LABEL" 2>/dev/null || true
-  launchctl bootstrap "$TARGET" "$PLIST"
+  # right after a bootout, bootstrap can fail with "Input/output error" for a moment
+  local try=1
+  until launchctl bootstrap "$TARGET" "$PLIST" 2>/dev/null; do
+    [ "$try" -lt 5 ] || { launchctl bootstrap "$TARGET" "$PLIST"; return 1; }
+    try=$((try + 1)); sleep 1
+  done
   echo "GPU watch on: scripts/setup.sh --adapt every $((INTERVAL / 60)) minutes from $ROOT, and now."
   echo "Log: $LOG (scripts/gpu-watch.sh status shows its last lines)."
   oc whoami >/dev/null 2>&1 || echo "Note: oc is not logged in now; the watch waits for the next oc login."
@@ -99,7 +104,10 @@ case "${1:-status}" in
   install) install_agent ;;
   uninstall) uninstall_agent ;;
   status) status_agent ;;
-  now) loaded && launchctl kickstart "$TARGET/$LABEL" && echo "Checking now; the result appears in $LOG within a minute." || echo "GPU watch off; scripts/gpu-watch.sh install starts it." ;;
+  now)
+    if ! loaded; then echo "GPU watch off; scripts/gpu-watch.sh install starts it."
+    elif launchctl kickstart "$TARGET/$LABEL"; then echo "Checking now; the result appears in $LOG within a minute."
+    else echo "launchctl could not start the check; scripts/setup.sh --adapt runs it in this terminal."; exit 1; fi ;;
   -h|--help|help) sed -n 2,16p "$0" ;;
   *) echo "usage: scripts/gpu-watch.sh install|uninstall|status|now"; exit 1 ;;
 esac

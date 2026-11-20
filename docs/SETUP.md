@@ -83,7 +83,7 @@ scripts/setup.sh --help     # the same list
 | `TTS_GPU`, `KOKORO_GPU_IMAGE` | `auto`, `ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.2` | Namespace path: Kokoro on a GPU slice the queue has left over; `false` keeps it on CPU |
 | `AVATAR_QUALITY` | `auto` | OpenSpline in `high` quality (a pair of whole GPUs) or `low` (one whole GPU or a MIG slice of 3g or more); `auto` picks high when the booking has the pair |
 | `KUEUE_QUEUE`, `GPU_RESOURCE` | from the quota | Namespace path: the local queue and the resource (`nvidia.com/gpu`, `nvidia.com/mig-1g.18gb`, ...) for the models served in the project; both together use a queue without quota of its own, such as one that borrows idle GPUs. These two, `TTS_GPU` and `AVATAR_QUALITY`, given to step 2, are kept for the deploys after it (step 6 and `--adapt` plan the GPUs again); run step 2 without them to go back to the defaults |
-| `ADAPT_MAX_WAIT`, `ADAPT_NOTIFY` | `60`, `1` | `--adapt`: how many minutes a redeploy waits for live voice sessions to end; `0` turns its macOS notifications off |
+| `ADAPT_MAX_WAIT`, `ADAPT_RETRY`, `ADAPT_NOTIFY` | `60`, `60`, `1` | `--adapt`: how many minutes a redeploy waits for live voice sessions to end; how many minutes it waits before trying a failed redeploy again for the same layout; `0` turns its macOS notifications off |
 
 Files the script writes, all under the home directory of the bastion user:
 
@@ -337,10 +337,14 @@ then `oc delete pvc -l app.kubernetes.io/instance=assistant -n <project>`.
 ### Following GPU bookings
 
 `scripts/setup.sh --adapt` compares the GPU layout the booking fits now with the deployed one
-(`helm get values`) and runs step 6 when they differ. It asks nothing and does nothing in these
+and runs step 6 when they differ. Both sides are values computed by Helm from the same files (a
+client dry run of the plan, and `helm get values --all` of the release), so a field set in
+`chart/values-demo-cluster.yaml` or the chart's defaults counts on both. A redeploy that fails is
+tried again for the same layout after `ADAPT_RETRY` minutes, with one notification. It asks nothing and does nothing in these
 cases: no booking now, or one without room for the models (the GPU pods wait in Kueue); no
 deployment made by setup from this machine yet; the login expired. While a voice session is live
-(a LiveKit room with someone in it) the redeploy waits, `ADAPT_MAX_WAIT` minutes at most. On a
+(a LiveKit room with someone in it), or LiveKit cannot be asked while the voice agent is ready,
+the redeploy waits, `ADAPT_MAX_WAIT` minutes at most. On a
 Mac, `scripts/gpu-watch.sh install` runs it every 10 minutes through a LaunchAgent, and shows a
 notification when it redeploys and when the login has expired:
 

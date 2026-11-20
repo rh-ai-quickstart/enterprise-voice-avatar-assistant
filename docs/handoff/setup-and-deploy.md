@@ -182,11 +182,17 @@ A booking can change shape (2 whole H200s + 2 MIG slices on 2026-11-03, 1 + 4 on
 `nvidia.com/mig-3g.71gb`: they are different resources, so the deployment has to change.
 - **Step 6 plans again** from the queues before every deploy, keeping step 2's answers. Without
   room for the models it deploys the saved layout and warns.
-- **`scripts/setup.sh --adapt`** plans dry, compares `gpu_signature` of the planned overlay with
-  that of `helm get values assistant`, and runs step 6 when they differ. It skips: not logged in
-  (one notification, flag `adapt-paused`), no deployment confirmed from this machine, no room for
-  the models, a live voice session (LiveKit rooms with participants, listed through the voice
-  agent's own keys; `adapt-deferred` holds when it started waiting, `ADAPT_MAX_WAIT` caps it).
+- **`scripts/setup.sh --adapt`** plans dry and compares `gpu_signature` of two computed values
+  documents: `planned_values` (`helm install --dry-run=client -o json` with the same files as
+  step 6, then `.chart.values * .config`) and `helm get values assistant --all`. Comparing the
+  overlay alone with the release's merged values (the first version) would differ forever if
+  `values-demo-cluster.yaml` ever set a GPU field. When they differ it runs step 6. It skips: not
+  logged in (one notification, flag `adapt-paused`), no deployment confirmed from this machine, no
+  room for the models, a live voice session (LiveKit rooms with participants, listed through the
+  voice agent's own keys; "unknown" when that fails while the voice agent is ready, which also
+  waits; `adapt-deferred` holds when it started waiting, `ADAPT_MAX_WAIT` caps it), and a layout
+  whose redeploy failed less than `ADAPT_RETRY` minutes ago (`adapt-failed`: epoch and layout;
+  one notification per layout).
   One line per run in `logs/adapt.log`, about 25 s each, mostly discovery.
 - **`scripts/gpu-watch.sh install`** writes the LaunchAgent
   `io.github.rh-ai-quickstart.assistant-gpu-watch` (every 600 s, `RunAtLoad`) that runs
@@ -194,7 +200,8 @@ A booking can change shape (2 whole H200s + 2 MIG slices on 2026-11-03, 1 + 4 on
   under Homebrew's bash. `status`, `now`, `uninstall`.
 - **`run.lock`** (a directory with `<pid> <mode>`) keeps the watch and a run by hand apart: the
   watch skips while a run is active, and a run by hand stops with a message while the watch
-  deploys. A lock whose pid is gone is taken over.
+  deploys. A lock whose pid is gone, or no longer runs `setup.sh` (reused after a reboot), is
+  taken over.
 - **Why not in the cluster:** a service account in the project gets "Forbidden" on the
   ClusterQueue (tested 2026-11-19), and nothing in the project shows the quota. A CronJob would
   need the TMM admins to grant it read access to its own ClusterQueue.

@@ -62,6 +62,8 @@ scripts/setup.sh --status   # discovery and progress only; changes nothing
 scripts/setup.sh --step 6   # run step 6 (again), then stop
 scripts/setup.sh --yes      # never prompt: keys come from ~/secrets.env, missing ones are skipped; no Let's Encrypt e-mail
 scripts/setup.sh --reset    # forget the saved progress; the cluster is not touched
+scripts/setup.sh --adapt    # unattended: redeploy when the booked GPUs changed (namespace path)
+scripts/gpu-watch.sh install  # on a Mac: run --adapt every 10 minutes (see "Following GPU bookings")
 scripts/setup.sh --help     # the same list
 ```
 
@@ -79,7 +81,9 @@ scripts/setup.sh --help     # the same list
 | `MAAS_LLM_MODEL`, `MAAS_STT_MODEL`, `MAAS_EMB_MODEL` | `llama-32-3b`, `whisper.*`, `bge-m3` | Namespace path: the Models-as-a-Service model used for each, when the service has it (a pattern) |
 | `MAAS_SUBSCRIPTION` | the one that includes every model used | Namespace path: the subscription the API key is bound to |
 | `TTS_GPU`, `KOKORO_GPU_IMAGE` | `auto`, `ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.2` | Namespace path: Kokoro on a GPU slice the queue has left over; `false` keeps it on CPU |
-| `KUEUE_QUEUE`, `GPU_RESOURCE` | from the quota | Namespace path: the local queue and the resource (`nvidia.com/gpu`, `nvidia.com/mig-1g.18gb`, ...) for the models served in the project; both together use a queue without quota of its own, such as one that borrows idle GPUs |
+| `AVATAR_QUALITY` | `auto` | OpenSpline in `high` quality (a pair of whole GPUs) or `low` (one whole GPU or a MIG slice of 3g or more); `auto` picks high when the booking has the pair |
+| `KUEUE_QUEUE`, `GPU_RESOURCE` | from the quota | Namespace path: the local queue and the resource (`nvidia.com/gpu`, `nvidia.com/mig-1g.18gb`, ...) for the models served in the project; both together use a queue without quota of its own, such as one that borrows idle GPUs. These two, `TTS_GPU` and `AVATAR_QUALITY`, given to step 2, are kept for the deploys after it (step 6 and `--adapt` plan the GPUs again); run step 2 without them to go back to the defaults |
+| `ADAPT_MAX_WAIT`, `ADAPT_NOTIFY` | `60`, `1` | `--adapt`: how many minutes a redeploy waits for live voice sessions to end; `0` turns its macOS notifications off |
 
 Files the script writes, all under the home directory of the bastion user:
 
@@ -87,6 +91,8 @@ Files the script writes, all under the home directory of the bastion user:
 |---|---|
 | `~/.assistant-setup/state.env` | Saved facts and progress: API URL and user of the login, versions, GPU count, domain, the language model's namespace, the profile, `STEP_N_DONE` and `STEP_N_LAST_RUN` per step |
 | `~/.assistant-setup/logs/setup-<timestamp>.log` | Everything one run printed; `bootstrap-<timestamp>.log` and `deploy-<timestamp>.log` next to it hold the output of steps 3 and 6 |
+| `~/.assistant-setup/logs/adapt.log` | `--adapt` (the GPU watch): one line per check, and the output of the redeploys it ran |
+| `~/.assistant-setup/run.lock` | Held while a run changes something, so the GPU watch and a run by hand never deploy at the same time |
 | `~/.assistant-setup/values-object.json` | The deployment profile: a small JSON overlay Argo CD merges over `chart/values-demo-cluster.yaml` (model shares, vLLM arguments, guardrails off) |
 | `~/.assistant-setup/google-sa.json` | The Google service account key pasted in step 5, mode 600 |
 | `~/secrets.env` | Every key and token, mode 600; created from `secrets.env.example` |
@@ -302,11 +308,11 @@ differ from the cluster path:
 | Step | On the namespace path |
 |---|---|
 | 1 Access and prerequisites | The tools (Homebrew on macOS), admin rights in the project, permission to create every kind the chart needs (routes with a host included), KServe in the project, the Kueue queues of the project with their GPU quota and the booking's end, the Models-as-a-Service models, a default StorageClass, cert-manager. The apps domain comes from the console URL |
-| 2 Deployment profile | Per model: `REMOTE_<X>_ENDPOINT` when given, else the Models-as-a-Service model (`MAAS_<X>_MODEL`), else the chart serves it in the project on the smallest GPU or MIG slice of a queue with quota that fits (10 GB for Whisper and BGE-M3, 24 GB for the language model). Without enough quota it stops with what is required, what the queues have, and the options (book GPUs, or remote endpoints). Then the avatar (`tavus`, `bey`, `openspline`, several as `openspline,tavus,bey` so the UI offers each, or `none`; with `bey` among them the overlay also gets `livekit.tcpTurn`, a TURN server on a cloud TCP load balancer that Beyond Presence's agents need to reach LiveKit, which `TCP_TURN=false` leaves out; `openspline,tavus` is suggested when a queue has a whole GPU free next to the models, and OpenSpline gets that GPU first, since real-time video wants a whole card). OpenSpline runs in high quality (the Pro model, finer detail) on a pair of whole GPUs when the queue has one free next to the models and Kokoro still gets its GPU slice, else in low quality on one GPU (one H200 runs high only just in real time); `AVATAR_QUALITY=low` or `high` decides instead. Kokoro (text to speech) gets a GPU slice the queue has left over, with its GPU image: a sentence in a fraction of a second instead of seconds on CPU (`TTS_GPU=false` keeps it on CPU). The overlay holds the endpoints, the GPU resources, the queue label (`models.podLabels`, `models.tts.podLabels`, `openspline.podLabels`), the avatar and a 10 GiB n8n volume |
+| 2 Deployment profile | Per model: `REMOTE_<X>_ENDPOINT` when given, else the Models-as-a-Service model (`MAAS_<X>_MODEL`), else the chart serves it in the project on the smallest GPU or MIG slice of a queue with quota that fits (10 GB for Whisper and BGE-M3, 24 GB for the language model). Without enough quota it stops with what is required, what the queues have, and the options (book GPUs, or remote endpoints). Then the avatar (`tavus`, `bey`, `openspline`, several as `openspline,tavus,bey` so the UI offers each, or `none`; with `bey` among them the overlay also gets `livekit.tcpTurn`, a TURN server on a cloud TCP load balancer that Beyond Presence's agents need to reach LiveKit, which `TCP_TURN=false` leaves out; `openspline,tavus` is suggested when a queue has a GPU for OpenSpline next to the models). OpenSpline runs in high quality (the Pro model, finer detail) on a pair of whole GPUs when the queue has one free next to the models and Kokoro still gets its GPU slice, else in low quality on one whole GPU, else on the MIG slice with the most compute, 3g or more, as long as Kokoro keeps a slice too (one H200 runs high only just in real time; the pair's two processes exchange tensors, which MIG slices cannot); `AVATAR_QUALITY=low` or `high` decides instead. With no GPU for it, OpenSpline is left out of the UI, with a warning, until a booking has one. Kokoro (text to speech) gets a GPU slice the queue has left over, with its GPU image: a sentence in a fraction of a second instead of seconds on CPU (`TTS_GPU=false` keeps it on CPU). The overlay holds the endpoints, the GPU resources, the queue label (`models.podLabels`, `models.tts.podLabels`, `openspline.podLabels`), the avatar and a 10 GiB n8n volume |
 | 3 Project check | Nothing is installed. Checks the project and that the queue still has quota, and warns when the booking ends within two hours |
 | 4 TURN certificate | The cluster's wildcard certificate is out of reach, so a namespaced cert-manager Issuer requests one for `livekit-turn-<project>.<apps domain>` from Let's Encrypt (HTTP-01; the e-mail defaults to the login). When the certificate is not Ready within ten minutes, the setup continues without TURN; `--step 4`, then `--step 6`, tries again later |
 | 5 Keys and integrations | As on the cluster path, plus one Models-as-a-Service API key, created with your login and bound to a subscription that includes every model used there (`MAAS_API_KEY` in `~/secrets.env`; `LLM_API_KEY` and `EMBEDDINGS_API_KEY` get its value). Nothing to do in a browser |
-| 6 Deploy with Helm | `scripts/deploy.sh`: `helm upgrade --install` of release `assistant` with `chart/values-demo-cluster.yaml` and the overlay, then waits for the workloads, the models (reporting Kueue workloads that are not admitted, with the reason), the OpenSpline worker when chosen (its first start installs OpenSpline and downloads its weights; the wait prints the container at work and its last log line), and every pod, and runs `helm test` |
+| 6 Deploy with Helm | First plans the GPUs again from the booking as it is now, as step 2 does, keeping the answers of step 2: a new booking needs no step 2. Without room for the models it warns and deploys the layout planned before. Then `scripts/deploy.sh`: `helm upgrade --install` of release `assistant` with `chart/values-demo-cluster.yaml` and the overlay, then waits for the workloads, the models (reporting Kueue workloads that are not admitted, with the reason), the OpenSpline worker when chosen (its first start installs OpenSpline and downloads its weights; the wait prints the container at work and its last log line), and every pod, and runs `helm test` |
 | 7 to 9 | As on the cluster path |
 
 A node of a shared cluster can fail to start containers (every pod's sandbox fails, for
@@ -322,9 +328,34 @@ keeps off the listed nodes too. Tell the cluster admins about the node: only the
 
 Models served in the project run only while the GPU booking lasts: when it ends Kueue stops
 them, and voice (Whisper) or search (BGE-M3) stop with them, while the models from
-Models-as-a-Service keep working. Book again, then `scripts/setup.sh --step 2` if the queue or
-the slice changed, and `--step 6`. To remove the demo: `helm uninstall assistant -n <project>`,
+Models-as-a-Service keep working. When the next booking has the same GPUs, Kueue starts them
+again by itself. When it has other ones (MIG slices instead of whole GPUs, more or fewer),
+`scripts/setup.sh --step 6` plans the layout again and deploys it, or the GPU watch does (next
+section). To remove the demo: `helm uninstall assistant -n <project>`,
 then `oc delete pvc -l app.kubernetes.io/instance=assistant -n <project>`.
+
+### Following GPU bookings
+
+`scripts/setup.sh --adapt` compares the GPU layout the booking fits now with the deployed one
+(`helm get values`) and runs step 6 when they differ. It asks nothing and does nothing in these
+cases: no booking now, or one without room for the models (the GPU pods wait in Kueue); no
+deployment made by setup from this machine yet; the login expired. While a voice session is live
+(a LiveKit room with someone in it) the redeploy waits, `ADAPT_MAX_WAIT` minutes at most. On a
+Mac, `scripts/gpu-watch.sh install` runs it every 10 minutes through a LaunchAgent, and shows a
+notification when it redeploys and when the login has expired:
+
+```bash
+scripts/gpu-watch.sh install     # from the main checkout; INTERVAL=<seconds> changes the period
+scripts/gpu-watch.sh status      # whether it runs, and its last checks
+scripts/gpu-watch.sh now         # check now
+scripts/gpu-watch.sh uninstall
+```
+
+It uses the Mac's `oc` login, so it pauses while the token is expired (a few hours on a shared
+cluster) and carries on after the next `oc login`. A pod in the project cannot do the same:
+its service account may not read the project's ClusterQueue, which holds the booking. It deploys
+the chart of the checkout it runs from, like a step 6 by hand. On Linux, `scripts/gpu-watch.sh
+install` prints a crontab line instead.
 
 ## Resuming, re-running, starting over
 

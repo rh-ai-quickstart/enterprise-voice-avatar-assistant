@@ -8,6 +8,24 @@ quality badge in the UI with the keepalive patch for high quality (#19). All of 
 Helm revision 23 (18:44 local on 2026-11-03, images `sha-becc97e`). The OpenSpline worker then
 stayed up for 47 minutes without a session; before the patch it restarted about every 24.
 
+## 2026-11-20: a new booking, and the layout now follows it
+
+- **The cluster today.** The booking of 2 whole H200s ended on 5 Nov. OpenSpline, still asking
+  for `nvidia.com/gpu: 2` (Helm revision 23), has waited in Kueue since; Whisper and Kokoro came
+  back by themselves on a booking of 1 whole H200 + 4 MIG 3g.71gb (19 Nov). That booking ended
+  on 20 Nov at 00:00: the ClusterQueue and LocalQueue `reserved` are gone, and all three GPU pods
+  wait. Mohamed has booked 5 MIG 3g.71gb slices, which had not started at 11:59 on 20 Nov.
+- **Step 2 ran on 19 Nov (16:51) and was answered `openspline` alone**, so the next step 6
+  offers OpenSpline only, without Tavus. Mohamed confirmed on 20 Nov that he wants OpenSpline
+  only. Not deployed yet.
+- **Branch `gpu-adapt` (PR):** setup plans the GPUs at every step 6, puts OpenSpline (low) on a
+  MIG slice of 3g or more when there is no whole GPU, leaves it out of the UI when there is no GPU
+  for it, and `scripts/setup.sh --adapt` redeploys when the booking changes;
+  `scripts/gpu-watch.sh install` runs it every 10 minutes on the Mac. With 5 slices the plan is
+  OpenSpline low, Whisper and Kokoro each on one slice, two slices free. Tested against the
+  cluster without a booking (no change) and with made-up bookings (plans, step 6's overlay, the
+  chart's render); not yet run against a real new booking.
+
 ## Where it runs
 
 **The shared Red Hat TMM cluster**, project `user-<name>` (see [environments.md](environments.md)).
@@ -145,10 +163,22 @@ chat) and the chart of `b5dd698` (2 Mbps in one stream); see the section above. 
 
 ## To do, in priority order
 
+### 0. Merge the GPU watch, and check it on the 5-slice booking
+- After the merge: `git pull` in the main checkout, then `scripts/gpu-watch.sh install` there.
+- When the booking starts, the watch's log (`scripts/gpu-watch.sh status`) should show "the GPU
+  booking changed", then step 6. OpenSpline's first start on the slice takes about a minute (the
+  low weights are on the volume). Then a voice session in the browser: lips in sync, the badge
+  says "Normal quality".
+- Measure OpenSpline low on the slice (`openspline benchmark --quality low --devices 0` in the
+  pod); about 2x real time is expected. If it falls short of real time, change
+  `assign_gpus` in setup.sh to keep the avatar off MIG.
+- An in-cluster watch (a CronJob) needs the TMM admins to let the project's service account read
+  its own ClusterQueue. Ask Mohamed whether to ask them.
+
 ### 1. Deploy the avatar switch, and confirm the sync fix
 - **Wait** for CI to build the images and commit their promotion to `main`.
-- **Run:** `git pull`, then `scripts/setup.sh --step 2` (answer `openspline,tavus`: Mohamed does
-  not want Beyond Presence, 2026-11-03), then `--step 6`, then hard-refresh the page. Step 6
+- **Run:** `git pull`, then `scripts/setup.sh --step 2` (answer `openspline`: since 2026-11-20
+  Mohamed wants OpenSpline only, and Beyond Presence not at all since 2026-11-03), then `--step 6`, then hard-refresh the page. Step 6
   restarts the OpenSpline worker; its log should say "publish options updated: simulcast from
   OPENSPLINE_VIDEO_SIMULCAST".
 - **Check:**
@@ -241,10 +271,8 @@ patch (#19) it restarted about every 24 minutes between sessions (see
   yes, as Mohamed did, skips the check of the Slack Interactivity URL. Setup could skip the
   question when the Slack keys were restored from the cluster for the same n8n host, or
   word it for an app made earlier.
-- **Low quality on a MIG slice.** It might free the whole H200: a 3g.71gb slice has about 3/7
-  of the compute, and low runs at 5.2x on the whole card. Not tested.
-  `KUEUE_QUEUE=reserved GPU_RESOURCE=nvidia.com/mig-3g.71gb` only works for every model at
-  once, so this needs an `AVATAR_GPU_RESOURCE` override in setup.
+- **Low quality on a MIG slice.** Setup chooses it since 2026-11-20 when no whole GPU is booked
+  (to-do 0); not measured yet.
 - **More than one avatar session at a time.** The chart already makes one worker per GPU
   (low) or per pair (high). Setup gives the avatar one or two GPUs. An `AVATAR_SESSIONS=n`
   setting would ask for n times as many.

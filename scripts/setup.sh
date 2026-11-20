@@ -8,6 +8,8 @@
 #   scripts/setup.sh --step N   run step N (again), then stop
 #   scripts/setup.sh --yes      never prompt: keys come from ~/secrets.env, missing ones are skipped
 #   scripts/setup.sh --reset    forget the saved progress (the cluster is not touched)
+#   scripts/setup.sh --adapt    unattended: redeploy (step 6) when the booked GPUs no longer match
+#                               the deployment; scripts/gpu-watch.sh runs it every 10 minutes
 #
 # The access decides the path. A cluster-admin gets the full setup: operators, GPU sharing,
 # Argo CD. A user who is only an admin of one project (a shared cluster) gets the namespace
@@ -20,12 +22,15 @@
 # REMOTE_STT_ENDPOINT, REMOTE_EMB_ENDPOINT (and the keys in ~/secrets.env).
 #
 # The avatar video is chosen in step 2: tavus (Tavus cloud, its key in step 5), bey (Beyond
-# Presence cloud, its key in step 5), openspline (self-hosted, OpenSpline on whole GPUs of the
+# Presence cloud, its key in step 5), openspline (self-hosted, OpenSpline on GPUs of the
 # project), several (openspline,tavus,bey: the person picks one in the UI, the first preselected)
 # or none (audio only); AVATAR_PROVIDER answers the question,
 # and a later run can switch with --step 2 then --step 6. OpenSpline runs
-# in high quality on a GPU pair when the booked quota has one free next to the models, else in
-# low quality on one GPU; AVATAR_QUALITY=low or high decides instead.
+# in high quality on a pair of whole GPUs when the booked quota has one free next to the models,
+# else in low quality on one whole GPU or a MIG slice of 3g or more; AVATAR_QUALITY=low or high
+# decides instead. The GPU layout follows the booking: step 6 and --adapt plan it again from the
+# quota each time, so a new booking needs no new answers, and OpenSpline is left out of the UI
+# while no GPU for it is booked.
 # Beyond Presence among the avatars also gets a TURN server on a TCP load balancer
 # (livekit.tcpTurn: its agents run LiveKit's native SDK, which cannot use the TURN server behind
 # the Route); TCP_TURN=false leaves it out, TCP_TURN=true adds it for any avatar.
@@ -76,6 +81,9 @@ STATE_DIR="${STATE_DIR:-$HOME/.assistant-setup}"
 STATE="$STATE_DIR/state.env"
 SECRETS_FILE="${SECRETS_FILE:-$HOME/secrets.env}"
 PROJECT_ENV="${PROJECT:-}"; ACCESS_ENV="${ACCESS:-}"; DOMAIN_ENV="${DOMAIN:-}"; AVATAR_ENV="${AVATAR_PROVIDER:-}"
+# settings that shape the GPU plan: given to step 2, they are kept for the deploys after it
+PLAN_OPTS="AVATAR_QUALITY TTS_GPU KUEUE_QUEUE GPU_RESOURCE"
+for _o in $PLAN_OPTS; do printf -v "PLAN_ENV_$_o" '%s' "${!_o:-}"; done
 PROJECT="${PROJECT:-voice-avatar-assistant}"
 LLM_NAME="${LLM_NAME:-llama-32-3b-instruct}"
 # namespace path: the Models-as-a-Service model names (patterns) used when the service has them
@@ -83,13 +91,42 @@ MAAS_LLM_MODEL="${MAAS_LLM_MODEL:-llama-32-3b}"; MAAS_STT_MODEL="${MAAS_STT_MODE
 # namespace path: Kokoro moves to a GPU slice the queue has left over (TTS_GPU=false keeps it on CPU)
 KOKORO_GPU_IMAGE="${KOKORO_GPU_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.2}"
 MODE=next; ONLY=""
-for a in "$@"; do case "$a" in --status) MODE=status;; --yes|-y) YES=1;; --reset) MODE=reset;; --step) MODE=step;; [0-9]*) ONLY="$a";; -h|--help) sed -n 2,29p "$0"; exit 0;; esac; done
+for a in "$@"; do case "$a" in --status) MODE=status;; --yes|-y) YES=1;; --reset) MODE=reset;; --step) MODE=step;; --adapt) MODE=adapt; YES=1;; [0-9]*) ONLY="$a";; -h|--help) sed -n 2,36p "$0"; exit 0;; esac; done
 mkdir -p "$STATE_DIR/logs"; touch "$STATE"; chmod 700 "$STATE_DIR"
 [ "$MODE" = reset ] && { rm -f "$STATE"; touch "$STATE"; echo "progress forgotten ($STATE)"; exit 0; }
-RUN_LOG="$STATE_DIR/logs/setup-$(date +%Y%m%d-%H%M%S).log"
-exec > >(tee -a "$RUN_LOG") 2>&1
+if [ "$MODE" = adapt ]; then
+  # the GPU watch runs --adapt every few minutes: one log for all its runs, kept short
+  RUN_LOG="$STATE_DIR/logs/adapt.log"
+  [ -f "$RUN_LOG" ] && [ $(( $(wc -l < "$RUN_LOG") )) -gt 5000 ] && { tail -n 2000 "$RUN_LOG" > "$RUN_LOG.tmp" && mv "$RUN_LOG.tmp" "$RUN_LOG"; }
+else
+  RUN_LOG="$STATE_DIR/logs/setup-$(date +%Y%m%d-%H%M%S).log"
+fi
+if [ "$MODE" = adapt ] && [ ! -t 1 ]; then exec >> "$RUN_LOG" 2>&1; else exec > >(tee -a "$RUN_LOG") 2>&1; fi
 if [ "${DEBUG:-0}" = 1 ]; then exec {BASH_XTRACEFD}>>"$RUN_LOG.trace"; export PS4='+ $(date +%H:%M:%S) ${BASH_SOURCE##*/}:${LINENO}: '; set -x; fi
-printf '%s setup started by %s on %s; log %s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$(id -un)" "$(hostname)" "$RUN_LOG"
+[ "$MODE" = adapt ] || printf '%s setup started by %s on %s; log %s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$(id -un)" "$(hostname)" "$RUN_LOG"
+
+# One run at a time: the GPU watch (--adapt) and a run by hand must not deploy over each other.
+LOCK_DIR="$STATE_DIR/run.lock"
+lock_owner() { cat "$LOCK_DIR/owner" 2>/dev/null; }   # "<pid> <mode>"
+take_lock() {
+  local owner _
+  for _ in 1 2 3; do
+    if mkdir "$LOCK_DIR" 2>/dev/null; then printf '%s %s\n' "$$" "$MODE" > "$LOCK_DIR/owner"; trap 'rm -rf "$LOCK_DIR"' EXIT; return 0; fi
+    owner=$(lock_owner); [ -n "$owner" ] || { sleep 1; owner=$(lock_owner); }
+    [ -n "$owner" ] && kill -0 "${owner%% *}" 2>/dev/null && return 1
+    rm -rf "$LOCK_DIR"   # left behind by a run that was killed
+  done
+  return 1
+}
+if [ "$MODE" != status ] && ! take_lock; then
+  owner=$(lock_owner)
+  [ "$MODE" = adapt ] && { printf '%s another setup run is active (pid %s): nothing checked\n' "$(date '+%Y-%m-%d %H:%M')" "${owner%% *}"; exit 0; }
+  case "$owner" in
+    *adapt) echo "The GPU watch is redeploying for a new GPU booking (pid ${owner%% *}); follow it with: tail -f $STATE_DIR/logs/adapt.log ; run this again when it has finished." ;;
+    *) echo "Another scripts/setup.sh is running (pid ${owner%% *}); run this again when it has finished." ;;
+  esac
+  exit 1
+fi
 
 # ---------------------------------------------------------------- helpers -------------------
 B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; D=$'\033[2m'; N=$'\033[0m'
@@ -137,6 +174,7 @@ logfile() { echo "$STATE_DIR/logs/$1-$(date +%Y%m%d-%H%M%S).log"; }
 . "$STATE" 2>/dev/null || true
 [ -n "$PROJECT_ENV" ] && PROJECT=$PROJECT_ENV   # the environment wins over the project saved by an earlier run
 [ -n "$AVATAR_ENV" ] && AVATAR_CHOICE=$AVATAR_ENV   # likewise the avatar
+for _o in $PLAN_OPTS; do _e="PLAN_ENV_$_o"; _s="SAVED_$_o"; printf -v "$_o" '%s' "${!_e:-${!_s:-}}"; done   # and the GPU plan's settings
 # nodes found unable to start containers: deploy.sh and test-services.sh keep the full list in this
 # file, which wins over the progress file; every install and test pod avoids them
 [ -s "$STATE_DIR/avoid-nodes" ] && AVOID_NODES=$(tr '\n' ' ' < "$STATE_DIR/avoid-nodes" | sed 's/ *$//')
@@ -272,7 +310,7 @@ discover() {
   FRONTEND_URL=$(oc get route frontend -n "$PROJECT" -o jsonpath='https://{.spec.host}' 2>/dev/null)
   N8N_URL=$(oc get route n8n -n "$PROJECT" -o jsonpath='https://{.spec.host}' 2>/dev/null)
   DOCS_INDEXED=""; DOCS_CLASSIFIED=""
-  if [ "$PODS_NOT_READY" = 0 ] && [ -n "$FRONTEND_URL" ]; then
+  if [ "$PODS_NOT_READY" = 0 ] && [ -n "$FRONTEND_URL" ] && [ "$MODE" != adapt ]; then
     read -r DOCS_INDEXED DOCS_CLASSIFIED < <(doc_counts)
   fi
 }
@@ -356,7 +394,7 @@ until_text() { [ -n "$1" ] || return 0; if [ "$IS_MAC" = 1 ]; then date -r "$1" 
 # remote: no GPU, every model is a remote OpenAI-compatible endpoint (PROFILE=remote)
 suggest_profile() { if [ "${GPUS:-0}" -eq 0 ]; then echo remote; else echo gpu; fi; }
 profile_slices() { case "$1" in gpu) echo 4;; *) echo 1;; esac; }
-write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over the values file by Argo CD
+write_values_object() {  # [file] -> the values overlay ($STATE_DIR/values-object.json by default), deep-merged over the values file
   local llm_deploy=true; [ -n "${LLM_NS:-}" ] && llm_deploy=false
   case "$PROFILE" in
   remote)
@@ -383,7 +421,7 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
        n8n: {storage: "10Gi"}}' ;;
   *)
     jq -n --argjson d "$llm_deploy" '{models:{llm:{deploy:$d,args:["--max-model-len=8192","--gpu-memory-utilization=0.45","--max-num-seqs=8","--enforce-eager","--enable-auto-tool-choice","--tool-call-parser=llama3_json"]},stt:{deploy:true,args:["--gpu-memory-utilization=0.15","--max-num-seqs=8","--enforce-eager"]},embeddings:{args:["--runner=pooling","--max-model-len=8192","--gpu-memory-utilization=0.12","--max-num-seqs=8","--enforce-eager"]},guardrails:{provider:"none",deploy:false}}}' ;;
-  esac | jq --arg av "${AVATAR_CHOICE:-}" --arg ag "${AVATAR_GPU:-}" --arg an "${AVATAR_GPUS:-1}" --arg al "${AVATAR_LEVEL:-low}" --arg q "${GPU_QUEUE:-}" --arg tt "$(tcp_turn && echo true || echo false)" '
+  esac | jq --arg av "$(avatars_deployed)" --arg ag "${AVATAR_GPU:-}" --arg an "${AVATAR_GPUS:-1}" --arg al "${AVATAR_LEVEL:-low}" --arg q "${GPU_QUEUE:-}" --arg tt "$(tcp_turn && echo true || echo false)" '
     # the avatar chosen in step 2; OpenSpline gets the GPUs assigned to it (one, or a pair for
     # high quality, whose two processes need more memory)
     def gpus($g; $n): if $g == "" then {} else {resources: {requests: {"nvidia.com/gpu": null, ($g): $n}, limits: {"nvidia.com/gpu": null, ($g): $n}}} end;
@@ -395,7 +433,9 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
     | (if $tt == "true" then . * {livekit: {tcpTurn: {enabled: true}}} else . end)
     | if ($list | index("openspline")) != null then . * {openspline: ({quality: $al} * gpus($ag; $an)
         * (if $al == "high" then {resources: {requests: {memory: "16Gi"}, limits: {memory: "64Gi"}}} else {} end)
-        * (if $q != "" then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end))} else . end' > "$STATE_DIR/values-object.json"
+        * (if $q != "" then {podLabels: {"kueue.x-k8s.io/queue-name": $q}} else {} end))} else . end' > "${1:-$STATE_DIR/values-object.json}"
+  # the overlay is built in a pipeline, whose errors would otherwise leave an empty file behind
+  [ -s "${1:-$STATE_DIR/values-object.json}" ] || { bad "could not write the values overlay ${1:-$STATE_DIR/values-object.json}"; return 1; }
 }
 # Namespace profile, per model: REMOTE_<X>_ENDPOINT when given, else the Models-as-a-Service
 # model named MAAS_<X>_MODEL, else the chart's own model on a GPU of a Kueue queue with quota.
@@ -403,22 +443,148 @@ write_values_object() {  # -> $STATE_DIR/values-object.json, deep-merged over th
 model_title() { case "$1" in LLM) echo "language model";; STT) echo "speech-to-text";; EMB) echo "embeddings";; TTS) echo "text-to-speech";; AVATAR) echo "avatar";; esac; }
 chart_model() { case "$1" in LLM) echo "Llama 3.1 8B Instruct (4-bit)";; STT) echo "Whisper large-v3-turbo";; EMB) echo "BGE-M3";; TTS) echo "Kokoro";; AVATAR) echo "the OpenSpline avatar";; esac; }
 gpu_size() { case "$1" in nvidia.com/mig-*) local s=${1##*.}; s=${s%gb}; echo "$s";; *) echo 999;; esac; }   # GB; a whole card counts as plenty
-# assign_gpus <queue> <kind...>: gives each kind the smallest resource of the queue that fits;
-# prints "<kind> <resource>" lines, or fails when the queue's quota cannot hold them all
+# gpu_compute <resource>: compute slices out of 7 (mig-3g.71gb: 3); a whole card counts as 8
+gpu_compute() { case "$1" in nvidia.com/mig-*) local s=${1#nvidia.com/mig-}; echo "${s%%g*}";; *) echo 8;; esac; }
+# assign_gpus <queue> <kind...>: gives each kind a resource of the queue; prints "<kind> <resource>"
+# lines, or fails when the queue's quota cannot hold them all. A model gets the smallest resource
+# that fits. The avatar renders 25 frames a second: AVATAR takes a whole card, else the MIG slice
+# with the most compute, 3g or more; AVATAR_WHOLE takes a whole card only (high quality's two
+# processes exchange tensors between their GPUs, which MIG slices cannot do).
 assign_gpus() {
-  local q=$1; shift; local -a res=() units=() out=(); local kind i best min lq r u
+  local q=$1; shift; local -a res=() units=() out=(); local kind i best min c lq r u
   while read -r lq r u _; do [ "$lq" = "$q" ] && { res+=("$r"); units+=("$u"); }; done < <(gpu_offers)
   for kind in "$@"; do
-    case "$kind" in LLM) min=24;; TTS) min=4;; AVATAR) min=999;; *) min=10;; esac   # the avatar: a whole card, for 25 frames a second
     best=""
     for i in "${!res[@]}"; do
-      [ "${units[$i]}" -gt 0 ] && [ "$(gpu_size "${res[$i]}")" -ge "$min" ] || continue
-      if [ -z "$best" ] || [ "$(gpu_size "${res[$i]}")" -lt "$(gpu_size "${res[$best]}")" ]; then best=$i; fi
+      [ "${units[$i]}" -gt 0 ] || continue
+      case "$kind" in
+        AVATAR|AVATAR_WHOLE)
+          c=$(gpu_compute "${res[$i]}")
+          if [ "$kind" = AVATAR_WHOLE ]; then [ "$c" -eq 8 ] || continue; else [ "$c" -ge 3 ] || continue; fi
+          if [ -z "$best" ] || [ "$c" -gt "$(gpu_compute "${res[$best]}")" ]; then best=$i; fi ;;
+        *)
+          case "$kind" in LLM) min=24;; TTS) min=4;; *) min=10;; esac
+          [ "$(gpu_size "${res[$i]}")" -ge "$min" ] || continue
+          if [ -z "$best" ] || [ "$(gpu_size "${res[$i]}")" -lt "$(gpu_size "${res[$best]}")" ]; then best=$i; fi ;;
+      esac
     done
     [ -n "$best" ] || return 1
-    units[$best]=$((units[best] - 1)); out+=("$kind ${res[$best]}")
+    units[$best]=$((units[best] - 1)); out+=("${kind%_WHOLE} ${res[$best]}")
   done
-  printf '%s\n' "${out[@]}"
+  [ "${#out[@]}" -eq 0 ] || printf '%s\n' "${out[@]}"
+}
+
+# ---------------------------------------------------------------- GPU plan ------------------
+# The GPU layout follows the booking. Step 2, step 6 and --adapt plan it from the queues' quota,
+# so a new booking (whole GPUs or MIG slices, more or fewer) needs no new answers. The avatars
+# chosen in step 2 are a wish list: OpenSpline is left out of the UI while no GPU for it is booked.
+# shellcheck disable=SC2163  # exports the variable named $1
+setv() { printf -v "$1" '%s' "$2"; export "$1"; }   # like save, without writing the progress file
+chart_models() { local k; for k in LLM STT EMB; do [ "$(val "MODEL_${k}_SRC")" = chart ] && echo "$k"; done; return 0; }
+chart_model_names() { local k names=""; for k in $(chart_models); do names+="$(chart_model "$k"), "; done; echo "${names%, }"; }
+offers_text() {
+  if [ -n "$GPU_OFFERS" ]; then gpu_offers | awk '{printf "%s%s x %s on queue %s", (NR > 1 ? "; " : ""), $3, $2, $1}'
+  else echo "no queue of $PROJECT has GPU quota, so no booking now"; fi
+}
+# plan_models: where each model comes from (step 2 only; the deploys after it keep the sources)
+plan_models() {
+  local k v id
+  for k in LLM STT EMB; do
+    v="REMOTE_${k}_ENDPOINT"
+    if [ -n "${!v:-}" ]; then
+      setv "MODEL_${k}_SRC" remote; setv "MODEL_${k}_URL" "${!v}"; v="REMOTE_${k}_MODEL"; setv "MODEL_${k}_NAME" "${!v:-}"
+      [ -n "${!v:-}" ] || { bad "REMOTE_${k}_ENDPOINT needs REMOTE_${k}_MODEL (the model id)"; return 1; }
+    elif v="MAAS_${k}_MODEL"; id=$(maas_find "${!v}"); then
+      setv "MODEL_${k}_SRC" maas; setv "MODEL_${k}_URL" "$(maas_endpoint "$id")"; setv "MODEL_${k}_NAME" "${id##*/}"
+    else
+      setv "MODEL_${k}_SRC" chart; setv "MODEL_${k}_URL" ""; setv "MODEL_${k}_NAME" ""
+    fi
+  done
+}
+# plan_gpus <openspline: yes|no>: sets PLAN_Q (the queue) and PLAN_LINES ("<kind> <resource>" per
+# GPU) for the models served in the project, Kokoro and OpenSpline. Returns 1 when the booking
+# cannot hold the models (OpenSpline and Kokoro's GPU are optional), 2 on a bad setting.
+plan_gpus() {
+  local wants=$1 c lq found=no; local -a need=() tts=() cands=() kinds=()
+  PLAN_Q=""; PLAN_LINES=""
+  read -r -a need <<< "$(chart_models | tr '\n' ' ')"
+  case "${AVATAR_QUALITY:-auto}" in low|high|auto) ;; *) bad "AVATAR_QUALITY=$AVATAR_QUALITY: use low, high or auto"; return 2;; esac
+  if [ "$KUEUE" = yes ] && { [ -z "${KUEUE_QUEUE:-}" ] || [ -z "${GPU_RESOURCE:-}" ]; }; then
+    # Layouts, best first. High quality only while Kokoro keeps a GPU slice (seconds per sentence
+    # on CPU cost more than the detail gains), unless Kokoro cannot have one anyway. OpenSpline
+    # takes a MIG slice only next to Kokoro's, and is left out when it can have neither.
+    [ "${TTS_GPU:-auto}" != false ] && [ -z "${GPU_RESOURCE:-}" ] && tts=(TTS)
+    local n="${need[*]-}" t="${tts[*]-}" hi="AVATAR_WHOLE AVATAR_WHOLE"
+    if [ "$wants" = yes ]; then
+      case "${AVATAR_QUALITY:-auto}" in
+        auto) cands+=("$hi $n $t" "AVATAR $n $t" "$hi $n" "AVATAR_WHOLE $n") ;;
+        high) cands+=("$hi $n $t" "$hi $n") ;;
+        low)  cands+=("AVATAR $n $t" "AVATAR_WHOLE $n") ;;
+      esac
+    fi
+    cands+=("$n $t" "$n")
+    for c in "${cands[@]}"; do
+      [ -n "${c// /}" ] || { found=yes; break; }   # nothing left that needs a GPU
+      for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do
+        # shellcheck disable=SC2086
+        PLAN_LINES=$(assign_gpus "$lq" $c) && { PLAN_Q=$lq; found=yes; break 2; }
+      done
+    done
+    [ "$found" = yes ] || { PLAN_LINES=""; return 1; }
+  else
+    # a queue and a resource given (KUEUE_QUEUE, GPU_RESOURCE), or no Kueue: every GPU request is
+    # GPU_RESOURCE as given, and Kokoro stays on CPU
+    if [ "$wants" = yes ]; then kinds+=(AVATAR); [ "${AVATAR_QUALITY:-auto}" = high ] && kinds+=(AVATAR); fi
+    kinds+=(${need[@]+"${need[@]}"})
+    [ "$KUEUE" = yes ] && PLAN_Q=$KUEUE_QUEUE
+    [ "${#kinds[@]}" -eq 0 ] || PLAN_LINES=$(for c in "${kinds[@]}"; do echo "$c ${GPU_RESOURCE:-nvidia.com/gpu}"; done)
+  fi
+  return 0
+}
+plan_has_openspline() { grep -q '^AVATAR ' <<< "$PLAN_LINES"; }
+# apply_plan [dry <file>]: makes the plan the profile, saved in the progress file and written to
+# the values overlay; dry keeps it to this run and writes the overlay to <file>
+apply_plan() {
+  local put=save out="" k v n p; local -A gpu=(); local -a active=()
+  [ "${1:-}" = dry ] && { put=setv; out=${2:-}; }
+  while read -r k v; do [ -n "$k" ] && gpu[$k]=$v; done <<< "$PLAN_LINES"
+  n=$(grep -c '^AVATAR ' <<< "$PLAN_LINES" || true)
+  $put GPU_QUEUE "$PLAN_Q"
+  for k in LLM STT EMB; do
+    $put "MODEL_${k}_SRC" "$(val "MODEL_${k}_SRC")"; $put "MODEL_${k}_URL" "$(val "MODEL_${k}_URL")"
+    $put "MODEL_${k}_NAME" "$(val "MODEL_${k}_NAME")"; $put "MODEL_${k}_GPU" "${gpu[$k]:-}"
+  done
+  $put MODEL_TTS_GPU "${gpu[TTS]:-}"
+  $put AVATAR_GPU "${gpu[AVATAR]:-}"; $put AVATAR_GPUS "${n:-0}"; $put AVATAR_LEVEL "$([ "${n:-0}" -ge 2 ] && echo high || echo low)"
+  # the avatars deployed: the wish list, without OpenSpline while it has no GPU
+  for p in $(avatar_list); do [ "$p" = openspline ] && [ "${n:-0}" = 0 ] && continue; active+=("$p"); done
+  $put AVATAR_ACTIVE "$(IFS=,; echo "${active[*]:-none}")"
+  write_values_object ${out:+"$out"}
+}
+report_plan() {
+  local k av q=$PLAN_Q
+  for k in LLM STT EMB; do
+    case "$(val "MODEL_${k}_SRC")" in
+      maas)   ok "$(model_title $k): Models-as-a-Service $(val "MODEL_${k}_NAME") ($(val "MODEL_${k}_URL"))" ;;
+      remote) ok "$(model_title $k): remote endpoint $(val "MODEL_${k}_NAME") ($(val "MODEL_${k}_URL"))" ;;
+      chart)  ok "$(model_title $k): $(chart_model $k) served in $PROJECT on 1 x $(val "MODEL_${k}_GPU")${q:+ from queue $q}" ;;
+    esac
+  done
+  if [ -n "${MODEL_TTS_GPU:-}" ]; then ok "text-to-speech: Kokoro on 1 x $MODEL_TTS_GPU${q:+ from queue $q} ($KOKORO_GPU_IMAGE)"
+  else ok "text-to-speech: Kokoro on CPU, with one synthesis thread per CPU of its limit (no GPU slice left over; TTS_GPU=false keeps it there)"; fi
+  for av in $(avatar_list); do
+    case "$av" in
+      openspline)
+        if [ "${AVATAR_GPUS:-0}" -gt 0 ]; then ok "avatar: OpenSpline in $AVATAR_LEVEL quality, self-hosted on $AVATAR_GPUS x $AVATAR_GPU${q:+ from queue $q} ($([ "$AVATAR_LEVEL" = high ] && echo "the Pro model on a GPU pair" || echo "the Lite model; two whole GPUs give high quality"); its first start installs it and downloads its weights, 10 to 20 minutes)"
+        else warn "avatar: OpenSpline left out of the UI for now: the booking has no whole GPU, or MIG slice of 3g or more, left for it next to the models and Kokoro; the next deploy (or the GPU watch, scripts/gpu-watch.sh) brings it back once one is booked"; fi ;;
+      tavus)      ok "avatar: Tavus (its key in step 5)" ;;
+      bey)        ok "avatar: Beyond Presence (its key in step 5; the faces are voiceAgent.beyFaces)"
+                  tcp_turn && note "Beyond Presence reaches LiveKit through a TURN server on a TCP load balancer (livekit.tcpTurn): a cloud load balancer with a public address, billed by the cloud account; TCP_TURN=false leaves it out" ;;
+    esac
+  done
+  if [ "$(avatars_deployed)" = none ] || [ -z "$(avatars_deployed)" ]; then ok "avatar: none (voice sessions are audio-only)"
+  elif [[ "$(avatars_deployed)" == *,* ]]; then ok "the UI offers these avatars, $(avatars_deployed | cut -d, -f1) preselected; the person picks one before a voice session"; fi
+  [ "$KUEUE" = yes ] || [ -z "$PLAN_LINES" ] || warn "no Kueue in $PROJECT: the models request ${GPU_RESOURCE:-nvidia.com/gpu} directly; a project admin cannot see whether the nodes have free GPUs"
 }
 
 # AVATAR_CHOICE holds the avatars offered in the UI, comma-separated, the first preselected
@@ -426,6 +592,9 @@ assign_gpus() {
 avatar_list() { local p; for p in ${AVATAR_CHOICE//,/ }; do [ "$p" = none ] || echo "$p"; done; }
 avatar_has() { [[ ",${AVATAR_CHOICE:-}," == *",$1,"* ]]; }
 avatar_default() { echo "${AVATAR_CHOICE%%,*}"; }
+# avatars_deployed: the avatars in the UI, the wish list without OpenSpline while it has no GPU
+# (AVATAR_ACTIVE, from the GPU plan; none when empty)
+avatars_deployed() { if [ -n "${AVATAR_ACTIVE:-}" ]; then echo "$AVATAR_ACTIVE"; else echo "${AVATAR_CHOICE:-}"; fi; }
 # tcp_turn: whether the deployment gets the TURN server on a TCP load balancer (TCP_TURN, else when
 # Beyond Presence is among the avatars)
 tcp_turn() { case "${TCP_TURN:-auto}" in true) return 0;; false) return 1;; *) avatar_has bey;; esac; }
@@ -444,7 +613,7 @@ choose_avatar() {
   say "  avatar video, one or more of these (comma-separated: the UI then offers each, the first preselected):"
   [[ " $* " == *" tavus "* ]] && say "     tavus       Tavus cloud: its key in step 5; the free plan has 25 minutes a month and one stream"
   [[ " $* " == *" bey "* ]] && say "     bey         Beyond Presence cloud: 1080p, animates the assistant's own voice; its key in step 5, billed per minute"
-  [[ " $* " == *" openspline "* ]] && say "     openspline  self-hosted: OpenSpline on a whole GPU of $PROJECT; its first start takes 10 to 20 minutes"
+  [[ " $* " == *" openspline "* ]] && say "     openspline  self-hosted: OpenSpline on a GPU of $PROJECT (a whole one, or a MIG slice of 3g or more); its first start takes 10 to 20 minutes"
   say "     none        audio only"
   while :; do
     ask a "avatars ($(echo "$*" | sed 's/ /, /g'))" "$def"
@@ -456,7 +625,11 @@ choose_avatar() {
 avatar_summary() {
   local p out=() n
   for p in $(avatar_list); do
-    case "$p" in openspline) out+=("OpenSpline ${AVATAR_LEVEL:-low}${AVATAR_GPU:+ on ${AVATAR_GPUS:-1} x $AVATAR_GPU}");; tavus) out+=(Tavus);; *) out+=("$p");; esac
+    case "$p" in
+      openspline) if [[ ",$(avatars_deployed)," == *",openspline,"* ]]; then out+=("OpenSpline ${AVATAR_LEVEL:-low}${AVATAR_GPU:+ on ${AVATAR_GPUS:-1} x $AVATAR_GPU}"); else out+=("OpenSpline (waiting for a GPU)"); fi ;;
+      tavus) out+=(Tavus) ;;
+      *) out+=("$p") ;;
+    esac
   done
   n=${#out[@]}
   if [ "$n" = 0 ]; then echo "no avatar"; elif [ "$n" = 1 ]; then echo "avatar ${out[0]}"; else echo "avatars $(IFS=,; echo "${out[*]}" | sed 's/,/, /g') (chosen in the UI)"; fi
@@ -590,111 +763,34 @@ step2() {
     choose_avatar tavus tavus bey openspline none || return 1
     avatar_has openspline && warn "OpenSpline takes one time-sliced share of a GPU, next to the models: on a busy card the video can fall below 25 frames a second"
   fi
-  save AVATAR_CHOICE "$AVATAR_CHOICE"; unsave AVATAR_GPU; unsave AVATAR_GPUS; unsave AVATAR_LEVEL
+  save AVATAR_CHOICE "$AVATAR_CHOICE"; unsave AVATAR_GPU; unsave AVATAR_GPUS; unsave AVATAR_LEVEL; unsave AVATAR_ACTIVE
   save PROFILE "$PROFILE"; write_values_object; ok "profile $PROFILE saved ($STATE_DIR/values-object.json), $(avatar_summary)"; mark 2
 }
 step2_namespace() {
   say "${B}Step 2: deployment profile${N} (each model from Models-as-a-Service when it has it, else served in $PROJECT on a GPU queue)"
   unsave PROFILE   # a choice that stops half-way leaves the step to do
-  local k id v q="" lines="" lq need=(); local -A src=() url=() name=() gpu=()
-  for k in LLM STT EMB; do
-    v="REMOTE_${k}_ENDPOINT"
-    if [ -n "${!v:-}" ]; then
-      src[$k]=remote; url[$k]=${!v}; v="REMOTE_${k}_MODEL"; name[$k]=${!v:-}
-      [ -n "${name[$k]}" ] || { bad "REMOTE_${k}_ENDPOINT needs REMOTE_${k}_MODEL (the model id)"; return 1; }
-    elif v="MAAS_${k}_MODEL"; id=$(maas_find "${!v}"); then
-      src[$k]=maas; url[$k]=$(maas_endpoint "$id"); name[$k]=${id##*/}
-    else
-      src[$k]=chart; need+=("$k")
-    fi
-  done
-  # the avatar: OpenSpline is suggested when a queue has a whole GPU for it next to the models
-  local fits=""; local -a kinds=()
-  if [ "$KUEUE" = yes ] && [ -z "${GPU_RESOURCE:-}" ]; then
-    for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do assign_gpus "$lq" AVATAR ${need[@]+"${need[@]}"} >/dev/null && { fits=$lq; break; }; done
+  local o e rc=0 k
+  # the GPU plan's settings given now are kept for the deploys after it; those not given are forgotten
+  for o in $PLAN_OPTS; do e="PLAN_ENV_$o"; if [ -n "${!e}" ]; then save "SAVED_$o" "${!e}"; else unsave "SAVED_$o"; fi; printf -v "$o" '%s' "${!e}"; done
+  plan_models || return 1
+  [ -z "$(chart_models)" ] || [ "$KSERVE_API" = yes ] || { bad "$(for k in $(chart_models); do printf '%s, ' "$(model_title "$k")"; done | sed 's/, $//'): not on Models-as-a-Service, and the project cannot serve models (no KServe); set REMOTE_<LLM|STT|EMB>_ENDPOINT and _MODEL"; return 1; }
+  # the avatar: OpenSpline is suggested when a queue has a GPU for it next to the models
+  local fits=no
+  if [ "$KUEUE" = yes ] && [ -z "${GPU_RESOURCE:-}" ] && plan_gpus yes >/dev/null && plan_has_openspline; then fits=yes; fi
+  choose_avatar "$([ "$fits" = yes ] && echo openspline,tavus || echo tavus)" tavus bey openspline none || return 1
+  plan_gpus "$(avatar_has openspline && echo yes || echo no)" || rc=$?
+  [ "$rc" = 2 ] && return 1
+  if [ "$rc" = 1 ]; then
+    bad "not enough GPU quota for $(chart_model_names), which Models-as-a-Service does not offer."
+    say "     required: one GPU or MIG slice per model, 10 GB or more for Whisper and BGE-M3 (MIG 1g.18gb is enough), 24 GB or more for the language model; for the OpenSpline avatar, a whole GPU or a MIG slice of 3g or more (two whole GPUs for high quality)"
+    say "     available: $(offers_text)"
+    say "     options: book GPUs for $PROJECT (on a shared cluster: the console's GPU booking page), then run scripts/setup.sh again;"
+    say "              or a remote endpoint per model: REMOTE_STT_ENDPOINT=... REMOTE_STT_MODEL=... (LLM, EMB likewise), keys in $SECRETS_FILE"
+    return 1
   fi
-  choose_avatar "$([ -n "$fits" ] && echo openspline,tavus || echo tavus)" tavus bey openspline none || return 1
-  # OpenSpline's quality: high (the Pro model) needs a GPU pair to stay real time, low one GPU
-  if avatar_has openspline; then
-    case "${AVATAR_QUALITY:-auto}" in
-      low)  kinds+=(AVATAR) ;;
-      high) kinds+=(AVATAR AVATAR) ;;
-      auto)
-        # high when a queue has the pair next to the models, unless it would push Kokoro off the
-        # GPU it gets with low quality (seconds per sentence on CPU cost more than the detail gains)
-        kinds+=(AVATAR)
-        if [ "$KUEUE" = yes ] && [ -z "${GPU_RESOURCE:-}" ]; then
-          local -a tts=(); [ "${TTS_GPU:-auto}" != false ] && tts=(TTS)
-          for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do
-            if assign_gpus "$lq" AVATAR AVATAR ${need[@]+"${need[@]}"} ${tts[@]+"${tts[@]}"} >/dev/null \
-              || { ! assign_gpus "$lq" AVATAR ${need[@]+"${need[@]}"} ${tts[@]+"${tts[@]}"} >/dev/null \
-                   && assign_gpus "$lq" AVATAR AVATAR ${need[@]+"${need[@]}"} >/dev/null; }; then
-              kinds+=(AVATAR); break
-            fi
-          done
-        fi ;;
-      *) bad "AVATAR_QUALITY=$AVATAR_QUALITY: use low, high or auto"; return 1 ;;
-    esac
-  fi
-  kinds+=(${need[@]+"${need[@]}"})
-  if [ "${#kinds[@]}" -gt 0 ]; then
-    [ "${#need[@]}" -eq 0 ] || [ "$KSERVE_API" = yes ] || { bad "$(for k in "${need[@]}"; do printf '%s, ' "$(model_title "$k")"; done | sed 's/, $//'): not on Models-as-a-Service, and the project cannot serve models (no KServe); set REMOTE_<LLM|STT|EMB>_ENDPOINT and _MODEL"; return 1; }
-    if [ -n "${KUEUE_QUEUE:-}" ] && [ -n "${GPU_RESOURCE:-}" ]; then
-      q=$KUEUE_QUEUE; lines=$(for k in "${kinds[@]}"; do echo "$k $GPU_RESOURCE"; done)   # e.g. a queue that borrows without quota of its own
-    elif [ "$KUEUE" = yes ]; then
-      for lq in ${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}; do lines=$(assign_gpus "$lq" "${kinds[@]}") && { q=$lq; break; }; done
-    else
-      lines=$(for k in "${kinds[@]}"; do echo "$k ${GPU_RESOURCE:-nvidia.com/gpu}"; done)   # no Kueue: plain GPU requests
-      warn "no Kueue in $PROJECT: the models request ${GPU_RESOURCE:-nvidia.com/gpu} directly; a project admin cannot see whether the nodes have free GPUs"
-    fi
-    if [ -z "$lines" ]; then
-      bad "not enough GPU quota for $(for k in "${kinds[@]}"; do printf '%s, ' "$(chart_model "$k")"; done | sed 's/, $//')$([ "${#need[@]}" -gt 0 ] && echo ", which Models-as-a-Service does not offer")."
-      say "     required: one GPU or MIG slice per model, 10 GB or more for Whisper and BGE-M3 (MIG 1g.18gb is enough), 24 GB or more for the language model$(avatar_has openspline && echo ", a whole GPU for the OpenSpline avatar (two for AVATAR_QUALITY=high)")"
-      say "     available: $( [ -n "$GPU_OFFERS" ] && gpu_offers | awk '{printf "%s x %s on queue %s; ", $3, $2, $1}' || echo "no queue of $PROJECT with GPU quota")"
-      say "     options: book GPUs for $PROJECT (on a shared cluster: the console's GPU booking page), then run scripts/setup.sh again;"
-      say "              or a remote endpoint per model: REMOTE_STT_ENDPOINT=... REMOTE_STT_MODEL=... (LLM, EMB likewise), keys in $SECRETS_FILE"
-      avatar_has openspline && say "              or another avatar: AVATAR_PROVIDER=tavus (or none) scripts/setup.sh --step 2$([ "${AVATAR_QUALITY:-}" = high ] && echo "; or AVATAR_QUALITY=low (one GPU)")"
-      return 1
-    fi
-    while read -r k v; do gpu[$k]=$v; done <<< "$lines"
-  fi
-  # Kokoro on a GPU slice the queue has left over: a sentence in a fraction of a second instead of
-  # seconds on CPU. Only when it fits next to the models above (TTS_GPU=false keeps it on CPU).
-  if [ "${TTS_GPU:-auto}" != false ] && [ "$KUEUE" = yes ] && [ -n "$GPU_OFFERS" ] && [ -z "${GPU_RESOURCE:-}" ]; then
-    local with_tts="" tq
-    for tq in ${q:-${KUEUE_QUEUE:-$(gpu_offers | awk '{print $1}' | sort -u)}}; do
-      with_tts=$(assign_gpus "$tq" ${kinds[@]+"${kinds[@]}"} TTS) && { q=$tq; break; }
-      with_tts=""
-    done
-    [ -n "$with_tts" ] && { lines=$with_tts; while read -r k v; do gpu[$k]=$v; done <<< "$with_tts"; }
-  fi
-  local avatar_gpus; avatar_gpus=$(grep -c '^AVATAR ' <<< "${lines:-}" || true)
-  save GPU_QUEUE "$q"
-  for k in LLM STT EMB; do
-    save "MODEL_${k}_SRC" "${src[$k]}"; save "MODEL_${k}_URL" "${url[$k]:-}"; save "MODEL_${k}_NAME" "${name[$k]:-}"; save "MODEL_${k}_GPU" "${gpu[$k]:-}"
-    case "${src[$k]}" in
-      maas)   ok "$(model_title $k): Models-as-a-Service ${name[$k]} (${url[$k]})" ;;
-      remote) ok "$(model_title $k): remote endpoint ${name[$k]} (${url[$k]})" ;;
-      chart)  ok "$(model_title $k): $(chart_model $k) served in $PROJECT on 1 x ${gpu[$k]}${q:+ from queue $q}" ;;
-    esac
-  done
-  save MODEL_TTS_GPU "${gpu[TTS]:-}"
-  if [ -n "${gpu[TTS]:-}" ]; then ok "text-to-speech: Kokoro on 1 x ${gpu[TTS]}${q:+ from queue $q} ($KOKORO_GPU_IMAGE)"
-  else ok "text-to-speech: Kokoro on CPU, with one synthesis thread per CPU of its limit (no GPU slice left over; TTS_GPU=false keeps it there)"; fi
-  local level=low; [ "${avatar_gpus:-0}" -ge 2 ] && level=high
-  save AVATAR_CHOICE "$AVATAR_CHOICE"; save AVATAR_GPU "${gpu[AVATAR]:-}"; save AVATAR_GPUS "${avatar_gpus:-0}"; save AVATAR_LEVEL "$level"
-  local av
-  for av in $(avatar_list); do
-    case "$av" in
-      openspline) ok "avatar: OpenSpline in $level quality, self-hosted on $avatar_gpus x ${gpu[AVATAR]}${q:+ from queue $q} ($([ "$level" = high ] && echo "the Pro model on a GPU pair" || echo "the Lite model; two whole GPUs give high quality"); its first start installs it and downloads its weights, 10 to 20 minutes)" ;;
-      tavus)      ok "avatar: Tavus (its key in step 5)" ;;
-      bey)        ok "avatar: Beyond Presence (its key in step 5; the faces are voiceAgent.beyFaces)"
-                  tcp_turn && note "Beyond Presence reaches LiveKit through a TURN server on a TCP load balancer (livekit.tcpTurn): a cloud load balancer with a public address, billed by the cloud account; TCP_TURN=false leaves it out" ;;
-    esac
-  done
-  if [ -z "$(avatar_list)" ]; then ok "avatar: none (voice sessions are audio-only)"
-  elif [ "$(avatar_list | wc -l)" -gt 1 ]; then ok "the UI offers these avatars, $(avatar_default) preselected; the person picks one before a voice session"; fi
-  PROFILE=namespace; save PROFILE namespace; write_values_object; ok "profile namespace saved ($STATE_DIR/values-object.json); no guardrail model"; mark 2
+  save AVATAR_CHOICE "$AVATAR_CHOICE"
+  PROFILE=namespace; apply_plan || return 1; report_plan   # the overlay is written for the profile
+  save PROFILE namespace; ok "profile namespace saved ($STATE_DIR/values-object.json); no guardrail model"; mark 2
 }
 step3() {
   [ "$ACCESS" = namespace ] && { step3_namespace; return; }
@@ -1137,11 +1233,18 @@ step5() {
 step6_namespace() {
   say "${B}Step 6: deploy with Helm${N} (release assistant in $PROJECT)"
   [ "${PROFILE:-}" = namespace ] || { bad "choose the profile first (step 2)"; return 1; }
-  write_values_object   # from the choices saved in step 2
+  # the GPUs as booked now, so a new booking needs no step 2 (which only changes the choices)
+  local prc=0; plan_gpus "$(avatar_has openspline && echo yes || echo no)" || prc=$?
+  case "$prc" in
+    0) apply_plan || return 1; report_plan ;;
+    2) return 1 ;;
+    *) warn "the GPU booking has no room for $(chart_model_names) now ($(offers_text)): deploying the layout planned before, whose GPU pods wait in Kueue until a booking holds them; the next deploy (or the GPU watch, scripts/gpu-watch.sh) plans again"
+       write_values_object || return 1 ;;
+  esac
   local log extra=(); log=$(logfile deploy)
   [ "$TURN_SECRET" = yes ] || { extra+=(--set livekit.turn.enabled=false); note "no TURN certificate: LiveKit runs without TURN (voice on open networks only)"; }
   say "  values chart/values-demo-cluster.yaml plus $STATE_DIR/values-object.json, secrets from $SECRETS_FILE (log $log)"
-  say "  this takes 5 to 20 minutes: image pulls, and the weights of the models served in the project$(avatar_has openspline && echo "; the OpenSpline avatar's first start up to 40")"
+  say "  this takes 5 to 20 minutes: image pulls, and the weights of the models served in the project$([[ ",$(avatars_deployed)," == *",openspline,"* ]] && echo "; the OpenSpline avatar's first start up to 40")"
   [ -n "${AVOID_NODES:-}" ] && note "pods avoid the nodes $AVOID_NODES, found unable to start containers by an earlier run"
   # shellcheck disable=SC1090
   set -a; [ -f "$SECRETS_FILE" ] && . "$SECRETS_FILE"; set +a
@@ -1149,7 +1252,7 @@ step6_namespace() {
   # the saved list keeps every later install and test pod off it
   local rc=0
   env PROJECT="$PROJECT" DOMAIN="$DOMAIN" SECRETS_FILE="$SECRETS_FILE" LOG_FILE="$log" RUN_TESTS=1 MODELS= \
-    AVOID_NODES="${AVOID_NODES:-}" AVOID_NODES_FILE="$STATE_DIR/avoid-nodes" AVATAR_PROVIDER="${AVATAR_CHOICE:-}" \
+    AVOID_NODES="${AVOID_NODES:-}" AVOID_NODES_FILE="$STATE_DIR/avoid-nodes" AVATAR_PROVIDER="$(avatars_deployed)" \
     "$ROOT/scripts/deploy.sh" -f "$ROOT/chart/values-demo-cluster.yaml" -f "$STATE_DIR/values-object.json" "${extra[@]}" || rc=$?
   [ -s "$STATE_DIR/avoid-nodes" ] && save AVOID_NODES "$(tr '\n' ' ' < "$STATE_DIR/avoid-nodes" | sed 's/ *$//')"
   [ "$rc" = 0 ] && { mark 6; return 0; }
@@ -1329,8 +1432,81 @@ restore_local_state() {
   write_private_environment
 }
 
+# ---------------------------------------------------------------- adapt ---------------------
+# --adapt runs unattended (scripts/gpu-watch.sh starts it every 10 minutes). When the booked GPUs
+# no longer match the deployment (a new booking, whole GPUs instead of MIG slices, more or fewer
+# of them), it plans the layout again and runs step 6. It never asks and never makes a first
+# deployment; it does nothing while the booking cannot hold the models (the GPU pods then wait
+# in Kueue), and it waits while a voice session is live, ADAPT_MAX_WAIT minutes at most (60).
+stamp() { date '+%Y-%m-%d %H:%M'; }
+adapt_notify() {  # a macOS notification; ADAPT_NOTIFY=0 turns them off
+  [ "$IS_MAC" = 1 ] && [ "${ADAPT_NOTIFY:-1}" = 1 ] || return 0
+  osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "Voice assistant GPUs"' -e 'end run' "$1" >/dev/null 2>&1 || true
+}
+# gpu_signature: the GPU layout of a values document (the overlay, or the release's values) on one line
+gpu_signature() {
+  jq -r 'def nv: (. // {}) | to_entries | map(select((.key | startswith("nvidia.com/")) and .value != null) | "\(.value) x \(.key | ltrimstr("nvidia.com/"))") | join(" + ");
+    def or_else($d): if . == "" then $d else . end;
+    ((.voiceAgent.avatarProviders // [.voiceAgent.avatarProvider // "none"]) | index("openspline")) as $os
+    | ([.models.podLabels, .models.tts.podLabels, .openspline.podLabels | .["kueue.x-k8s.io/queue-name"]? // empty] | first // "none") as $q
+    | [ (if $os == null then "no OpenSpline" else "OpenSpline \(.openspline.quality // "low") on \(.openspline.resources.limits | nv | or_else("1 x gpu"))" end),
+        (if .models.stt.deploy == false then "Whisper remote" else "Whisper on \(.models.stt.resources.limits | nv | or_else("1 x gpu"))" end),
+        "Kokoro on \(.models.tts.resources.limits | nv | or_else("CPU"))",
+        "queue \($q)" ]
+    | join(", ")'
+}
+# live_sessions: the voice sessions now, as LiveKit rooms with someone in them (asked through the
+# voice agent, which has LiveKit's keys); 0 when it cannot be asked
+live_sessions() {
+  oc exec deploy/voice-agent -n "$PROJECT" -- .venv/bin/python -c '
+import asyncio, os
+from livekit import api
+async def main():
+    lk = api.LiveKitAPI(os.environ["LIVEKIT_URL"], os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"])
+    try:
+        rooms = (await lk.room.list_rooms(api.ListRoomsRequest())).rooms
+    finally:
+        await lk.aclose()
+    print(sum(1 for r in rooms if r.num_participants > 0))
+asyncio.run(main())' 2>/dev/null | tail -1 | grep -E '^[0-9]+$' || echo 0
+}
+adapt() {
+  local rc=0 want have tmp n waited deferred="$STATE_DIR/adapt-deferred"
+  if ! oc whoami >/dev/null 2>&1; then
+    say "$(stamp) not logged in to the cluster (the token expired?): nothing checked until the next oc login"
+    [ -f "$STATE_DIR/adapt-paused" ] || { touch "$STATE_DIR/adapt-paused"; adapt_notify "GPU watch paused: log in to the cluster again with oc login"; }
+    return 0
+  fi
+  rm -f "$STATE_DIR/adapt-paused"
+  QUIET_DISCOVERY=1 discover
+  if [ "$ACCESS" != namespace ] || [ "${PROFILE:-}" != namespace ]; then say "$(stamp) the GPU watch follows bookings on the namespace path only (run scripts/setup.sh first): nothing to do"; return 0; fi
+  if [ "${CONFIRMED_TARGET:-}" != "$API $PROJECT" ] || [ -z "$HELM_STATE" ]; then say "$(stamp) no deployment made by setup in $PROJECT on $API (run scripts/setup.sh once): nothing to adapt"; return 0; fi
+  plan_gpus "$(avatar_has openspline && echo yes || echo no)" >/dev/null || rc=$?
+  [ "$rc" = 2 ] && return 1
+  if [ "$rc" = 1 ]; then rm -f "$deferred"; say "$(stamp) the GPU booking has no room for $(chart_model_names) ($(offers_text)): nothing changed"; return 0; fi
+  tmp=$(mktemp); apply_plan dry "$tmp" || { rm -f "$tmp"; return 1; }; want=$(gpu_signature < "$tmp"); rm -f "$tmp"
+  have=$(helm get values assistant -n "$PROJECT" -o json 2>/dev/null | gpu_signature)
+  [ -n "$have" ] && [ -n "$want" ] || { say "$(stamp) could not compare with release assistant (helm get values): nothing changed"; return 0; }
+  if [ "$want" = "$have" ]; then rm -f "$deferred"; say "$(stamp) unchanged: $have"; return 0; fi
+  say "$(stamp) the GPU booking changed. Deployed: $have. The booking fits: $want"
+  n=$(live_sessions)
+  if [ "${n:-0}" -gt 0 ]; then
+    [ -s "$deferred" ] || date +%s > "$deferred"
+    waited=$(( ($(date +%s) - $(cat "$deferred")) / 60 ))
+    if [ "$waited" -lt "${ADAPT_MAX_WAIT:-60}" ]; then say "  $n voice session(s) live: the redeploy waits for them (waited $waited of ${ADAPT_MAX_WAIT:-60} minutes)"; return 0; fi
+    say "  $n voice session(s) still live after $waited minutes: redeploying now"
+  fi
+  rm -f "$deferred"
+  adapt_notify "GPU booking changed: redeploying for $want"
+  run_step 6; rc=$?
+  if [ "$rc" = 0 ]; then adapt_notify "Redeployed for the new GPU booking: $want"
+  else adapt_notify "The redeploy for the new GPU booking failed; see $RUN_LOG"; fi
+  return $rc
+}
+
 # ---------------------------------------------------------------- main ----------------------
 ensure_tool jq quiet || exit 1
+[ "$MODE" = adapt ] && { adapt; exit $?; }
 [ "$MODE" = status ] || ensure_login || { discover; show_status; exit 1; }
 say "$(ts) discovering the cluster (a few seconds)"
 discover; show_status
